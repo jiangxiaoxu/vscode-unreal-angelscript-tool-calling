@@ -6,7 +6,7 @@
     "publisher": "Hazelight",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
-        "vscode": "^1.65.0"
+        "vscode": "^1.88.0"
     },
     "categories": [
         "Programming Languages",
@@ -14,7 +14,8 @@
     ],
     "activationEvents": [
         "onDebug",
-        "onLanguage:angelscript"
+        "onLanguage:angelscript",
+        "onLanguageModelTool:angelscript.searchApi"
     ],
     "repository": {
         "type": "git",
@@ -28,6 +29,37 @@
                     "id": "angelscript-api",
                     "title": "Angelscript API",
                     "icon": "resources/angelscript_unreal.png"
+                }
+            ]
+        },
+        "languageModels": {
+            "tools": [
+                {
+                    "name": "angelscript.searchApi",
+                    "displayName": "Angelscript API Search",
+                    "description": "Search the Angelscript API database for symbols and documentation.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query text for Angelscript API symbols."
+                            },
+                            "limit": {
+                                "type": "number",
+                                "description": "Maximum number of results to return (1-50).",
+                                "default": 10
+                            },
+                            "includeDetails": {
+                                "type": "boolean",
+                                "description": "Include documentation details for top matches.",
+                                "default": false
+                            }
+                        },
+                        "required": [
+                            "query"
+                        ]
+                    }
                 }
             ]
         },

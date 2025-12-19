@@ -190,6 +190,106 @@ export function activate(context: ExtensionContext) {
     {
         apiDetails.showDetails(data);
     });
+
+    const lm = (vscode as any).lm;
+    if (lm?.registerTool)
+    {
+        const toolDisposable = lm.registerTool(
+            {
+                name: "angelscript.searchApi",
+                description: "Search the Angelscript API database and return matching symbols.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        query: {
+                            type: "string",
+                            description: "Search query text for Angelscript API symbols."
+                        },
+                        limit: {
+                            type: "number",
+                            description: "Maximum number of results to return (1-50).",
+                            default: 10
+                        },
+                        includeDetails: {
+                            type: "boolean",
+                            description: "Include documentation details for top matches.",
+                            default: false
+                        }
+                    },
+                    required: ["query"]
+                }
+            },
+            async (request: any) => {
+                const query = typeof request?.query === "string" ? request.query.trim() : "";
+                if (!query)
+                {
+                    return {
+                        content: [
+                            {
+                                kind: "markdown",
+                                value: "No query provided. Please supply a search query."
+                            }
+                        ]
+                    };
+                }
+
+                await client.onReady();
+                const limit = typeof request?.limit === "number"
+                    ? Math.min(Math.max(Math.floor(request.limit), 1), 50)
+                    : 10;
+                const results = await client.sendRequest(GetAPISearchRequest, query);
+                if (!results || results.length === 0)
+                {
+                    return {
+                        content: [
+                            {
+                                kind: "markdown",
+                                value: `No Angelscript API results for \`${query}\`.`
+                            }
+                        ]
+                    };
+                }
+
+                const items = results.slice(0, limit);
+                let text = "## Angelscript API search results\n\n";
+                text += `Query: \`${query}\`\n\n`;
+                for (const item of items)
+                {
+                    text += `- \`${item.label}\``;
+                    if (item.type)
+                        text += ` _(${item.type})_`;
+                    text += "\n";
+                }
+
+                if (results.length > limit)
+                    text += `\n...and ${results.length - limit} more results.\n`;
+
+                if (request?.includeDetails)
+                {
+                    const detailItems = items.slice(0, Math.min(items.length, 5));
+                    for (const item of detailItems)
+                    {
+                        const details = await client.sendRequest(GetAPIDetailsRequest, item.data);
+                        if (details)
+                        {
+                            text += `\n### ${item.label}\n\n`;
+                            text += `${details}\n`;
+                        }
+                    }
+                }
+
+                return {
+                    content: [
+                        {
+                            kind: "markdown",
+                            value: text
+                        }
+                    ]
+                };
+            }
+        );
+        context.subscriptions.push(toolDisposable);
+    }
 }
 
 class ASApiSearchProvider implements vscode.WebviewViewProvider
