@@ -194,92 +194,112 @@ export function activate(context: ExtensionContext) {
     const lm = (vscode as any).lm;
     if (lm?.registerTool)
     {
-        const toolDisposable = vscode.lm.registerTool(
-            "angelscript_searchApi",
-            new AngelscriptSearchApiTool(client, startedClient)
-        );
-        context.subscriptions.push(toolDisposable);
-    }
-}
-
-type AngelscriptSearchParams = {
-    query: string;
-    limit?: number;
-    includeDetails?: boolean;
-};
-
-class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSearchParams>
-{
-    client : LanguageClient;
-    startedClient : Promise<void>;
-
-    constructor(client : LanguageClient, startedClient : Promise<void>)
-    {
-        this.client = client;
-        this.startedClient = startedClient;
-    }
-
-    async invoke(
-        options: vscode.LanguageModelToolInvocationOptions<AngelscriptSearchParams>,
-        token: CancellationToken
-    ): Promise<vscode.LanguageModelToolResult>
-    {
-        const query = typeof options?.input?.query === "string" ? options.input.query.trim() : "";
-        if (!query)
-        {
-            return new vscode.LanguageModelToolResult([
-                new vscode.LanguageModelTextPart("No query provided. Please supply a search query.")
-            ]);
-        }
-
-        try
-        {
-            await this.startedClient;
-            const limit = typeof options?.input?.limit === "number"
-                ? Math.min(Math.max(Math.floor(options.input.limit), 1), 100)
-                : 50;
-            const includeDetails = options?.input?.includeDetails !== false;
-            const results = await this.client.sendRequest(GetAPISearchRequest, query);
-            if (!results || results.length === 0)
+        const toolDisposable = lm.registerTool(
             {
-                return new vscode.LanguageModelToolResult([
-                    new vscode.LanguageModelTextPart(`No Angelscript API results for "${query}".`)
-                ]);
-            }
-
-            const items = results.slice(0, limit);
-            const payload : {
-                query: string;
-                total: number;
-                returned: number;
-                truncated: boolean;
-                items: Array<{ label: string; type?: string; data?: unknown }>;
-                details?: Array<{ label: string; details?: string }>;
-            } = {
-                query,
-                total: results.length,
-                returned: items.length,
-                truncated: results.length > items.length,
-                items: items.map((item: any) => ({
-                    label: item.label,
-                    type: item.type ?? undefined,
-                    data: item.data ?? undefined
-                }))
-            };
-
-            if (includeDetails)
-            {
-                payload.details = [];
-                const detailItems = items.slice(0, Math.min(items.length, 5));
-                for (const item of detailItems)
+                name: "angelscript_searchApi",
+                description: "Search the Angelscript API database and return matching symbols.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        query: {
+                            type: "string",
+                            description: "Search query text for Angelscript API symbols."
+                        },
+                        limit: {
+                            type: "number",
+                            description: "Maximum number of results to return (1-100).",
+                            default: 50
+                        },
+                        includeDetails: {
+                            type: "boolean",
+                            description: "Include documentation details for top matches.",
+                            default: true
+                        }
+                    },
+                    required: ["query"]
+                }
+            },
+            async (request: any) => {
+                const query = typeof request?.query === "string" ? request.query.trim() : "";
+                if (!query)
                 {
-                    if (token.isCancellationRequested)
-                        break;
-                    const details = await this.client.sendRequest(GetAPIDetailsRequest, item.data);
-                    payload.details.push({
-                        label: item.label,
-                        details: details ?? undefined
-                    });
+                    return {
+                        content: [
+                            {
+                                kind: "markdown",
+                                value: "No query provided. Please supply a search query."
+                            }
+                        ]
+                    };
+                }
+
+                try
+                {
+                    await startedClient;
+                    const limit = typeof request?.limit === "number"
+                        ? Math.min(Math.max(Math.floor(request.limit), 1), 100)
+                        : 50;
+                    const results = await client.sendRequest(GetAPISearchRequest, query);
+                    if (!results || results.length === 0)
+                    {
+                        return {
+                            content: [
+                                {
+                                    kind: "markdown",
+                                    value: `No Angelscript API results for \`${query}\`.`
+                                }
+                            ]
+                        };
+                    }
+
+                    const items = results.slice(0, limit);
+                    let text = "## Angelscript API search results\n\n";
+                    text += `Query: \`${query}\`\n\n`;
+                    for (const item of items)
+                    {
+                        text += `- \`${item.label}\``;
+                        if (item.type)
+                            text += ` _(${item.type})_`;
+                        text += "\n";
+                    }
+
+                    if (results.length > limit)
+                        text += `\n...and ${results.length - limit} more results.\n`;
+
+                    if (request?.includeDetails !== false)
+                    {
+                        const detailItems = items.slice(0, Math.min(items.length, 5));
+                        for (const item of detailItems)
+                        {
+                            const details = await client.sendRequest(GetAPIDetailsRequest, item.data);
+                            if (details)
+                            {
+                                text += `\n### ${item.label}\n\n`;
+                                text += `${details}\n`;
+                            }
+                        }
+                    }
+
+                    return {
+                        content: [
+                            {
+                                kind: "markdown",
+                                value: text
+                            }
+                        ]
+                    };
+                }
+                catch (error)
+                {
+                    console.error("angelscript_searchApi tool failed:", error);
+                    return {
+                        content: [
+                            {
+                                kind: "markdown",
+                                value: "The Angelscript API tool failed to run. Please ensure the language server is running and try again."
+                            }
+                        ]
+                    };
                 }
             }
 
