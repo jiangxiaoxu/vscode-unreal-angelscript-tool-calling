@@ -92,7 +92,7 @@ function connect_unreal()
     if (unreal != null)
     {
         unreal.removeAllListeners();
-        unreal.write(buildDisconnect());
+        unreal.write(Uint8Array.from(buildDisconnect()));
         unreal.destroy();
     }
     unreal = new Socket;
@@ -274,7 +274,7 @@ function connect_unreal()
             reqDb.writeUInt32LE(1, 0);
             reqDb.writeUInt8(MessageType.RequestDebugDatabase, 4);
 
-            unreal.write(reqDb);
+            unreal.write(Uint8Array.from(reqDb));
         }, 1000);
     });
 }
@@ -687,7 +687,7 @@ connection.onImplementation((_textDocumentPosition: TextDocumentPositionParams):
     {
         // the unreal editor with the type and symbol we've resolved that we want.
         if (unreal)
-            unreal.write(buildGoTo(cppSymbol[0], cppSymbol[1]));
+            unreal.write(Uint8Array.from(buildGoTo(cppSymbol[0], cppSymbol[1])));
     }
 
     return null;
@@ -825,7 +825,7 @@ connection.onExecuteCommand(function (params : ExecuteCommandParams)
                 return;
 
             if (unreal)
-                unreal.write(buildOpenAssets(references, className));
+                unreal.write(buildOpenAssets(references, className) as any);
             else
                 connection.window.showErrorMessage("Cannot open asset: not connected to unreal editor.");
         }
@@ -836,7 +836,7 @@ connection.onExecuteCommand(function (params : ExecuteCommandParams)
         {
             let assetPath = params.arguments[0] as string;
             if (unreal)
-                unreal.write(buildOpenAssets([assetPath], ""));
+                unreal.write(buildOpenAssets([assetPath], "") as any);
             else
                 connection.window.showErrorMessage("Cannot edit asset: not connected to unreal editor.");
         }
@@ -847,7 +847,7 @@ connection.onExecuteCommand(function (params : ExecuteCommandParams)
         {
             let className = params.arguments[0] as string;
             if (unreal)
-                unreal.write(buildCreateBlueprint(className));
+                unreal.write(buildCreateBlueprint(className) as any);
             else
                 connection.window.showErrorMessage("Cannot create blueprint: not connected to unreal editor.");
         }
