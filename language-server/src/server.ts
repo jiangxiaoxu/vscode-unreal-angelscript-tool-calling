@@ -961,6 +961,8 @@ function WaitForResolveSymbols(params: SemanticTokensParams): SemanticTokens | T
         let result = TryResolveSymbols(asmodule);
         if (result)
             return resolve(result);
+        if (triesLeft <= 0)
+            return reject(new Error("Failed to resolve symbols after maximum retries"));
         setTimeout(function () { timerFunc(resolve, reject, triesLeft - 1); }, 100);
     }
     let promise = new Promise<SemanticTokens>(function (resolve, reject)
@@ -1310,6 +1312,8 @@ function WaitForInlayHints(uri: string, range: Range): Array<InlayHint> | Thenab
         let result = TryResolveInlayHints(asmodule, range);
         if (result)
             return resolve(result);
+        if (triesLeft <= 0)
+            return reject(new Error("Failed to resolve inlay hints after maximum retries"));
         setTimeout(function () { timerFunc(resolve, reject, triesLeft - 1); }, 100);
     }
     let promise = new Promise<Array<InlayHint>>(function (resolve, reject)
