@@ -293,13 +293,15 @@ export function GetAPISearch(filter: string): any
             if (!type.isRootNamespace())
             {
                 typePrefix = type.getQualifiedNamespace() + "::";
-                typeMatches = canComplete(type.name);
+                // Check both the namespace name and the full qualified namespace (including "::")
+                typeMatches = canComplete(type.name) || canComplete(typePrefix);
             }
         }
         else
         {
             typePrefix = type.getQualifiedTypenameInNamespace(null) + ".";
-            typeMatches = canComplete(type.name);
+            // Check both the type name and the full qualified type name (including ".")
+            typeMatches = canComplete(type.name) || canComplete(typePrefix);
         }
 
         type.forEachSymbol(function (symbol: typedb.DBSymbol)
@@ -310,7 +312,9 @@ export function GetAPISearch(filter: string): any
                     return;
                 if (symbol.name.startsWith("op"))
                     return;
-                if (typeMatches || canComplete(symbol.name))
+                // Also check the full qualified name (prefix + symbol name)
+                let fullName = typePrefix + symbol.name;
+                if (typeMatches || canComplete(symbol.name) || canComplete(fullName))
                 {
                     let symbol_id;
                     if (symbol.containingType)
@@ -339,7 +343,9 @@ export function GetAPISearch(filter: string): any
             }
             else if (symbol instanceof typedb.DBProperty)
             {
-                if (typeMatches || canComplete(symbol.name))
+                // Also check the full qualified name (prefix + symbol name)
+                let fullName = typePrefix + symbol.name;
+                if (typeMatches || canComplete(symbol.name) || canComplete(fullName))
                 {
                     let symbol_id;
                     if (symbol.containingType)
