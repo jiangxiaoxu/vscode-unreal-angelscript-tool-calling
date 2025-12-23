@@ -257,8 +257,7 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
                 total: number;
                 returned: number;
                 truncated: boolean;
-                items: Array<{ label: string; type?: string; data?: unknown }>;
-                details?: Array<{ label: string; details?: string }>;
+                items: Array<{ label: string; type?: string; data?: unknown; details?: string }>;
             } = {
                 query,
                 total: results.length,
@@ -273,17 +272,77 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
 
             if (includeDetails)
             {
-                payload.details = [];
-                const detailItems = items.slice(0, Math.min(items.length, 5));
-                for (const item of detailItems)
+                if (token.isCancellationRequested)
                 {
-                    if (token.isCancellationRequested)
-                        break;
-                    const details = await this.client.sendRequest(GetAPIDetailsRequest, item.data);
-                    payload.details.push({
-                        label: item.label,
-                        details: details ?? undefined
+                    return new vscode.LanguageModelToolResult([
+                        new vscode.LanguageModelTextPart(JSON.stringify(payload, null, 2))
+                    ]);
+                }
+
+                // Concurrent pool: maintain max 10 active requests at all times
+                // When one completes, immediately start the next one
+                const CONCURRENCY_LIMIT = 10;
+                const allDetails: Array<{ index: number; details?: string }> = [];
+                let nextIndex = 0;
+                let activeCount = 0;
+                const totalItems = payload.items.length;
+
+                if (totalItems > 0)
+                {
+                    await new Promise<void>((resolveAll) =>
+                    {
+                        const startNext = () =>
+                        {
+                            // Don't start new requests if cancelled
+                            if (token.isCancellationRequested)
+                            {
+                                if (activeCount === 0)
+                                    resolveAll();
+                                return;
+                            }
+
+                            // Fill up to CONCURRENCY_LIMIT active requests
+                            while (nextIndex < totalItems && activeCount < CONCURRENCY_LIMIT)
+                            {
+                                const currentIndex = nextIndex;
+                                const item = payload.items[currentIndex];
+                                const itemData = item.data;
+                                nextIndex++;
+                                activeCount++;
+
+                                this.client.sendRequest(GetAPIDetailsRequest, itemData)
+                                    .then((details: string) =>
+                                    {
+                                        allDetails.push({ index: currentIndex, details });
+                                    })
+                                    .catch((error: any) =>
+                                    {
+                                        console.error(`Failed to fetch details for ${item.label}:`, error);
+                                        allDetails.push({ index: currentIndex, details: undefined });
+                                    })
+                                    .finally(() =>
+                                    {
+                                        activeCount--;
+                                        if (nextIndex >= totalItems && activeCount === 0)
+                                        {
+                                            resolveAll();
+                                        }
+                                        else
+                                        {
+                                            startNext();
+                                        }
+                                    });
+                            }
+                        };
+
+                        startNext();
                     });
+                }
+
+                // Map details back to items by index
+                for (const detail of allDetails)
+                {
+                    payload.items[detail.index].details = detail.details;
                 }
             }
 
