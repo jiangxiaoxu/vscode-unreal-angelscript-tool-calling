@@ -6,14 +6,13 @@
 
 import * as path from 'path';
 
-import { workspace, ExtensionContext, TextDocument, Range, InlayHint } from 'vscode';
-import { LanguageClient, LanguageClientOptions, ServerOptions, Definition, TransportKind, Diagnostic, ExecuteCommandRequest, ExecuteCommandParams, ExecuteCommandRegistrationOptions, ImplementationRequest, TypeDefinitionRequest, TextDocumentItem } from 'vscode-languageclient/node';
+import { workspace, ExtensionContext, TextDocument, Range } from 'vscode';
+import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
 
 import * as vscode from 'vscode';
 import { WorkspaceFolder, DebugConfiguration, ProviderResult, CancellationToken } from 'vscode';
 import { ASDebugSession } from './debug';
 import * as Net from 'net';
-import { ClientRequest } from 'http';
 import { buildSearchPayload, AngelscriptSearchParams } from './angelscriptApiSearch';
 import { GetAPIRequest, GetAPIDetailsRequest, GetAPISearchRequest, GetModuleForSymbolRequest, ProvideInlineValuesRequest } from './apiRequests';
 import { startMcpHttpServerManager } from './mcpHttpServer';
