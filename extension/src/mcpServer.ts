@@ -5,6 +5,7 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
 import type { LanguageClient } from 'vscode-languageclient/node';
+import { CancellationTokenSource } from 'vscode-languageclient';
 
 const MCP_SERVER_ID = 'unreal-angelscript-mcp';
 const HEALTH_PATH = '/health';
@@ -353,37 +354,45 @@ class McpServerState implements vscode.Disposable
 
     private async runSearch(query: string, limit: number, includeDetails: boolean, signal: AbortSignal | undefined): Promise<AngelscriptSearchPayload>
     {
-        const results: any[] = await this.client.sendRequest('angelscript/getAPISearch', query);
-        if (!results || results.length === 0)
+        const searchCancel = this.createCancellationFromSignal(signal);
+        try
         {
-            return {
+            const results: any[] = await this.client.sendRequest('angelscript/getAPISearch', query, searchCancel?.token);
+            if (!results || results.length === 0)
+            {
+                return {
+                    query,
+                    total: 0,
+                    returned: 0,
+                    truncated: false,
+                    items: [],
+                };
+            }
+
+            const items = results.slice(0, limit).map((item: any) => ({
+                label: item.label,
+                type: item.type ?? undefined,
+                data: item.data ?? undefined,
+            }));
+
+            const payload: AngelscriptSearchPayload = {
                 query,
-                total: 0,
-                returned: 0,
-                truncated: false,
-                items: [],
+                total: results.length,
+                returned: items.length,
+                truncated: results.length > items.length,
+                items,
             };
-        }
 
-        const items = results.slice(0, limit).map((item: any) => ({
-            label: item.label,
-            type: item.type ?? undefined,
-            data: item.data ?? undefined,
-        }));
+            if (!includeDetails || items.length === 0)
+                return payload;
 
-        const payload: AngelscriptSearchPayload = {
-            query,
-            total: results.length,
-            returned: items.length,
-            truncated: results.length > items.length,
-            items,
-        };
-
-        if (!includeDetails || items.length === 0)
+            await this.fetchDetailsConcurrently(payload, signal);
             return payload;
-
-        await this.fetchDetailsConcurrently(payload, signal);
-        return payload;
+        }
+        finally
+        {
+            searchCancel?.dispose();
+        }
     }
 
     private async fetchDetailsConcurrently(payload: AngelscriptSearchPayload, signal: AbortSignal | undefined)
@@ -394,6 +403,7 @@ class McpServerState implements vscode.Disposable
         let active = 0;
         let resolved = false;
         let aborted = signal?.aborted ?? false;
+        const detailsCancel = this.createCancellationFromSignal(signal);
 
         const tryResolve = (resolve: () => void) =>
         {
@@ -425,7 +435,7 @@ class McpServerState implements vscode.Disposable
                     const item = payload.items[currentIndex];
                     active++;
 
-                    this.client.sendRequest('angelscript/getAPIDetails', item.data)
+                    this.client.sendRequest('angelscript/getAPIDetails', item.data, detailsCancel?.token)
                         .then((details: string) =>
                         {
                             if (!aborted)
@@ -453,6 +463,33 @@ class McpServerState implements vscode.Disposable
         {
             payload.items[detail.index].details = detail.details;
         }
+        detailsCancel?.dispose();
+    }
+
+    private createCancellationFromSignal(signal: AbortSignal | undefined): { token: CancellationTokenSource['token']; dispose: () => void } | undefined
+    {
+        if (!signal)
+            return undefined;
+        const source = new CancellationTokenSource();
+        const onAbort = () =>
+        {
+            if (!source.token.isCancellationRequested)
+                source.cancel();
+        };
+        if (signal.aborted)
+        {
+            source.cancel();
+        }
+        else
+        {
+            signal.addEventListener('abort', onAbort, { once: true });
+        }
+        const dispose = () =>
+        {
+            signal.removeEventListener('abort', onAbort);
+            source.dispose();
+        };
+        return { token: source.token, dispose };
     }
 
     private getExtensionVersion(): string

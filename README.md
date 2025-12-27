@@ -6,7 +6,7 @@ This branch specifically implements the runtime required to expose Language Mode
 - 提供了 Search_AngelScriptApi 工具调用以便Copilot查询API.
 
 ### MCP (Streamable HTTP)
-- 扩展激活后会在本机启动一个 MCP HTTP 服务（默认 `unrealConnectionPort + 100`，可通过 `UnrealAngelscript.mcp.port` 修改，启动失败重试次数可通过 `UnrealAngelscript.mcp.startupRetries` 配置，默认 5 次）。
+- 扩展激活后会在本机启动一个 MCP HTTP 服务（默认端口为 `unrealConnectionPort + 100`，当 `unrealConnectionPort` 使用默认值 27099 时实际为 27199，可通过 `UnrealAngelscript.mcp.port` 修改，启动失败重试次数可通过 `UnrealAngelscript.mcp.startupRetries` 配置，默认 5 次）。
 - MCP 工具名称、输入/输出与 `Search_AngelScriptApi` 完全一致，返回 JSON 字符串。
 - 健康检查端点：`http://127.0.0.1:<port>/health`，端点 ID 为 `unreal-angelscript-mcp`。
 
