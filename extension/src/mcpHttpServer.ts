@@ -15,11 +15,14 @@ type McpHttpServerState = {
 
 const SERVER_ID = 'angelscript-api-mcp';
 const HEALTH_TIMEOUT_MS = 400;
+const POLL_INTERVAL_OK_MS = 3000;
+const POLL_INTERVAL_RETRY_MS = 1000;
 
 let serverState: McpHttpServerState | null = null;
 let pollingTimer: NodeJS.Timeout | null = null;
 let failedStartupAttempts = 0;
 let stopPolling = false;
+let isPolling = false;
 
 function getMcpPort(): number {
     const config = vscode.workspace.getConfiguration('UnrealAngelscript');
@@ -236,50 +239,75 @@ function disposeServer(): void {
 }
 
 async function pollForServer(client: LanguageClient, startedClient: Promise<void>): Promise<void> {
-    if (!isMcpEnabled() || stopPolling) {
+    if (isPolling || stopPolling) {
         return;
     }
-
-    const port = getMcpPort();
-    const handshakeStatus = await checkMcpServer(port);
-    if (handshakeStatus === 'ok') {
+    if (!isMcpEnabled()) {
         if (pollingTimer) {
             clearTimeout(pollingTimer);
             pollingTimer = null;
         }
-        failedStartupAttempts = 0;
-        return;
-    }
-    if (handshakeStatus === 'mismatch') {
-        stopPolling = true;
-        vscode.window.showErrorMessage(
-            `检测到端口 ${port} 上有非本插件的 MCP 服务，已停止自动启动。请修改 UnrealAngelscript.mcp.port。`
-        );
         return;
     }
 
-    const started = await tryStartHttpServer(client, startedClient);
-    if (started) {
+    const schedulePoll = (delayMs: number) => {
+        if (stopPolling) {
+            return;
+        }
         if (pollingTimer) {
             clearTimeout(pollingTimer);
-            pollingTimer = null;
         }
-        failedStartupAttempts = 0;
-        return;
-    }
+        pollingTimer = setTimeout(() => {
+            pollingTimer = null;
+            pollForServer(client, startedClient);
+        }, delayMs);
+    };
 
-    failedStartupAttempts += 1;
-    if (failedStartupAttempts >= getMaxStartupFailures()) {
-        stopPolling = true;
-        vscode.window.showErrorMessage(
-            `端口 ${port} 被占用且无法连接 /health，已停止重试。请更换端口或关闭占用服务。`
-        );
-        return;
-    }
+    isPolling = true;
+    try {
+        const port = getMcpPort();
+        const handshakeStatus = await checkMcpServer(port);
+        if (handshakeStatus === 'ok') {
+            failedStartupAttempts = 0;
+            schedulePoll(POLL_INTERVAL_OK_MS);
+            return;
+        }
+        if (handshakeStatus === 'mismatch') {
+            stopPolling = true;
+            if (pollingTimer) {
+                clearTimeout(pollingTimer);
+                pollingTimer = null;
+            }
+            vscode.window.showErrorMessage(
+                `检测到端口 ${port} 上有非本插件的 MCP 服务，已停止自动启动。请修改 UnrealAngelscript.mcp.port。`
+            );
+            return;
+        }
 
-    pollingTimer = setTimeout(() => {
-        pollForServer(client, startedClient);
-    }, 1000);
+        const started = await tryStartHttpServer(client, startedClient);
+        if (started) {
+            failedStartupAttempts = 0;
+            schedulePoll(POLL_INTERVAL_OK_MS);
+            return;
+        }
+
+        failedStartupAttempts += 1;
+        if (failedStartupAttempts >= getMaxStartupFailures()) {
+            stopPolling = true;
+            if (pollingTimer) {
+                clearTimeout(pollingTimer);
+                pollingTimer = null;
+            }
+            vscode.window.showErrorMessage(
+                `端口 ${port} 被占用且无法连接 /health，已停止重试。请更换端口或关闭占用服务。`
+            );
+            return;
+        }
+
+        schedulePoll(POLL_INTERVAL_RETRY_MS);
+    } finally {
+        isPolling = false;
+    }
 }
 
 export function startMcpHttpServerManager(
@@ -287,8 +315,12 @@ export function startMcpHttpServerManager(
     client: LanguageClient,
     startedClient: Promise<void>
 ): void {
-    if (!isMcpEnabled()) {
-        return;
+    failedStartupAttempts = 0;
+    stopPolling = false;
+    isPolling = false;
+    if (pollingTimer) {
+        clearTimeout(pollingTimer);
+        pollingTimer = null;
     }
 
     const disposable = vscode.workspace.onDidChangeConfiguration((event) => {
@@ -300,10 +332,27 @@ export function startMcpHttpServerManager(
             }
             failedStartupAttempts = 0;
             stopPolling = false;
+            isPolling = false;
             pollForServer(client, startedClient);
         }
     });
 
-    context.subscriptions.push(disposable, { dispose: disposeServer });
-    pollForServer(client, startedClient);
+    const managerDisposable = {
+        dispose: () => {
+            disposeServer();
+            if (pollingTimer) {
+                clearTimeout(pollingTimer);
+                pollingTimer = null;
+            }
+            failedStartupAttempts = 0;
+            stopPolling = true;
+            isPolling = false;
+        }
+    };
+
+    context.subscriptions.push(disposable, managerDisposable);
+
+    if (isMcpEnabled()) {
+        pollForServer(client, startedClient);
+    }
 }
