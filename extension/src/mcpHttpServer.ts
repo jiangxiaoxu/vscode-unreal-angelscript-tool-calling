@@ -4,7 +4,6 @@ import * as vscode from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import * as z from 'zod';
 import { buildSearchPayload } from './angelscriptApiSearch';
 
 type McpTransport = {
@@ -148,9 +147,24 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
         {
             description: 'Search the Angelscript API database for symbols and documentation.',
             inputSchema: {
-                query: z.string().describe('Search query text for Angelscript API symbols.'),
-                limit: z.number().min(1).max(1000).optional().describe('Maximum number of results to return (1-1000).'),
-                includeDetails: z.boolean().optional().describe('Include documentation details for top matches.')
+                type: 'object',
+                properties: {
+                    query: {
+                        type: 'string',
+                        description: 'Search query text for Angelscript API symbols.'
+                    },
+                    limit: {
+                        type: 'number',
+                        description: 'Maximum number of results to return (1-1000).',
+                        minimum: 1,
+                        maximum: 1000
+                    },
+                    includeDetails: {
+                        type: 'boolean',
+                        description: 'Include documentation details for top matches.'
+                    }
+                },
+                required: ['query']
             }
         },
         async (args, extra) => {

@@ -741,8 +741,7 @@
         "npm": "^11.5.2",
         "vscode-languageclient": "^8.1.0",
         "vscode-languageserver": "^8.1.0",
-        "vscode-languageserver-textdocument": "^1.0.8",
-        "zod": "^3.25.0"
+        "vscode-languageserver-textdocument": "^1.0.8"
     },
     "scripts": {
         "vscode:prepublish": "npm run compile",
