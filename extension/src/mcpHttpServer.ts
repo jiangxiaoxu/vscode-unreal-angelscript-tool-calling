@@ -358,7 +358,7 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                         {
                             uri: uri.toString(),
                             mimeType: 'text/plain',
-                            text: 'Failed to read AngelScript API search resource.'
+                            text: 'Failed to read Angelscript API search resource.'
                         }
                     ]
                 };
@@ -413,7 +413,7 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                         {
                             uri: uri.toString(),
                             mimeType: 'text/plain',
-                            text: 'Failed to fetch AngelScript API symbol details.'
+                            text: 'Failed to fetch Angelscript API symbol details.'
                         }
                     ]
                 };
