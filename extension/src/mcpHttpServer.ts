@@ -3,8 +3,10 @@ import { URL } from 'url';
 import * as vscode from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+// @modelcontextprotocol/sdk does not currently expose ResourceTemplate via the typed server import path,
+// so we require the CJS build and type it loosely.
 // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-unsafe-assignment
-const { ResourceTemplate } = require('@modelcontextprotocol/sdk/server/mcp.js');
+const { ResourceTemplate }: { ResourceTemplate: new (...args: any[]) => any } = require('@modelcontextprotocol/sdk/dist/cjs/server/mcp.js');
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import * as z from 'zod';
 import {
@@ -28,7 +30,7 @@ type McpHttpServerState = {
 };
 
 const SERVER_ID = 'angelscript-api-mcp';
-const RESOURCE_BASE = 'mcp://angelscript-api/';
+const RESOURCE_BASE = `mcp://${SERVER_ID}/`;
 const SEARCH_RESOURCE_TEMPLATE = `${RESOURCE_BASE}search{?query,limit,includeDetails}`;
 const SYMBOL_RESOURCE_TEMPLATE = `${RESOURCE_BASE}symbol/{id}`;
 const HEALTH_TIMEOUT_MS = 400;
@@ -65,7 +67,7 @@ function parseLimit(raw: string | undefined): number | undefined {
         return undefined;
     }
     const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) {
+    if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
         return undefined;
     }
     return parsed;
@@ -76,6 +78,9 @@ function parseIncludeDetails(raw: string | undefined): boolean | undefined {
         return undefined;
     }
     const normalized = raw.trim().toLowerCase();
+    if (normalized === '') {
+        return undefined;
+    }
     if (normalized === 'true' || normalized === '1') {
         return true;
     }
@@ -300,14 +305,14 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
             description: 'Search the Angelscript API database via resource template (same as Search_AngelScriptApi tool).',
             mimeType: 'application/json'
         },
-        async (_uri, variables, extra) => {
+        async (uri, variables, extra) => {
             const query = decodeURIComponentSafe(getSingleVariable(variables, 'query'))?.trim() ?? '';
             const limit = parseLimit(getSingleVariable(variables, 'limit'));
             const includeDetails = parseIncludeDetails(getSingleVariable(variables, 'includeDetails'));
 
-            if (!query) {
-                const emptyPayload: ApiResponsePayload = {
-                    query,
+                if (!query) {
+                    const emptyPayload: ApiResponsePayload = {
+                        query,
                     total: 0,
                     returned: 0,
                     truncated: false,
@@ -316,7 +321,7 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                 return {
                     contents: [
                         {
-                            uri: _uri.toString(),
+                            uri: uri.toString(),
                             mimeType: 'application/json',
                             text: JSON.stringify(emptyPayload, null, 2)
                         }
@@ -340,7 +345,7 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                 return {
                     contents: [
                         {
-                            uri: _uri.toString(),
+                            uri: uri.toString(),
                             mimeType: 'application/json',
                             text: JSON.stringify(payloadWithUris, null, 2)
                         }
@@ -350,7 +355,7 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                 return {
                     contents: [
                         {
-                            uri: _uri.toString(),
+                            uri: uri.toString(),
                             mimeType: 'text/plain',
                             text: 'Failed to read Angelscript API search resource.'
                         }
