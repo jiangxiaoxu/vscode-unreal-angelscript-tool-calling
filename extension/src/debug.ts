@@ -9,9 +9,9 @@ import {
     InitializedEvent, TerminatedEvent, StoppedEvent, BreakpointEvent, OutputEvent,
     ContinuedEvent,
     Thread, StackFrame, Scope, Source, Handles, Breakpoint
-} from 'vscode-debugadapter';
+} from '@vscode/debugadapter';
 
-import { DebugProtocol } from 'vscode-debugprotocol';
+import { DebugProtocol } from '@vscode/debugprotocol';
 import { basename } from 'path';
 import * as vscode from 'vscode';
 import * as path from 'path';
