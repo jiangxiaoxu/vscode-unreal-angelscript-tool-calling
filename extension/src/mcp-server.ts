@@ -30,12 +30,13 @@ const GetAPIDetailsRequest = new RequestType<any, string, void>('angelscript/get
 const SERVER_ID = "angelscript-mcp-server-v1";
 
 // Configuration constants
-const HEALTH_CHECK_TIMEOUT_MS = 2000;
+const HEALTH_CHECK_TIMEOUT_MS = 400; // 300-500ms as per requirement
 const RETRY_INTERVAL_MS = 1000;
+const DEFAULT_MAX_RETRY_COUNT = 5;
 
 // Tool definition matching the VS Code extension's languageModelTools schema
 const ANGELSCRIPT_SEARCH_TOOL: Tool = {
-    name: "angelscript_searchApi",
+    name: "Search_AngelScriptApi",
     description: "Search the Angelscript API database for symbols and documentation. Provide a query string and optionally limit the results or include documentation details.",
     inputSchema: {
         type: "object" as const,
@@ -95,6 +96,7 @@ export class AngelscriptMcpServer {
     private port: number = 27199; // Default: 27099 + 100
     private workspaceName: string = "";
     private activeTransports: Map<string, SSEServerTransport> = new Map();
+    private retryCount: number = 0;
 
     constructor(client: LanguageClient, clientReady: Promise<void>) {
         this.client = client;
@@ -113,13 +115,22 @@ export class AngelscriptMcpServer {
      */
     private getConfiguredPort(): number {
         const config = vscode.workspace.getConfiguration("UnrealAngelscript");
-        const mcpPort = config.get<number>("mcpServerPort");
+        // First check mcp.port, then fall back to mcpServerPort for backward compatibility
+        const mcpPort = config.get<number>("mcp.port");
         if (mcpPort !== undefined && mcpPort > 0) {
             return mcpPort;
         }
         // Default: Unreal connection port + 100
         const unrealPort = config.get<number>("unrealConnectionPort") ?? 27099;
         return unrealPort + 100;
+    }
+
+    /**
+     * Get the maximum retry count before giving up
+     */
+    private getMaxRetryCount(): number {
+        const config = vscode.workspace.getConfiguration("UnrealAngelscript");
+        return config.get<number>("mcp.maxRetryCount") ?? DEFAULT_MAX_RETRY_COUNT;
     }
 
     /**
@@ -149,7 +160,7 @@ export class AngelscriptMcpServer {
         server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const { name, arguments: args } = request.params;
 
-            if (name === "angelscript_searchApi") {
+            if (name === "Search_AngelScriptApi") {
                 const params = args as unknown as SearchParams;
                 const result = await this.performApiSearch(params);
                 
@@ -416,6 +427,9 @@ export class AngelscriptMcpServer {
      * Start the MCP server with automatic retry and single-instance detection
      */
     async startWithRetry(): Promise<void> {
+        this.retryCount = 0;
+        const maxRetries = this.getMaxRetryCount();
+
         const attemptStart = async () => {
             const port = this.getConfiguredPort();
 
@@ -424,15 +438,16 @@ export class AngelscriptMcpServer {
 
             if (healthCheck.running) {
                 if (healthCheck.isOurs) {
-                    // Another instance of our extension is serving, just wait
+                    // Another instance of our extension is serving, reset retry count and wait
+                    this.retryCount = 0;
                     console.log(`MCP Server already running on port ${port} (our extension), waiting...`);
                     return;
                 } else {
-                    // Port is occupied by something else
+                    // Port is occupied by something else - immediately stop and show error
                     this.stopRetry();
                     vscode.window.showErrorMessage(
                         `Port ${port} is occupied by another service (not Angelscript MCP Server). ` +
-                        `Please configure a different port in settings: UnrealAngelscript.mcpServerPort`
+                        `Please configure a different port in settings: UnrealAngelscript.mcp.port`
                     );
                     return;
                 }
@@ -442,12 +457,22 @@ export class AngelscriptMcpServer {
             const started = await this.tryStartServer(port);
             if (started) {
                 // Successfully started, stop retrying
+                this.retryCount = 0;
                 this.stopRetry();
                 vscode.window.showInformationMessage(
                     `Angelscript MCP Server started on port ${port}`
                 );
+            } else {
+                // Failed to start (port binding failed), increment retry count
+                this.retryCount++;
+                if (this.retryCount >= maxRetries) {
+                    this.stopRetry();
+                    vscode.window.showErrorMessage(
+                        `Failed to start Angelscript MCP Server after ${maxRetries} attempts. ` +
+                        `Port ${port} may be in use. Configure a different port in settings: UnrealAngelscript.mcp.port`
+                    );
+                }
             }
-            // If not started (port binding failed), continue retrying
         };
 
         // Start retry loop
