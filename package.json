@@ -500,6 +500,11 @@
                             }
                         }
                     }
+                },
+                "UnrealAngelscript.mcpServerPort": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "Port for the MCP (Model Context Protocol) server. If set to 0 or not specified, uses Unreal connection port + 100 (default: 27199). The MCP server allows AI tools like Codex to search the Angelscript API."
                 }
             }
         },

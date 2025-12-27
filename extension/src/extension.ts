@@ -210,23 +210,13 @@ export function activate(context: ExtensionContext)
     }
 
     // Start MCP server (integrated with extension, sharing LanguageClient)
-    // The MCP server can be used by Codex via STDIO transport
+    // The MCP server uses HTTP transport and auto-starts with single-instance detection
     mcpServer = new AngelscriptMcpServer(client, startedClient);
     
-    // Register command to manually start MCP server if needed
-    const startMcpServerCommand = vscode.commands.registerCommand('angelscript.startMcpServer', async () => {
-        if (mcpServer) {
-            try {
-                await mcpServer.start();
-                vscode.window.showInformationMessage('Angelscript MCP Server started');
-            } catch (error) {
-                vscode.window.showErrorMessage(`Failed to start MCP Server: ${error}`);
-            }
-        }
-    });
-    context.subscriptions.push(startMcpServerCommand);
-
-    // Register command to stop MCP server
+    // Auto-start MCP server with retry mechanism
+    mcpServer.startWithRetry();
+    
+    // Register command to manually stop MCP server
     const stopMcpServerCommand = vscode.commands.registerCommand('angelscript.stopMcpServer', async () => {
         if (mcpServer) {
             try {
@@ -239,7 +229,34 @@ export function activate(context: ExtensionContext)
     });
     context.subscriptions.push(stopMcpServerCommand);
 
-    console.log("MCP Server integration ready (use 'angelscript.startMcpServer' command to start)");
+    // Register command to get MCP server status
+    const mcpServerStatusCommand = vscode.commands.registerCommand('angelscript.mcpServerStatus', () => {
+        if (mcpServer) {
+            const isRunning = mcpServer.getIsRunning();
+            const port = mcpServer.getPort();
+            if (isRunning) {
+                vscode.window.showInformationMessage(
+                    `Angelscript MCP Server is running on http://localhost:${port}`
+                );
+            } else {
+                vscode.window.showInformationMessage(
+                    `Angelscript MCP Server is not running (waiting for port ${port})`
+                );
+            }
+        }
+    });
+    context.subscriptions.push(mcpServerStatusCommand);
+
+    // Clean up MCP server on deactivation
+    context.subscriptions.push({
+        dispose: () => {
+            if (mcpServer) {
+                mcpServer.stop();
+            }
+        }
+    });
+
+    console.log("MCP Server auto-starting (HTTP mode with single-instance detection)");
 }
 
 type AngelscriptSearchParams = {
