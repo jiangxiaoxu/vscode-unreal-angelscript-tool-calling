@@ -13,6 +13,7 @@
         "Debuggers"
     ],
     "activationEvents": [
+        "onStartupFinished",
         "onDebug",
         "onLanguage:angelscript",
         "onLanguageModelTool:angelscript_searchApi"
