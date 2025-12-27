@@ -17,6 +17,7 @@ const SERVER_ID = 'angelscript-api-mcp';
 const HEALTH_TIMEOUT_MS = 400;
 const POLL_INTERVAL_OK_MS = 3000;
 const POLL_INTERVAL_RETRY_MS = 1000;
+const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 
 let serverState: McpHttpServerState | null = null;
 let pollingTimer: NodeJS.Timeout | null = null;
@@ -196,8 +197,26 @@ async function tryStartHttpServer(client: LanguageClient, startedClient: Promise
             }
         }
         const chunks: Buffer[] = [];
-        req.on('data', (chunk) => chunks.push(chunk));
+        let bodyBytes = 0;
+        let bodyTooLarge = false;
+        req.on('data', (chunk) => {
+            if (bodyTooLarge) {
+                return;
+            }
+            bodyBytes += chunk.length;
+            if (bodyBytes > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                res.statusCode = 413;
+                res.end('Payload Too Large');
+                req.destroy();
+                return;
+            }
+            chunks.push(chunk);
+        });
         req.on('end', async () => {
+            if (bodyTooLarge) {
+                return;
+            }
             const bodyText = Buffer.concat(chunks).toString('utf-8');
             let parsedBody: unknown = undefined;
             if (bodyText) {
@@ -207,7 +226,14 @@ async function tryStartHttpServer(client: LanguageClient, startedClient: Promise
                     parsedBody = undefined;
                 }
             }
-            await transport.handleRequest(req, res, parsedBody);
+            try {
+                await transport.handleRequest(req, res, parsedBody);
+            } catch {
+                if (!res.headersSent) {
+                    res.statusCode = 500;
+                }
+                res.end();
+            }
         });
     });
 
