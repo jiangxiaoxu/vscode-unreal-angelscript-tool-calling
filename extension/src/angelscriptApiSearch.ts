@@ -26,14 +26,16 @@ export async function buildSearchPayload(
     client: LanguageClient,
     params: AngelscriptSearchParams,
     isCancelled: () => boolean
-): Promise<ApiResponsePayload> {
+): Promise<ApiResponsePayload>
+{
     const query = typeof params.query === 'string' ? params.query.trim() : '';
     const limit = typeof params.limit === 'number'
-        ? Math.min(Math.max(Math.floor(params.limit), 1), 1000)
-        : 500;
+        ? Math.max(Math.floor(params.limit), 1000)
+        : 1000;
     const includeDetails = params.includeDetails !== false;
 
-    if (!query) {
+    if (!query)
+    {
         return {
             query,
             total: 0,
@@ -44,7 +46,8 @@ export async function buildSearchPayload(
     }
 
     const results = await client.sendRequest(GetAPISearchRequest, query);
-    if (!results || results.length === 0) {
+    if (!results || results.length === 0)
+    {
         return {
             query,
             total: 0,
@@ -67,11 +70,13 @@ export async function buildSearchPayload(
         }))
     };
 
-    if (!includeDetails || payload.items.length === 0) {
+    if (!includeDetails || payload.items.length === 0)
+    {
         return payload;
     }
 
-    if (isCancelled()) {
+    if (isCancelled())
+    {
         return payload;
     }
 
@@ -82,17 +87,22 @@ export async function buildSearchPayload(
     let cancelled = false;
     const totalItems = payload.items.length;
 
-    await new Promise<void>((resolveAll) => {
-        const startNext = () => {
-            if (isCancelled()) {
+    await new Promise<void>((resolveAll) =>
+    {
+        const startNext = () =>
+        {
+            if (isCancelled())
+            {
                 cancelled = true;
-                if (activeCount === 0) {
+                if (activeCount === 0)
+                {
                     resolveAll();
                 }
                 return;
             }
 
-            while (nextIndex < totalItems && activeCount < concurrencyLimit) {
+            while (nextIndex < totalItems && activeCount < concurrencyLimit)
+            {
                 const currentIndex = nextIndex;
                 const item = payload.items[currentIndex];
                 const itemData = item.data;
@@ -100,17 +110,22 @@ export async function buildSearchPayload(
                 activeCount += 1;
 
                 client.sendRequest(GetAPIDetailsRequest, itemData)
-                    .then((details: string) => {
+                    .then((details: string) =>
+                    {
                         allDetails.push({ index: currentIndex, details });
                     })
-                    .catch(() => {
+                    .catch(() =>
+                    {
                         allDetails.push({ index: currentIndex, details: undefined });
                     })
-                    .finally(() => {
+                    .finally(() =>
+                    {
                         activeCount -= 1;
-                        if ((nextIndex >= totalItems || cancelled) && activeCount === 0) {
+                        if ((nextIndex >= totalItems || cancelled) && activeCount === 0)
+                        {
                             resolveAll();
-                        } else {
+                        } else
+                        {
                             startNext();
                         }
                     });
@@ -120,7 +135,8 @@ export async function buildSearchPayload(
         startNext();
     });
 
-    for (const detail of allDetails) {
+    for (const detail of allDetails)
+    {
         payload.items[detail.index].details = detail.details;
     }
 

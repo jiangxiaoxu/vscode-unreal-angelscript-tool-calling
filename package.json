@@ -42,7 +42,7 @@
                 ],
                 "toolReferenceName": "Search_AngelScriptApi",
                 "displayName": "Angelscript API Search",
-                "modelDescription": "Search the Angelscript API database for symbols and documentation. Provide a query string and optionally limit the results or include documentation details.",
+                "modelDescription": "Search the Angelscript API database for symbols and documentation. The limit parameter defaults to 1000 and must not be below 1000. Do NOT pass limit unless you need a specific value greater than or equal to 1000. Omit limit to use the default.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(search)",
                 "inputSchema": {
@@ -54,10 +54,9 @@
                         },
                         "limit": {
                             "type": "number",
-                            "description": "Maximum number of results to return (1-1000).",
-                            "default": 500,
-                            "minimum": 1,
-                            "maximum": 1000
+                            "description": "Maximum number of results. Minimum is 1000. Default is 1000. Do NOT pass this parameter unless you need a specific value. Never pass values below 1000.",
+                            "default": 1000,
+                            "minimum": 1000
                         },
                         "includeDetails": {
                             "type": "boolean",

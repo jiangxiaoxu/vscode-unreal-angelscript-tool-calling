@@ -8,7 +8,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 const { ResourceTemplate }: { ResourceTemplate: new (...args: any[]) => any } = require('@modelcontextprotocol/sdk/server/mcp.js');
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import * as z from 'zod';
-import {
+import
+{
     ApiResponsePayload,
     ApiResultItem,
     buildSearchPayload
@@ -39,82 +40,106 @@ const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 const MAX_HEALTH_RESPONSE_BYTES = 64 * 1024;
 type TemplateVariables = Record<string, string | string[] | undefined>;
 
-function getSingleVariable(variables: TemplateVariables, key: string): string | undefined {
+function getSingleVariable(variables: TemplateVariables, key: string): string | undefined
+{
     const raw = variables[key];
-    if (Array.isArray(raw)) {
+    if (Array.isArray(raw))
+    {
         return raw[0];
     }
-    if (typeof raw === 'string') {
+    if (typeof raw === 'string')
+    {
         return raw;
     }
     return undefined;
 }
 
-function decodeURIComponentSafe(value: string | undefined): string | undefined {
-    if (typeof value !== 'string') {
+function decodeURIComponentSafe(value: string | undefined): string | undefined
+{
+    if (typeof value !== 'string')
+    {
         return value;
     }
-    try {
+    try
+    {
         return decodeURIComponent(value);
-    } catch {
+    } catch
+    {
         return value;
     }
 }
 
-function parseLimit(raw: string | undefined): number | undefined {
-    if (!raw) {
+function parseLimit(raw: string | undefined): number | undefined
+{
+    if (!raw)
+    {
         return undefined;
     }
     const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed < 1 || !Number.isInteger(parsed)) {
+    if (!Number.isFinite(parsed) || parsed < 1 || !Number.isInteger(parsed))
+    {
         return undefined;
     }
     return parsed;
 }
 
-function parseIncludeDetails(raw: string | undefined): boolean | undefined {
-    if (raw === undefined) {
+function parseIncludeDetails(raw: string | undefined): boolean | undefined
+{
+    if (raw === undefined)
+    {
         return undefined;
     }
     const normalized = raw.trim().toLowerCase();
-    if (normalized === '') {
+    if (normalized === '')
+    {
         return undefined;
     }
-    if (normalized === 'true' || normalized === '1') {
+    if (normalized === 'true' || normalized === '1')
+    {
         return true;
     }
-    if (normalized === 'false' || normalized === '0') {
+    if (normalized === 'false' || normalized === '0')
+    {
         return false;
     }
     return undefined;
 }
 
-function encodeSymbolId(data: unknown): string | undefined {
-    try {
+function encodeSymbolId(data: unknown): string | undefined
+{
+    try
+    {
         const json = JSON.stringify(data ?? null);
         return encodeURIComponent(json);
-    } catch {
+    } catch
+    {
         return undefined;
     }
 }
 
-function decodeSymbolId(raw: string): unknown {
-    try {
+function decodeSymbolId(raw: string): unknown
+{
+    try
+    {
         return JSON.parse(decodeURIComponent(raw));
-    } catch {
+    } catch
+    {
         return raw;
     }
 }
 
-function formatSymbolUri(data: unknown): string | undefined {
+function formatSymbolUri(data: unknown): string | undefined
+{
     const encoded = encodeSymbolId(data);
-    if (!encoded) {
+    if (!encoded)
+    {
         return undefined;
     }
     return SYMBOL_RESOURCE_TEMPLATE.replace('{id}', encoded);
 }
 
-function attachResourceUris(payload: ApiResponsePayload): ApiResponsePayload & { items: Array<ApiResultItem & { resourceUri?: string }> } {
+function attachResourceUris(payload: ApiResponsePayload): ApiResponsePayload & { items: Array<ApiResultItem & { resourceUri?: string }> }
+{
     return {
         ...payload,
         items: payload.items.map((item) => ({
@@ -130,25 +155,30 @@ let failedStartupAttempts = 0;
 let stopPolling = false;
 let isPolling = false;
 
-function getMcpPort(): number {
+function getMcpPort(): number
+{
     const config = vscode.workspace.getConfiguration('UnrealAngelscript');
     const explicitPort = config.get<number>('mcp.port', 0);
-    if (typeof explicitPort === 'number' && explicitPort > 0) {
+    if (typeof explicitPort === 'number' && explicitPort > 0)
+    {
         return explicitPort;
     }
     const unrealPort = config.get<number>('unrealConnectionPort', 27099);
     return (typeof unrealPort === 'number' ? unrealPort : 27099) + 100;
 }
 
-function isMcpEnabled(): boolean {
+function isMcpEnabled(): boolean
+{
     const config = vscode.workspace.getConfiguration('UnrealAngelscript');
     return config.get<boolean>('mcp.enabled', true);
 }
 
-function getMaxStartupFailures(): number {
+function getMaxStartupFailures(): number
+{
     const config = vscode.workspace.getConfiguration('UnrealAngelscript');
     const configured = config.get<number>('mcp.maxStartupFailures', 5);
-    if (typeof configured === 'number' && configured > 0) {
+    if (typeof configured === 'number' && configured > 0)
+    {
         return configured;
     }
     return 5;
@@ -156,8 +186,10 @@ function getMaxStartupFailures(): number {
 
 type HealthStatus = 'ok' | 'mismatch' | 'unreachable';
 
-async function requestHealth(port: number): Promise<{ serverId?: string } | null> {
-    return await new Promise((resolve) => {
+async function requestHealth(port: number): Promise<{ serverId?: string } | null>
+{
+    return await new Promise((resolve) =>
+    {
         const url = new URL(`http://127.0.0.1:${port}/health`);
         const req = http.request(
             {
@@ -167,16 +199,20 @@ async function requestHealth(port: number): Promise<{ serverId?: string } | null
                 method: 'GET',
                 timeout: HEALTH_TIMEOUT_MS
             },
-            (res) => {
+            (res) =>
+            {
                 const chunks: Buffer[] = [];
                 let responseBytes = 0;
                 let responseTooLarge = false;
-                res.on('data', (chunk) => {
-                    if (responseTooLarge) {
+                res.on('data', (chunk) =>
+                {
+                    if (responseTooLarge)
+                    {
                         return;
                     }
                     responseBytes += chunk.length;
-                    if (responseBytes > MAX_HEALTH_RESPONSE_BYTES) {
+                    if (responseBytes > MAX_HEALTH_RESPONSE_BYTES)
+                    {
                         responseTooLarge = true;
                         res.destroy();
                         resolve(null);
@@ -184,25 +220,31 @@ async function requestHealth(port: number): Promise<{ serverId?: string } | null
                     }
                     chunks.push(chunk);
                 });
-                res.on('end', () => {
-                    if (responseTooLarge) {
+                res.on('end', () =>
+                {
+                    if (responseTooLarge)
+                    {
                         resolve(null);
                         return;
                     }
-                    if (res.statusCode !== 200) {
+                    if (res.statusCode !== 200)
+                    {
                         resolve(null);
                         return;
                     }
-                    try {
+                    try
+                    {
                         const payload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
                         resolve(payload);
-                    } catch {
+                    } catch
+                    {
                         resolve(null);
                     }
                 });
             }
         );
-        req.on('timeout', () => {
+        req.on('timeout', () =>
+        {
             req.destroy();
             resolve(null);
         });
@@ -211,18 +253,22 @@ async function requestHealth(port: number): Promise<{ serverId?: string } | null
     });
 }
 
-async function checkMcpServer(port: number): Promise<HealthStatus> {
+async function checkMcpServer(port: number): Promise<HealthStatus>
+{
     const health = await requestHealth(port);
-    if (!health) {
+    if (!health)
+    {
         return 'unreachable';
     }
-    if (health.serverId === SERVER_ID) {
+    if (health.serverId === SERVER_ID)
+    {
         return 'ok';
     }
     return 'mismatch';
 }
 
-function createMcpServer(client: LanguageClient, startedClient: Promise<void>): McpServerLike {
+function createMcpServer(client: LanguageClient, startedClient: Promise<void>): McpServerLike
+{
     const server = new McpServer({
         name: SERVER_ID,
         version: '1.0.0'
@@ -231,16 +277,18 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
     server.registerTool(
         'Search_AngelScriptApi',
         {
-            description: 'Search the Angelscript API database for symbols and documentation.',
+            description: 'Search the Angelscript API database for symbols and documentation. The limit parameter defaults to 1000 and must not be below 1000. Do NOT pass limit unless you need a specific value greater than or equal to 1000. Omit limit to use the default.',
             inputSchema: {
                 query: z.string().describe('Search query text for Angelscript API symbols.'),
-                limit: z.number().min(1).max(1000).optional().describe('Maximum number of results to return (1-1000).'),
+                limit: z.number().min(1000).optional().describe('Maximum number of results. Minimum is 1000. Default is 1000. Do NOT pass this parameter unless you need a specific value. Never pass values below 1000.'),
                 includeDetails: z.boolean().optional().describe('Include documentation details for top matches.')
             }
         },
-        async (args, extra) => {
+        async (args, extra) =>
+        {
             const query = typeof args?.query === 'string' ? args.query.trim() : '';
-            if (!query) {
+            if (!query)
+            {
                 return {
                     content: [
                         {
@@ -251,7 +299,8 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                 };
             }
 
-            try {
+            try
+            {
                 await startedClient;
                 const payload = await buildSearchPayload(
                     client,
@@ -264,7 +313,8 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                 );
                 const payloadWithUris = attachResourceUris(payload);
 
-                if (payloadWithUris.items.length === 0) {
+                if (payloadWithUris.items.length === 0)
+                {
                     return {
                         content: [
                             {
@@ -283,7 +333,8 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                         }
                     ]
                 };
-            } catch {
+            } catch
+            {
                 return {
                     content: [
                         {
@@ -304,14 +355,16 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
             description: 'Search the Angelscript API database via resource template (same as Search_AngelScriptApi tool).',
             mimeType: 'application/json'
         },
-        async (uri, variables, extra) => {
+        async (uri, variables, extra) =>
+        {
             const query = decodeURIComponentSafe(getSingleVariable(variables, 'query'))?.trim() ?? '';
             const limit = parseLimit(getSingleVariable(variables, 'limit'));
             const includeDetailsParam = parseIncludeDetails(getSingleVariable(variables, 'includeDetails'));
             // Default to true when unspecified to match buildSearchPayload behavior (includeDetails !== false).
             const includeDetails = includeDetailsParam ?? true;
 
-            if (!query) {
+            if (!query)
+            {
                 const emptyPayload: ApiResponsePayload = {
                     query,
                     total: 0,
@@ -330,7 +383,8 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                 };
             }
 
-            try {
+            try
+            {
                 await startedClient;
                 const payload = await buildSearchPayload(
                     client,
@@ -352,7 +406,8 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                         }
                     ]
                 };
-            } catch {
+            } catch
+            {
                 return {
                     contents: [
                         {
@@ -374,9 +429,11 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
             description: 'Fetch Angelscript API symbol documentation using the encoded symbol id from search results.',
             mimeType: 'text/markdown'
         },
-        async (uri, variables, extra) => {
+        async (uri, variables, extra) =>
+        {
             const rawId = getSingleVariable(variables, 'id');
-            if (!rawId) {
+            if (!rawId)
+            {
                 return {
                     contents: [
                         {
@@ -390,7 +447,8 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
 
             const decodedId = decodeSymbolId(rawId);
 
-            try {
+            try
+            {
                 await startedClient;
                 const details = await client.sendRequest(GetAPIDetailsRequest, decodedId);
                 const text =
@@ -407,7 +465,8 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                         }
                     ]
                 };
-            } catch {
+            } catch
+            {
                 return {
                     contents: [
                         {
@@ -424,8 +483,10 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
     return server;
 }
 
-async function tryStartHttpServer(client: LanguageClient, startedClient: Promise<void>): Promise<boolean> {
-    if (serverState) {
+async function tryStartHttpServer(client: LanguageClient, startedClient: Promise<void>): Promise<boolean>
+{
+    if (serverState)
+    {
         return true;
     }
 
@@ -436,10 +497,13 @@ async function tryStartHttpServer(client: LanguageClient, startedClient: Promise
     const mcpServer = createMcpServer(client, startedClient);
     await mcpServer.connect(transport);
 
-    const httpServer = http.createServer((req, res) => {
-        if (req.method === 'GET' && req.url) {
+    const httpServer = http.createServer((req, res) =>
+    {
+        if (req.method === 'GET' && req.url)
+        {
             const requestUrl = new URL(req.url, `http://${req.headers.host ?? '127.0.0.1'}`);
-            if (requestUrl.pathname === '/health') {
+            if (requestUrl.pathname === '/health')
+            {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ serverId: SERVER_ID }));
                 return;
@@ -448,12 +512,15 @@ async function tryStartHttpServer(client: LanguageClient, startedClient: Promise
         const chunks: Buffer[] = [];
         let bodyBytes = 0;
         let bodyTooLarge = false;
-        req.on('data', (chunk) => {
-            if (bodyTooLarge) {
+        req.on('data', (chunk) =>
+        {
+            if (bodyTooLarge)
+            {
                 return;
             }
             bodyBytes += chunk.length;
-            if (bodyBytes > MAX_REQUEST_BODY_BYTES) {
+            if (bodyBytes > MAX_REQUEST_BODY_BYTES)
+            {
                 bodyTooLarge = true;
                 res.statusCode = 413;
                 res.end('Payload Too Large');
@@ -462,23 +529,31 @@ async function tryStartHttpServer(client: LanguageClient, startedClient: Promise
             }
             chunks.push(chunk);
         });
-        req.on('end', async () => {
-            if (bodyTooLarge) {
+        req.on('end', async () =>
+        {
+            if (bodyTooLarge)
+            {
                 return;
             }
             const bodyText = Buffer.concat(chunks).toString('utf-8');
             let parsedBody: unknown = undefined;
-            if (bodyText) {
-                try {
+            if (bodyText)
+            {
+                try
+                {
                     parsedBody = JSON.parse(bodyText);
-                } catch {
+                } catch
+                {
                     parsedBody = undefined;
                 }
             }
-            try {
+            try
+            {
                 await transport.handleRequest(req, res, parsedBody);
-            } catch {
-                if (!res.headersSent) {
+            } catch
+            {
+                if (!res.headersSent)
+                {
                     res.statusCode = 500;
                 }
                 res.end();
@@ -486,9 +561,12 @@ async function tryStartHttpServer(client: LanguageClient, startedClient: Promise
         });
     });
 
-    return await new Promise<boolean>((resolve) => {
-        httpServer.once('error', async (error: NodeJS.ErrnoException) => {
-            if (error.code === 'EADDRINUSE') {
+    return await new Promise<boolean>((resolve) =>
+    {
+        httpServer.once('error', async (error: NodeJS.ErrnoException) =>
+        {
+            if (error.code === 'EADDRINUSE')
+            {
                 await transport.close().catch(() => undefined);
                 resolve(false);
                 return;
@@ -497,11 +575,14 @@ async function tryStartHttpServer(client: LanguageClient, startedClient: Promise
             resolve(false);
         });
 
-        httpServer.listen(port, '127.0.0.1', () => {
-            try {
+        httpServer.listen(port, '127.0.0.1', () =>
+        {
+            try
+            {
                 serverState = { httpServer, transport, mcpServer };
                 resolve(true);
-            } catch {
+            } catch
+            {
                 httpServer.close();
                 transport.close().catch(() => undefined);
                 resolve(false);
@@ -510,8 +591,10 @@ async function tryStartHttpServer(client: LanguageClient, startedClient: Promise
     });
 }
 
-function disposeServer(): void {
-    if (!serverState) {
+function disposeServer(): void
+{
+    if (!serverState)
+    {
         return;
     }
     serverState.transport.close().catch(() => undefined);
@@ -519,43 +602,55 @@ function disposeServer(): void {
     serverState = null;
 }
 
-async function pollForServer(client: LanguageClient, startedClient: Promise<void>): Promise<void> {
-    if (isPolling || stopPolling) {
+async function pollForServer(client: LanguageClient, startedClient: Promise<void>): Promise<void>
+{
+    if (isPolling || stopPolling)
+    {
         return;
     }
-    if (!isMcpEnabled()) {
-        if (pollingTimer) {
+    if (!isMcpEnabled())
+    {
+        if (pollingTimer)
+        {
             clearTimeout(pollingTimer);
             pollingTimer = null;
         }
         return;
     }
 
-    const schedulePoll = (delayMs: number) => {
-        if (stopPolling) {
+    const schedulePoll = (delayMs: number) =>
+    {
+        if (stopPolling)
+        {
             return;
         }
-        if (pollingTimer) {
+        if (pollingTimer)
+        {
             clearTimeout(pollingTimer);
         }
-        pollingTimer = setTimeout(() => {
+        pollingTimer = setTimeout(() =>
+        {
             pollingTimer = null;
             pollForServer(client, startedClient);
         }, delayMs);
     };
 
     isPolling = true;
-    try {
+    try
+    {
         const port = getMcpPort();
         const handshakeStatus = await checkMcpServer(port);
-        if (handshakeStatus === 'ok') {
+        if (handshakeStatus === 'ok')
+        {
             failedStartupAttempts = 0;
             schedulePoll(POLL_INTERVAL_OK_MS);
             return;
         }
-        if (handshakeStatus === 'mismatch') {
+        if (handshakeStatus === 'mismatch')
+        {
             stopPolling = true;
-            if (pollingTimer) {
+            if (pollingTimer)
+            {
                 clearTimeout(pollingTimer);
                 pollingTimer = null;
             }
@@ -566,16 +661,19 @@ async function pollForServer(client: LanguageClient, startedClient: Promise<void
         }
 
         const started = await tryStartHttpServer(client, startedClient);
-        if (started) {
+        if (started)
+        {
             failedStartupAttempts = 0;
             schedulePoll(POLL_INTERVAL_OK_MS);
             return;
         }
 
         failedStartupAttempts += 1;
-        if (failedStartupAttempts >= getMaxStartupFailures()) {
+        if (failedStartupAttempts >= getMaxStartupFailures())
+        {
             stopPolling = true;
-            if (pollingTimer) {
+            if (pollingTimer)
+            {
                 clearTimeout(pollingTimer);
                 pollingTimer = null;
             }
@@ -586,7 +684,8 @@ async function pollForServer(client: LanguageClient, startedClient: Promise<void
         }
 
         schedulePoll(POLL_INTERVAL_RETRY_MS);
-    } finally {
+    } finally
+    {
         isPolling = false;
     }
 }
@@ -595,19 +694,24 @@ export function startMcpHttpServerManager(
     context: vscode.ExtensionContext,
     client: LanguageClient,
     startedClient: Promise<void>
-): void {
+): void
+{
     failedStartupAttempts = 0;
     stopPolling = false;
     isPolling = false;
-    if (pollingTimer) {
+    if (pollingTimer)
+    {
         clearTimeout(pollingTimer);
         pollingTimer = null;
     }
 
-    const disposable = vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration('UnrealAngelscript.mcp')) {
+    const disposable = vscode.workspace.onDidChangeConfiguration((event) =>
+    {
+        if (event.affectsConfiguration('UnrealAngelscript.mcp'))
+        {
             disposeServer();
-            if (pollingTimer) {
+            if (pollingTimer)
+            {
                 clearTimeout(pollingTimer);
                 pollingTimer = null;
             }
@@ -619,9 +723,11 @@ export function startMcpHttpServerManager(
     });
 
     const managerDisposable = {
-        dispose: () => {
+        dispose: () =>
+        {
             disposeServer();
-            if (pollingTimer) {
+            if (pollingTimer)
+            {
                 clearTimeout(pollingTimer);
                 pollingTimer = null;
             }
@@ -633,7 +739,8 @@ export function startMcpHttpServerManager(
 
     context.subscriptions.push(disposable, managerDisposable);
 
-    if (isMcpEnabled()) {
+    if (isMcpEnabled())
+    {
         pollForServer(client, startedClient);
     }
 }
