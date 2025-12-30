@@ -277,11 +277,11 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
     server.registerTool(
         'Search_AngelScriptApi',
         {
-            description: 'Search the Angelscript API database for symbols and documentation. The limit parameter defaults to 1000 and must not be below 1000. Do NOT pass limit unless you need a specific value greater than or equal to 1000. Omit limit to use the default.',
+            description: 'Search the Angelscript API database for symbols and documentation. The limit parameter defaults to 1000 and must not be below 1000. The includeDetails parameter defaults to true and should not be passed unless you specifically need to exclude documentation. Do NOT pass limit or includeDetails unless you need specific values. Omit both parameters to use defaults.',
             inputSchema: {
                 query: z.string().describe('Search query text for Angelscript API symbols.'),
                 limit: z.number().min(1000).optional().describe('Maximum number of results. Minimum is 1000. Default is 1000. Do NOT pass this parameter unless you need a specific value. Never pass values below 1000.'),
-                includeDetails: z.boolean().optional().describe('Include documentation details for top matches.')
+                includeDetails: z.boolean().optional().describe('Include documentation details for top matches. Default is true. Do NOT pass this parameter unless you specifically need to exclude documentation. Omit to use the default.')
             }
         },
         async (args, extra) =>
