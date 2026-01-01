@@ -30,6 +30,9 @@ export let ASPropertySpecifiers : any = {
     "Instanced": "The object in this property is a new instance for each containing instance",
     "BlueprintSetter": "Specify a function to call instead when writing this property from blueprint",
     "BlueprintGetter": "Specify a function to call instead when reading this property from blueprint",
+    "Setter": "Specify a function to call when reflection system writing this property",
+    "Getter": "Specify a function to call when reflection system reading this property",
+    "FieldNotify": "Property supports field notification",
     "SaveGame": "Property should be serialized for save games",
 };
 
@@ -140,6 +143,7 @@ export let ASFunctionSpecifiers : any = {
     "ToolTip": "Tooltip to show in the editor",
     "DisplayName": "Name to use to display the function in the editor",
     "BlueprintProtected": "Treat this function as protected in blueprint, disallowing it from being called by non-child blueprints",
+    "FieldNotify": "Function supports field notification",
     "Meta": "Specify arbitrary meta tags",
 };
 

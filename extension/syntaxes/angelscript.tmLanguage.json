@@ -122,7 +122,7 @@
                 },
                 {
                     "name": "keyword.specifier.angelscript",
-                    "match": "\\b(BlueprintCallable|NotBlueprintCallable|BlueprintPure|BlueprintEvent|NetFunction|CrumbFunction|DevFunction|Unreliable|BlueprintOverride|CallInEditor|Category|Keywords|ToolTip|DisplayName|BlueprintProtected|Meta|NetMulticast|Server|Client|WithValidation|BlueprintAuthorityOnly)\\b"
+                    "match": "\\b(BlueprintCallable|NotBlueprintCallable|BlueprintPure|BlueprintEvent|NetFunction|CrumbFunction|DevFunction|Unreliable|BlueprintOverride|CallInEditor|Category|Keywords|ToolTip|DisplayName|BlueprintProtected|Meta|NetMulticast|Server|Client|WithValidation|BlueprintAuthorityOnly|Setter|Getter|FieldNotify)\\b"
                 }
             ]
         },
