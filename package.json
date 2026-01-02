@@ -1,8 +1,8 @@
 {
     "name": "unreal-angelscript",
     "displayName": "Unreal Angelscript",
-    "description": "Language Server and Debug Adapter for use with the UnrealEngine-Angelscript plugin from https://github.com/Hazelight/UnrealEngine-Angelscript",
-    "version": "1.8.8-3",
+    "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
+    "version": "1.8.8003",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -14,7 +14,6 @@
     ],
     "activationEvents": [
         "onDebug",
-        "onLanguage:angelscript",
         "onLanguageModelTool:angelscript_searchApi"
     ],
     "repository": {
