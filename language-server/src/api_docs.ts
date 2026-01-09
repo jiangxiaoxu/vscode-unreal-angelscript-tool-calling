@@ -306,21 +306,38 @@ export function GetAPIDetails(data: any): any
 export function GetAPISearch(filter: string): any
 {
     let list: any[] = [];
-    let phraseGroups: Array<Array<string>> = [];
+    type SearchToken = {
+        value: string;
+        isSeparator: boolean;
+        tightPrev: boolean;
+    };
+    let phraseGroups: Array<Array<SearchToken>> = [];
     let tokenRegex = /::|\.|[A-Za-z0-9_]+/g;
     for (let rawGroup of filter.split("|"))
     {
-        let group = new Array<string>();
-        let matches = rawGroup.match(tokenRegex);
-        if (matches)
+        let group = new Array<SearchToken>();
+        let regex = new RegExp(tokenRegex.source, "g");
+        let prevEnd = -1;
+        let match: RegExpExecArray;
+        while ((match = regex.exec(rawGroup)) !== null)
         {
-            for (let token of matches)
+            let token = match[0];
+            let start = match.index ?? 0;
+            let end = start + token.length;
+            let hasSpaceBefore = false;
+            if (prevEnd >= 0)
             {
-                if (token == "." || token == "::")
-                    group.push(token);
-                else
-                    group.push(token.toLowerCase());
+                let gap = rawGroup.substring(prevEnd, start);
+                hasSpaceBefore = /\s/.test(gap);
             }
+
+            let isSeparator = token == "." || token == "::";
+            group.push({
+                value: isSeparator ? token : token.toLowerCase(),
+                isSeparator: isSeparator,
+                tightPrev: prevEnd >= 0 && !hasSpaceBefore,
+            });
+            prevEnd = end;
         }
 
         if (group.length > 0)
@@ -330,7 +347,7 @@ export function GetAPISearch(filter: string): any
     if (phraseGroups.length == 0)
         return [];
 
-    let groupMatches = function (name: string, group: Array<string>)
+    let groupMatches = function (name: string, group: Array<SearchToken>)
     {
         if (group.length == 0)
             return false;
@@ -339,19 +356,21 @@ export function GetAPISearch(filter: string): any
         let searchIndex = 0;
         for (let token of group)
         {
-            if (token == "." || token == "::")
+            if (token.isSeparator)
             {
-                let matchIndex = name.indexOf(token, searchIndex);
+                let matchIndex = name.indexOf(token.value, searchIndex);
                 if (matchIndex == -1)
                     return false;
-                searchIndex = matchIndex + token.length;
+                if (token.tightPrev && matchIndex != searchIndex)
+                    return false;
+                searchIndex = matchIndex + token.value.length;
                 continue;
             }
 
-            let matchIndex = lowerName.indexOf(token, searchIndex);
+            let matchIndex = lowerName.indexOf(token.value, searchIndex);
             if (matchIndex == -1)
                 return false;
-            searchIndex = matchIndex + token.length;
+            searchIndex = matchIndex + token.value.length;
         }
 
         return true;
@@ -428,7 +447,7 @@ export function GetAPISearch(filter: string): any
         return score;
     }
 
-    let scoreGroup = function (name: string, lowerName: string, group: Array<string>) : number
+    let scoreGroup = function (name: string, lowerName: string, group: Array<SearchToken>) : number
     {
         if (group.length == 0)
             return -1;
@@ -437,24 +456,26 @@ export function GetAPISearch(filter: string): any
         let score = 0;
         for (let token of group)
         {
-            if (token == "." || token == "::")
+            if (token.isSeparator)
             {
-                let matchIndex = name.indexOf(token, searchIndex);
+                let matchIndex = name.indexOf(token.value, searchIndex);
                 if (matchIndex == -1)
                     return -1;
-                score += token == "::" ? 60 : 40;
-                searchIndex = matchIndex + token.length;
+                if (token.tightPrev && matchIndex != searchIndex)
+                    return -1;
+                score += token.value == "::" ? 60 : 40;
+                searchIndex = matchIndex + token.value.length;
                 continue;
             }
 
-            let matchIndex = lowerName.indexOf(token, searchIndex);
+            let matchIndex = lowerName.indexOf(token.value, searchIndex);
             if (matchIndex == -1)
                 return -1;
-            score += scoreToken(name, matchIndex, token.length);
-            searchIndex = matchIndex + token.length;
+            score += scoreToken(name, matchIndex, token.value.length);
+            searchIndex = matchIndex + token.value.length;
         }
 
-        if (group.length == 1 && lowerName == group[0])
+        if (group.length == 1 && !group[0].isSeparator && lowerName == group[0].value)
             score += 300;
 
         score += Math.max(0, 50 - name.length);
