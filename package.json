@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8010",
+    "version": "1.8.8011",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -14,7 +14,8 @@
     ],
     "activationEvents": [
         "onDebug",
-        "onLanguageModelTool:angelscript_searchApi"
+        "onLanguageModelTool:angelscript_searchApi",
+        "onLanguageModelTool:angelscript_resolveSymbolAtPosition"
     ],
     "repository": {
         "type": "git",
@@ -65,6 +66,54 @@
                     },
                     "required": [
                         "query"
+                    ]
+                }
+            },
+            {
+                "name": "angelscript_resolveSymbolAtPosition",
+                "tags": [
+                    "angelscript",
+                    "symbol",
+                    "hover"
+                ],
+                "toolReferenceName": "angelscript_resolveSymbolAtPosition",
+                "displayName": "Angelscript Resolve Symbol At Position",
+                "modelDescription": "Resolve the symbol at a given document position and return its kind, full signature, definition location, and optional documentation.",
+                "canBeReferencedInPrompt": true,
+                "icon": "$(symbol-method)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "uri": {
+                            "type": "string",
+                            "description": "Document URI for the file containing the symbol."
+                        },
+                        "position": {
+                            "type": "object",
+                            "properties": {
+                                "line": {
+                                    "type": "number",
+                                    "description": "0-based line number."
+                                },
+                                "character": {
+                                    "type": "number",
+                                    "description": "0-based character offset."
+                                }
+                            },
+                            "required": [
+                                "line",
+                                "character"
+                            ]
+                        },
+                        "includeDocumentation": {
+                            "type": "boolean",
+                            "description": "Include documentation when available. Default is true.",
+                            "default": true
+                        }
+                    },
+                    "required": [
+                        "uri",
+                        "position"
                     ]
                 }
             }
