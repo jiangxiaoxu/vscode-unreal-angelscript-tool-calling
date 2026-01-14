@@ -14,7 +14,16 @@ import { WorkspaceFolder, DebugConfiguration, ProviderResult, CancellationToken 
 import { ASDebugSession } from './debug';
 import * as Net from 'net';
 import { buildSearchPayload, AngelscriptSearchParams, isUnrealConnected } from './angelscriptApiSearch';
-import { GetAPIRequest, GetAPIDetailsRequest, GetAPISearchRequest, GetModuleForSymbolRequest, ProvideInlineValuesRequest } from './apiRequests';
+import {
+    GetAPIRequest,
+    GetAPIDetailsRequest,
+    GetAPISearchRequest,
+    GetModuleForSymbolRequest,
+    ProvideInlineValuesRequest,
+    ResolveSymbolAtPositionParams,
+    ResolveSymbolAtPositionRequest,
+    ResolveSymbolAtPositionResult,
+} from './apiRequests';
 import { startMcpHttpServerManager } from './mcpHttpServer';
 
 export function activate(context: ExtensionContext)
@@ -199,6 +208,11 @@ export function activate(context: ExtensionContext)
             new AngelscriptSearchApiTool(client, startedClient)
         );
         context.subscriptions.push(toolDisposable);
+        const resolveSymbolToolDisposable = vscode.lm.registerTool(
+            "angelscript_resolveSymbolAtPosition",
+            new AngelscriptResolveSymbolAtPositionTool(client, startedClient)
+        );
+        context.subscriptions.push(resolveSymbolToolDisposable);
     }
 
     startMcpHttpServerManager(context, client, startedClient);
@@ -267,6 +281,65 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
             return new vscode.LanguageModelToolResult([
                 new vscode.LanguageModelTextPart(
                     "The Angelscript API tool failed to run. Please ensure the language server is running and try again."
+                )
+            ]);
+        }
+    }
+}
+
+class AngelscriptResolveSymbolAtPositionTool implements vscode.LanguageModelTool<ResolveSymbolAtPositionParams>
+{
+    client: LanguageClient;
+    startedClient: Promise<void>;
+
+    constructor(client: LanguageClient, startedClient: Promise<void>)
+    {
+        this.client = client;
+        this.startedClient = startedClient;
+    }
+
+    async invoke(
+        options: vscode.LanguageModelToolInvocationOptions<ResolveSymbolAtPositionParams>,
+        token: CancellationToken
+    ): Promise<vscode.LanguageModelToolResult>
+    {
+        const input = options?.input;
+        const uri = input?.uri;
+        const position = input?.position;
+        const line = position?.line;
+        const character = position?.character;
+
+        if (typeof uri !== "string" || typeof line !== "number" || typeof character !== "number")
+        {
+            return new vscode.LanguageModelToolResult([
+                new vscode.LanguageModelTextPart("Invalid input. Provide uri and position { line, character }.")
+            ]);
+        }
+
+        const includeDocumentation = input?.includeDocumentation !== false;
+
+        try
+        {
+            await this.startedClient;
+            const result = await this.client.sendRequest(
+                ResolveSymbolAtPositionRequest,
+                {
+                    uri,
+                    position: { line, character },
+                    includeDocumentation,
+                }
+            ) as ResolveSymbolAtPositionResult;
+
+            return new vscode.LanguageModelToolResult([
+                new vscode.LanguageModelTextPart(JSON.stringify(result, null, 2))
+            ]);
+        }
+        catch (error)
+        {
+            console.error("angelscript_resolveSymbolAtPosition tool failed:", error);
+            return new vscode.LanguageModelToolResult([
+                new vscode.LanguageModelTextPart(
+                    "The resolveSymbolAtPosition tool failed to run. Please ensure the language server is running and try again."
                 )
             ]);
         }

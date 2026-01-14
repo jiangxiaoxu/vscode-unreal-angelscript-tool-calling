@@ -15,7 +15,7 @@ import
     buildSearchPayload,
     isUnrealConnected
 } from './angelscriptApiSearch';
-import { GetAPIDetailsRequest } from './apiRequests';
+import { GetAPIDetailsRequest, ResolveSymbolAtPositionRequest } from './apiRequests';
 
 type McpTransport = {
     handleRequest: (req: http.IncomingMessage, res: http.ServerResponse, body: unknown) => Promise<void>;
@@ -353,6 +353,73 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                         {
                             type: 'text',
                             text: 'The Angelscript API tool failed to run. Please ensure the language server is running and try again.'
+                        }
+                    ]
+                };
+            }
+        }
+    );
+
+    server.registerTool(
+        'angelscript_resolveSymbolAtPosition',
+        {
+            description: 'Resolve a symbol at a given document position and return its kind, full signature, definition location, and optional documentation.',
+            inputSchema: {
+                uri: z.string().describe('Document URI for the file containing the symbol.'),
+                position: z.object({
+                    line: z.number().int().min(0).describe('0-based line number.'),
+                    character: z.number().int().min(0).describe('0-based character offset.'),
+                }),
+                includeDocumentation: z.boolean().optional().describe('Include documentation when available. Default is true.'),
+            }
+        },
+        async (args) =>
+        {
+            const uri = typeof args?.uri === 'string' ? args.uri.trim() : '';
+            const position = args?.position;
+            const line = typeof position?.line === 'number' ? position.line : null;
+            const character = typeof position?.character === 'number' ? position.character : null;
+
+            if (!uri || line === null || character === null)
+            {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: 'Invalid input. Provide uri and position { line, character }.'
+                        }
+                    ]
+                };
+            }
+
+            try
+            {
+                await startedClient;
+                const includeDocumentation = args?.includeDocumentation !== false;
+                const result = await client.sendRequest(
+                    ResolveSymbolAtPositionRequest,
+                    {
+                        uri,
+                        position: { line, character },
+                        includeDocumentation,
+                    }
+                );
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2)
+                        }
+                    ]
+                };
+            }
+            catch
+            {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: 'The resolveSymbolAtPosition tool failed to run. Please ensure the language server is running and try again.'
                         }
                     ]
                 };

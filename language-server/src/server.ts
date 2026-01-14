@@ -1057,6 +1057,17 @@ connection.onRequest("angelscript/getUnrealConnectionStatus", () : boolean => {
     return UnrealConnected;
 });
 
+connection.onRequest("angelscript/resolveSymbolAtPosition", (params : scriptsymbols.ResolveSymbolAtPositionParams) : scriptsymbols.ResolveSymbolAtPositionResult => {
+    if (!params || !params.uri || !params.position)
+        return { ok: false, error: { code: "InvalidParams", message: "uri and position are required." } };
+
+    let asmodule = GetAndParseModule(params.uri);
+    if (!asmodule)
+        return { ok: false, error: { code: "NotFound", message: "Module not found." } };
+
+    return scriptsymbols.ResolveSymbolAtPosition(asmodule, params.position, params.includeDocumentation !== false);
+});
+
 connection.onRequest("angelscript/getAPI", (root : string) : any => {
     if (typedb.HasTypesFromUnreal())
         return api_docs.GetAPIList(root);
