@@ -12,6 +12,9 @@ Streamable HTTP MCP server，会复用 Angelscript language server 的 API 搜�
 查询规则：空格表示“有序通配”（`a b` 可匹配 `a...b`），`|` 表示 OR 分隔；`.`/`::` 无空格时要求紧邻（如 `UObject.`、`Math::`），带空格时为模糊分隔（如 `UObject .`、`Math ::`）。
 可选参数：`includeDocs` 用于控制是否返回 `docs`，`maxBatchResults` 用于控制单次返回数量，`kinds` 用于筛选结果类型（`class`/`struct`/`enum`/`method`/`function`/`property`/`globalVariable`，大小写不敏感，支持多选），`source` 用于筛选来源（`native`/`script`/`both`，默认 `both`），`labelQueryUseRegex` 启用 label 正则（对 `labelQuery` 生效，先做 kinds 过滤再做正则，仅匹配 label；支持 `/pattern/flags`，省略 `i` 表示区分大小写；不使用 `/pattern/flags` 时默认忽略大小写），`signatureRegex` 启用 signature 正则（对解析后的 signature 生效，支持 `/pattern/flags`，省略 `i` 表示区分大小写；不使用 `/pattern/flags` 时默认忽略大小写；与 `labelQueryUseRegex` 同时启用时先 label 再 signature 过滤）。
 错误返回为结构化 JSON：`{ ok:false, error:{ code, message, details? } }`，常见 code 包含：`MISSING_LABEL_QUERY`、`DETAILS_UNAVAILABLE`、`INVALID_REGEX`、`INVALID_SEARCH_INDEX`、`INVALID_MAX_BATCH_RESULTS`、`INVALID_SOURCE`、`UE_UNAVAILABLE`、`INTERNAL_ERROR`、`RESOURCE_ERROR`。
+空结果返回为结构化 JSON（`items` 为空数组，`total=0`，`nextSearchIndex=null`），并包含：
+- `text`: `No Angelscript API results for "<labelQuery>".`
+- `request`: 回显关键输入（`labelQuery`、`searchIndex`、`maxBatchResults`、`kinds`、`source`、`labelQueryUseRegex`、`signatureRegex`，其中 `signatureRegex` 为空时不返回）。
 
 示例（LM tool）：
 ```json

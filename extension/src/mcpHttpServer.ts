@@ -446,14 +446,32 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                     () => extra.signal.aborted
                 );
                 const payloadWithUris = attachResourceUris(payload);
-
                 if (payloadWithUris.items.length === 0)
                 {
+                    const request: Record<string, unknown> = {
+                        labelQuery,
+                        searchIndex,
+                        maxBatchResults: maxBatchResults ?? 200,
+                        kinds: args?.kinds,
+                        source: args?.source ?? "both",
+                        labelQueryUseRegex: args?.labelQueryUseRegex === true,
+                    };
+                    const signatureRegex = typeof args?.signatureRegex === "string"
+                        ? args.signatureRegex.trim()
+                        : "";
+                    if (signatureRegex)
+                    {
+                        request.signatureRegex = signatureRegex;
+                    }
                     return {
                         content: [
                             {
                                 type: 'text',
-                                text: `No Angelscript API results for "${labelQuery}".`
+                                text: JSON.stringify({
+                                    ...payloadWithUris,
+                                    text: `No Angelscript API results for "${labelQuery}".`,
+                                    request
+                                }, null, 2)
                             }
                         ]
                     };

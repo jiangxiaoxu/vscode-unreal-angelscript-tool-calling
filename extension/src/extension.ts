@@ -229,6 +229,40 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
         this.startedClient = startedClient;
     }
 
+    prepareInvocation(
+        options: vscode.LanguageModelToolInvocationPrepareOptions<AngelscriptSearchParams>,
+        token: CancellationToken
+    ): vscode.ProviderResult<vscode.PreparedToolInvocation>
+    {
+        const input = options?.input;
+        const labelQuery = typeof input?.labelQuery === "string" ? input.labelQuery.trim() : "";
+        const searchIndex = Number(input?.searchIndex);
+        const maxBatchResults = typeof input?.maxBatchResults === "number" ? input.maxBatchResults : undefined;
+        const includeDocs = input?.includeDocs === true ? "true" : "false";
+        const labelQueryUseRegex = input?.labelQueryUseRegex === true ? "true" : "false";
+        const signatureRegex = typeof input?.signatureRegex === "string" ? input.signatureRegex.trim() : "";
+        const source = typeof input?.source === "string" ? input.source : "both";
+        const kinds = Array.isArray(input?.kinds) ? input?.kinds.filter((item) => typeof item === "string") : [];
+
+        const details: string[] = [];
+        details.push(`source=${source}`);
+        if (Number.isFinite(searchIndex))
+            details.push(`index=${searchIndex}`);
+        if (typeof maxBatchResults === "number")
+            details.push(`max=${maxBatchResults}`);
+        details.push(`docs=${includeDocs}`);
+        details.push(`labelRegex=${labelQueryUseRegex}`);
+        if (signatureRegex)
+            details.push(`signatureRegex=${signatureRegex}`);
+        if (kinds && kinds.length > 0)
+            details.push(`kinds=${kinds.join(",")}`);
+
+        const queryLabel = labelQuery ? `"${labelQuery}"` : "<empty>";
+        return {
+            invocationMessage: `Search Angelscript API ${queryLabel} (${details.join(", ")})`
+        };
+    }
+
     async invoke(
         options: vscode.LanguageModelToolInvocationOptions<AngelscriptSearchParams>,
         token: CancellationToken
@@ -285,8 +319,27 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
 
             if (payload.items.length === 0)
             {
+                const request: Record<string, unknown> = {
+                    labelQuery,
+                    searchIndex,
+                    maxBatchResults: maxBatchResults ?? 200,
+                    kinds: options?.input?.kinds,
+                    source: options?.input?.source ?? "both",
+                    labelQueryUseRegex: options?.input?.labelQueryUseRegex === true,
+                };
+                const signatureRegex = typeof options?.input?.signatureRegex === "string"
+                    ? options.input.signatureRegex.trim()
+                    : "";
+                if (signatureRegex)
+                {
+                    request.signatureRegex = signatureRegex;
+                }
                 return new vscode.LanguageModelToolResult([
-                    new vscode.LanguageModelTextPart(`No Angelscript API results for "${labelQuery}".`)
+                    new vscode.LanguageModelTextPart(JSON.stringify({
+                        ...payload,
+                        text: `No Angelscript API results for "${labelQuery}".`,
+                        request
+                    }, null, 2))
                 ]);
             }
 
