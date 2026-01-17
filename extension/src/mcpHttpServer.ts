@@ -12,6 +12,7 @@ import
 {
     ApiResponsePayload,
     ApiResultItem,
+    SearchSource,
     buildSearchPayload,
     isUnrealConnected,
     toApiErrorPayload
@@ -33,7 +34,7 @@ type McpHttpServerState = {
 
 const SERVER_ID = 'angelscript-api-mcp';
 const RESOURCE_BASE = `mcp://${SERVER_ID}/`;
-const SEARCH_RESOURCE_TEMPLATE = `${RESOURCE_BASE}search{?labelQuery,searchIndex,maxBatchResults,includeDocs,labelQueryUseRegex,signatureRegex,kinds}`;
+const SEARCH_RESOURCE_TEMPLATE = `${RESOURCE_BASE}search{?labelQuery,searchIndex,maxBatchResults,includeDocs,labelQueryUseRegex,signatureRegex,source,kinds}`;
 const SYMBOL_RESOURCE_TEMPLATE = `${RESOURCE_BASE}symbol/{id}`;
 const HEALTH_TIMEOUT_MS = 400;
 const POLL_INTERVAL_OK_MS = 3000;
@@ -155,6 +156,25 @@ function parseLabelQueryUseRegex(raw: string | undefined): boolean | undefined
         return false;
     }
     return undefined;
+}
+
+function parseSource(raw: string | undefined): string | undefined
+{
+    if (raw === undefined)
+    {
+        return undefined;
+    }
+    const decoded = decodeURIComponentSafe(raw);
+    if (typeof decoded !== 'string')
+    {
+        return undefined;
+    }
+    const trimmed = decoded.trim().toLowerCase();
+    if (trimmed.length === 0)
+    {
+        return undefined;
+    }
+    return trimmed;
 }
 
 function parseKinds(rawValues: string[]): string[] | undefined
@@ -355,7 +375,7 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
     server.registerTool(
         'angelscript_searchApi',
         {
-            description: 'Search Angelscript API symbols and docs. Spaces act as ordered wildcards; use "a b" to match a...b. Use "|" to separate alternate queries (OR). Use "." or "::" to require those separators; without a space they must be adjacent (e.g., "UObject." or "Math::"), with a space they stay fuzzy (e.g., "UObject ." or "Math ::"). Optional kinds filter: class, struct, enum, method, function, property, globalVariable (case-insensitive, multiple allowed). Signature is always returned; includeDocs controls documentation payload. Paging uses searchIndex (required) and maxBatchResults (default 200). Set labelQueryUseRegex to true to apply a regex to labelQuery after kind filtering; supports /pattern/flags (omit i for case-sensitive). If not using /pattern/flags, default ignore case. Set signatureRegex to filter parsed signatures using a regex (supports /pattern/flags).',
+            description: 'Search Angelscript API symbols and docs. Spaces act as ordered wildcards; use "a b" to match a...b. Use "|" to separate alternate queries (OR). Use "." or "::" to require those separators; without a space they must be adjacent (e.g., "UObject." or "Math::"), with a space they stay fuzzy (e.g., "UObject ." or "Math ::"). Optional kinds filter: class, struct, enum, method, function, property, globalVariable (case-insensitive, multiple allowed). Optional source filter: native, script, both (default). Signature is always returned; includeDocs controls documentation payload. Paging uses searchIndex (required) and maxBatchResults (default 200). Set labelQueryUseRegex to true to apply a regex to labelQuery after kind filtering; supports /pattern/flags (omit i for case-sensitive). If not using /pattern/flags, default ignore case. Set signatureRegex to filter parsed signatures using a regex (supports /pattern/flags).',
             inputSchema: {
                 labelQuery: z.string().describe('Search query text for Angelscript API symbols.'),
                 searchIndex: z.number().int().describe('0-based start index for paged results.'),
@@ -363,6 +383,7 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                 includeDocs: z.boolean().optional().describe('Include documentation text in the docs field. Default is false.'),
                 labelQueryUseRegex: z.boolean().optional().describe('Treat labelQuery as a regular expression applied to labels after kind filtering. Supports /pattern/flags (omit i for case-sensitive). If not using /pattern/flags, default ignore case. Default is false.'),
                 signatureRegex: z.string().optional().describe('Regular expression to filter parsed signatures. Supports /pattern/flags (omit i for case-sensitive). If not using /pattern/flags, default ignore case.'),
+                source: z.enum(['native', 'script', 'both']).optional().describe('Filter results by source. Supported values: native, script, both. Default is both.'),
                 kinds: z.array(z.string().min(1)).optional().describe('Filter results by kinds. Supported values: class, struct, enum, method, function, property, globalVariable. Case-insensitive; multiple values allowed.')
             }
         },
@@ -414,13 +435,14 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                     client,
                     {
                         labelQuery,
-                    searchIndex,
-                    maxBatchResults,
-                    includeDocs: args?.includeDocs,
-                    labelQueryUseRegex: args?.labelQueryUseRegex,
-                    signatureRegex: args?.signatureRegex,
-                    kinds: args?.kinds
-                },
+                        searchIndex,
+                        maxBatchResults,
+                        includeDocs: args?.includeDocs,
+                        labelQueryUseRegex: args?.labelQueryUseRegex,
+                        signatureRegex: args?.signatureRegex,
+                        source: args?.source as SearchSource | undefined,
+                        kinds: args?.kinds
+                    },
                     () => extra.signal.aborted
                 );
                 const payloadWithUris = attachResourceUris(payload);
@@ -559,6 +581,7 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
             const includeDocsParam = parseIncludeDocs(getSingleVariable(variables, 'includeDocs'));
             const labelQueryUseRegexParam = parseLabelQueryUseRegex(getSingleVariable(variables, 'labelQueryUseRegex'));
             const signatureRegex = decodeURIComponentSafe(getSingleVariable(variables, 'signatureRegex'))?.trim();
+            const source = parseSource(getSingleVariable(variables, 'source')) as SearchSource | undefined;
             const kinds = parseKinds(getMultiVariable(variables, 'kinds'));
             const includeDocs = includeDocsParam ?? false;
             const labelQueryUseRegex = labelQueryUseRegexParam ?? false;
@@ -614,6 +637,7 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                         includeDocs,
                         labelQueryUseRegex,
                         signatureRegex,
+                        source,
                         kinds
                     },
                     () => extra.signal?.aborted ?? false

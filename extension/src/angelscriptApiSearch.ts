@@ -7,11 +7,13 @@ export type AngelscriptSearchParams = {
     maxBatchResults?: number;
     includeDocs?: boolean;
     kinds?: string[];
+    source?: SearchSource;
     labelQueryUseRegex?: boolean;
     signatureRegex?: string;
 };
 
 export type SearchKind = 'class' | 'struct' | 'enum' | 'method' | 'function' | 'property' | 'globalvariable';
+export type SearchSource = 'native' | 'script' | 'both';
 
 export type ApiResultItem = {
     signature: string;
@@ -138,21 +140,48 @@ function normalizeKinds(rawKinds: unknown): Set<SearchKind>
     return kinds;
 }
 
-function getCacheKey(labelQuery: string, kinds: Set<SearchKind>): string
+function normalizeSource(rawSource: unknown): SearchSource
+{
+    if (rawSource === undefined || rawSource === null)
+    {
+        return 'both';
+    }
+    if (typeof rawSource !== 'string')
+    {
+        throw new ApiSearchError(
+            'INVALID_SOURCE',
+            'Invalid source value. Expected "native", "script", or "both".',
+            { receivedSource: rawSource }
+        );
+    }
+    const value = rawSource.trim().toLowerCase();
+    if (value === 'native' || value === 'script' || value === 'both')
+    {
+        return value as SearchSource;
+    }
+    throw new ApiSearchError(
+        'INVALID_SOURCE',
+        `Invalid source "${rawSource}". Expected "native", "script", or "both".`,
+        { receivedSource: rawSource }
+    );
+}
+
+function getCacheKey(labelQuery: string, kinds: Set<SearchKind>, source: SearchSource): string
 {
     const kindsKey = kinds.size > 0 ? Array.from(kinds.values()).sort().join(',') : '';
-    return `${labelQuery}|${kindsKey}`;
+    return `${labelQuery}|${kindsKey}|source=${source}`;
 }
 
 function getSignatureCacheKey(
     labelQuery: string,
     kinds: Set<SearchKind>,
+    source: SearchSource,
     labelQueryUseRegex: boolean,
     signatureRegex: string
 ): string
 {
     const kindsKey = kinds.size > 0 ? Array.from(kinds.values()).sort().join(',') : '';
-    return `${labelQuery}|${kindsKey}|labelQueryUseRegex=${labelQueryUseRegex ? '1' : '0'}|signatureRegex=${signatureRegex}`;
+    return `${labelQuery}|${kindsKey}|source=${source}|labelQueryUseRegex=${labelQueryUseRegex ? '1' : '0'}|signatureRegex=${signatureRegex}`;
 }
 
 function getCachedResults(cacheKey: string, now: number): ApiSearchResult[] | null
@@ -543,6 +572,7 @@ export async function buildSearchPayload(
     const searchIndex = Number(params.searchIndex);
     const maxBatchResults = resolveMaxBatchResults(params.maxBatchResults);
     const labelQueryUseRegex = params.labelQueryUseRegex === true;
+    const source = normalizeSource(params.source);
     const signatureRegexPattern = typeof params.signatureRegex === 'string'
         ? params.signatureRegex.trim()
         : '';
@@ -558,11 +588,14 @@ export async function buildSearchPayload(
 
     const now = Date.now();
     const kindFilter = normalizeKinds(params.kinds);
-    const cacheKey = getCacheKey(labelQuery, kindFilter);
+    const cacheKey = getCacheKey(labelQuery, kindFilter, source);
     let baseResults = getCachedResults(cacheKey, now);
     if (!baseResults)
     {
-        const results = await client.sendRequest(GetAPISearchRequest, labelQuery);
+        const results = await client.sendRequest(GetAPISearchRequest, {
+            filter: labelQuery,
+            source
+        });
         if (!Array.isArray(results) || results.length === 0)
         {
             ensureValidSearchIndex(searchIndex, 0);
@@ -599,6 +632,7 @@ export async function buildSearchPayload(
         const signatureCacheKey = getSignatureCacheKey(
             labelQuery,
             kindFilter,
+            source,
             labelQueryUseRegex,
             signatureRegexPattern
         );

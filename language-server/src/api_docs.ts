@@ -2,6 +2,30 @@ import * as scriptfiles from './as_parser';
 import * as typedb from './database';
 import * as documentation from './documentation';
 
+type ApiSearchSource = "native" | "script" | "both";
+
+function normalizeSearchSource(raw: unknown) : ApiSearchSource
+{
+    if (typeof raw !== "string")
+        return "both";
+    let value = raw.trim().toLowerCase();
+    if (value == "" || value == "both")
+        return "both";
+    if (value == "native")
+        return "native";
+    if (value == "script")
+        return "script";
+    return "both";
+}
+
+function matchesSearchSource(declaredModule: string | null | undefined, source: ApiSearchSource) : boolean
+{
+    if (source == "both")
+        return true;
+    let isScript = typeof declaredModule == "string" && declaredModule.length > 0;
+    return source == "script" ? isScript : !isScript;
+}
+
 export function GetAPIList(root: string): any
 {
     let list: any[] = [];
@@ -311,9 +335,10 @@ export function GetAPIDetailsBatch(dataList: any[]): any
     return dataList.map((data) => GetAPIDetails(data));
 }
 
-export function GetAPISearch(filter: string): any
+export function GetAPISearch(filter: string, source?: string): any
 {
     let list: any[] = [];
+    let sourceFilter = normalizeSearchSource(source);
     type SearchToken = {
         value: string;
         isSeparator: boolean;
@@ -541,30 +566,33 @@ export function GetAPISearch(filter: string): any
         {
             if (typeMatches && !type.isDelegate && !type.isEvent && !type.isPrimitive && !type.isTemplateInstantiation)
             {
-                let displayName = type.name;
-                if (type.isTemplateType() && type.templateSubTypes && type.templateSubTypes.length > 0)
-                    displayName = typedb.FormatTemplateTypename(type.name, type.templateSubTypes);
-
-                let typeNamespace = type.namespace && !type.namespace.isRootNamespace()
-                    ? type.namespace.getQualifiedNamespace()
-                    : "";
-
-                let typeKind = "class";
-                if (type.isEnum)
-                    typeKind = "enum";
-                else if (type.isStruct)
-                    typeKind = "struct";
-
-                let uniqueId = ["type", type.name, typeNamespace].join("|");
-                if (!seenIds.has(uniqueId))
+                if (matchesSearchSource(type.declaredModule, sourceFilter))
                 {
-                    seenIds.add(uniqueId);
-                    typeResults.push({
-                        "type": "type",
-                        "label": displayName,
-                        "id": uniqueId,
-                        "data": ["type", type.name, typeNamespace, typeKind],
-                    });
+                    let displayName = type.name;
+                    if (type.isTemplateType() && type.templateSubTypes && type.templateSubTypes.length > 0)
+                        displayName = typedb.FormatTemplateTypename(type.name, type.templateSubTypes);
+
+                    let typeNamespace = type.namespace && !type.namespace.isRootNamespace()
+                        ? type.namespace.getQualifiedNamespace()
+                        : "";
+
+                    let typeKind = "class";
+                    if (type.isEnum)
+                        typeKind = "enum";
+                    else if (type.isStruct)
+                        typeKind = "struct";
+
+                    let uniqueId = ["type", type.name, typeNamespace].join("|");
+                    if (!seenIds.has(uniqueId))
+                    {
+                        seenIds.add(uniqueId);
+                        typeResults.push({
+                            "type": "type",
+                            "label": displayName,
+                            "id": uniqueId,
+                            "data": ["type", type.name, typeNamespace, typeKind],
+                        });
+                    }
                 }
             }
         }
@@ -608,6 +636,8 @@ export function GetAPISearch(filter: string): any
         {
             if (symbol instanceof typedb.DBMethod)
             {
+                if (!matchesSearchSource(symbol.declaredModule, sourceFilter))
+                    return;
                 if (symbol.isConstructor && (!symbol.args || symbol.args.length == 0))
                     return;
                 if (symbol.isConstructor && symbol.args && symbol.args.length == 1)
@@ -704,6 +734,8 @@ export function GetAPISearch(filter: string): any
             }
             else if (symbol instanceof typedb.DBProperty)
             {
+                if (!matchesSearchSource(symbol.declaredModule, sourceFilter))
+                    return;
                 // Also check the full qualified name (prefix + symbol name)
                 let fullName = typePrefix + symbol.name;
                 if (typeMatches || canComplete(symbol.name) || canComplete(fullName))

@@ -1,4 +1,5 @@
 import { RequestType, RequestType0, TextDocumentPositionParams } from 'vscode-languageclient/node';
+import { SearchSource } from './angelscriptApiSearch';
 
 export const GetModuleForSymbolRequest = new RequestType<TextDocumentPositionParams, string, void>('angelscript/getModuleForSymbol');
 export const GetUnrealConnectionStatusRequest = new RequestType0<boolean, void>('angelscript/getUnrealConnectionStatus');
@@ -6,7 +7,11 @@ export const ProvideInlineValuesRequest = new RequestType<TextDocumentPositionPa
 export const GetAPIRequest = new RequestType<any, any[], void>('angelscript/getAPI');
 export const GetAPIDetailsRequest = new RequestType<any, string, void>('angelscript/getAPIDetails');
 export const GetAPIDetailsBatchRequest = new RequestType<any[], string[], void>('angelscript/getAPIDetailsBatch');
-export const GetAPISearchRequest = new RequestType<any, any[], void>('angelscript/getAPISearch');
+export type GetAPISearchParams = {
+    filter: string;
+    source?: SearchSource;
+};
+export const GetAPISearchRequest = new RequestType<GetAPISearchParams, any[], void>('angelscript/getAPISearch');
 export type ResolveSymbolAtPositionParams = {
     uri: string;
     position: {

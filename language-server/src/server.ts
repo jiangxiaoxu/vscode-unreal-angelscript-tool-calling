@@ -1084,13 +1084,31 @@ connection.onRequest("angelscript/getAPI", (root : string) : any => {
     return promise;
 });
 
-connection.onRequest("angelscript/getAPISearch", (filter : string) : any => {
+connection.onRequest("angelscript/getAPISearch", (payload : any) : any => {
+    if (!payload || typeof payload !== "object")
+        return new ResponseError<void>(0, "Invalid params. Provide { filter: string, source?: 'native' | 'script' | 'both' }.");
+
+    if (typeof payload.filter !== "string")
+        return new ResponseError<void>(0, "Invalid params. 'filter' must be a string.");
+
+    let filter = payload.filter;
+    let source: string | undefined = undefined;
+    if (payload.source !== undefined)
+    {
+        if (typeof payload.source !== "string")
+            return new ResponseError<void>(0, "Invalid params. 'source' must be a string.");
+        let normalizedSource = payload.source.trim().toLowerCase();
+        if (normalizedSource != "native" && normalizedSource != "script" && normalizedSource != "both")
+            return new ResponseError<void>(0, "Invalid params. 'source' must be 'native', 'script', or 'both'.");
+        source = normalizedSource;
+    }
+
     if (typedb.HasTypesFromUnreal())
-        return api_docs.GetAPISearch(filter);
+        return api_docs.GetAPISearch(filter, source);
 
     function timerFunc(resolve : any, reject : any, triesLeft : number) {
         if (typedb.HasTypesFromUnreal())
-            return resolve(api_docs.GetAPISearch(filter));
+            return resolve(api_docs.GetAPISearch(filter, source));
         setTimeout(function() { timerFunc(resolve, reject, triesLeft-1); }, 100);
     }
     let promise = new Promise<any>(function(resolve, reject)

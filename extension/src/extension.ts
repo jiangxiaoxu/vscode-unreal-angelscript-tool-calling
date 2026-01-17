@@ -276,6 +276,7 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
                     maxBatchResults: maxBatchResults,
                     includeDocs: options?.input?.includeDocs,
                     kinds: options?.input?.kinds,
+                    source: options?.input?.source,
                     labelQueryUseRegex: options?.input?.labelQueryUseRegex,
                     signatureRegex: options?.input?.signatureRegex
                 },
@@ -510,7 +511,10 @@ class ASApiTreeProvider implements vscode.TreeDataProvider<ASApiItem>
         if (element)
             request = this.client.sendRequest(GetAPIRequest, element.id);
         else if (this.search)
-            request = this.client.sendRequest(GetAPISearchRequest, this.search);
+            request = this.client.sendRequest(GetAPISearchRequest, {
+                filter: this.search,
+                source: "both"
+            });
         else
             request = this.client.sendRequest(GetAPIRequest, "");
 

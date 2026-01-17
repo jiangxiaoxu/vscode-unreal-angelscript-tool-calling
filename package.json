@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8013",
+    "version": "1.8.8014",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -42,7 +42,7 @@
                 ],
                 "toolReferenceName": "angelscript_searchApi",
                 "displayName": "Angelscript API Search",
-                "modelDescription": "Search Angelscript API symbols and docs. Spaces act as ordered wildcards; use 'a b' to match a...b. Use '|' to separate alternate queries (OR). Use '.' or '::' to require those separators; without a space before them they must be adjacent (e.g., 'UObject.' or 'Math::'), with a space they stay fuzzy (e.g., 'UObject .' or 'Math ::'). Optional kinds filter: class, struct, enum, method, function, property, globalVariable (case-insensitive, multiple allowed). Signature is always returned; includeDocs controls documentation payload. Paging uses searchIndex (required) and maxBatchResults (default 200). Set labelQueryUseRegex to true to apply a regex to labelQuery after kind filtering; supports /pattern/flags (omit i for case-sensitive). If not using /pattern/flags, default ignore case. Use signatureRegex to filter parsed signatures with a regex (also supports /pattern/flags).",
+                "modelDescription": "Search Angelscript API symbols and docs. Spaces act as ordered wildcards; use 'a b' to match a...b. Use '|' to separate alternate queries (OR). Use '.' or '::' to require those separators; without a space before them they must be adjacent (e.g., 'UObject.' or 'Math::'), with a space they stay fuzzy (e.g., 'UObject .' or 'Math ::'). Optional kinds filter: class, struct, enum, method, function, property, globalVariable (case-insensitive, multiple allowed). Optional source filter: native, script, both (default). Signature is always returned; includeDocs controls documentation payload. Paging uses searchIndex (required) and maxBatchResults (default 200). Set labelQueryUseRegex to true to apply a regex to labelQuery after kind filtering; supports /pattern/flags (omit i for case-sensitive). If not using /pattern/flags, default ignore case. Use signatureRegex to filter parsed signatures with a regex (also supports /pattern/flags).",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(search)",
                 "inputSchema": {
@@ -74,6 +74,15 @@
                         "signatureRegex": {
                             "type": "string",
                             "description": "Regular expression to filter parsed signatures. Supports /pattern/flags (omit i for case-sensitive). If not using /pattern/flags, default ignore case."
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": "Filter results by source. Supported values: native, script, both. Default is both.",
+                            "enum": [
+                                "native",
+                                "script",
+                                "both"
+                            ]
                         },
                         "kinds": {
                             "type": "array",
