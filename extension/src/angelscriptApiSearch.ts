@@ -2,11 +2,13 @@ import { LanguageClient } from 'vscode-languageclient/node';
 import { GetAPIDetailsBatchRequest, GetAPISearchRequest, GetUnrealConnectionStatusRequest } from './apiRequests';
 
 export type AngelscriptSearchParams = {
-    query: string;
+    labelQuery: string;
     searchIndex: number;
     maxBatchResults?: number;
     includeDocs?: boolean;
     kinds?: string[];
+    labelQueryUseRegex?: boolean;
+    signatureRegex?: string;
 };
 
 export type SearchKind = 'class' | 'struct' | 'enum' | 'method' | 'function' | 'property' | 'globalvariable';
@@ -19,7 +21,7 @@ export type ApiResultItem = {
 };
 
 export type ApiResponsePayload = {
-    query: string;
+    labelQuery: string;
     searchIndex: number;
     nextSearchIndex: number | null;
     remainingCount: number;
@@ -80,9 +82,20 @@ type CachedSearchEntry = {
     expiresAt: number;
 };
 
+type SignatureMatch = {
+    item: ApiSearchResult;
+    parsed: ParsedDetails;
+};
+
+type SignatureCacheEntry = {
+    results: SignatureMatch[];
+    expiresAt: number;
+};
+
 const CACHE_TTL_MS = 20000;
 const MAX_CACHE_ENTRIES = 50;
 const searchCache = new Map<string, CachedSearchEntry>();
+const signatureCache = new Map<string, SignatureCacheEntry>();
 
 const kindAliases: Record<string, SearchKind> = {
     class: 'class',
@@ -125,11 +138,21 @@ function normalizeKinds(rawKinds: unknown): Set<SearchKind>
     return kinds;
 }
 
-function getCacheKey(query: string, kinds: Set<SearchKind>): string
+function getCacheKey(labelQuery: string, kinds: Set<SearchKind>): string
 {
-    const normalizedQuery = query.toLowerCase();
     const kindsKey = kinds.size > 0 ? Array.from(kinds.values()).sort().join(',') : '';
-    return `${normalizedQuery}|${kindsKey}`;
+    return `${labelQuery}|${kindsKey}`;
+}
+
+function getSignatureCacheKey(
+    labelQuery: string,
+    kinds: Set<SearchKind>,
+    labelQueryUseRegex: boolean,
+    signatureRegex: string
+): string
+{
+    const kindsKey = kinds.size > 0 ? Array.from(kinds.values()).sort().join(',') : '';
+    return `${labelQuery}|${kindsKey}|labelQueryUseRegex=${labelQueryUseRegex ? '1' : '0'}|signatureRegex=${signatureRegex}`;
 }
 
 function getCachedResults(cacheKey: string, now: number): ApiSearchResult[] | null
@@ -162,6 +185,38 @@ function setCachedResults(cacheKey: string, results: ApiSearchResult[], now: num
         searchCache.delete(oldestKey);
     }
     searchCache.set(cacheKey, { results, expiresAt: now + CACHE_TTL_MS });
+}
+
+function getCachedSignatureMatches(cacheKey: string, now: number): SignatureMatch[] | null
+{
+    const entry = signatureCache.get(cacheKey);
+    if (!entry)
+    {
+        return null;
+    }
+    if (entry.expiresAt <= now)
+    {
+        signatureCache.delete(cacheKey);
+        return null;
+    }
+    entry.expiresAt = now + CACHE_TTL_MS;
+    signatureCache.delete(cacheKey);
+    signatureCache.set(cacheKey, entry);
+    return entry.results;
+}
+
+function setCachedSignatureMatches(cacheKey: string, results: SignatureMatch[], now: number): void
+{
+    while (signatureCache.size >= MAX_CACHE_ENTRIES)
+    {
+        const oldestKey = signatureCache.keys().next().value as string | undefined;
+        if (!oldestKey)
+        {
+            break;
+        }
+        signatureCache.delete(oldestKey);
+    }
+    signatureCache.set(cacheKey, { results, expiresAt: now + CACHE_TTL_MS });
 }
 
 function ensureValidSearchIndex(searchIndex: number, total: number): void
@@ -203,6 +258,64 @@ function resolveMaxBatchResults(rawValue: number | undefined): number
         );
     }
     return rawValue;
+}
+
+type ParsedRegex = {
+    pattern: string;
+    flags: string;
+    usesLiteralSyntax: boolean;
+};
+
+function parseRegexPattern(raw: string, defaultIgnoreCase: boolean): ParsedRegex
+{
+    if (raw.length >= 2 && raw.startsWith('/') && raw.lastIndexOf('/') > 0)
+    {
+        const lastSlash = raw.lastIndexOf('/');
+        const pattern = raw.slice(1, lastSlash);
+        const flags = raw.slice(lastSlash + 1);
+        return {
+            pattern,
+            flags,
+            usesLiteralSyntax: true
+        };
+    }
+
+    return {
+        pattern: raw,
+        flags: defaultIgnoreCase ? 'i' : '',
+        usesLiteralSyntax: false
+    };
+}
+
+function buildRegex(rawPattern: string, defaultIgnoreCase: boolean): RegExp
+{
+    try
+    {
+        const parsed = parseRegexPattern(rawPattern, defaultIgnoreCase);
+        if (parsed.usesLiteralSyntax && parsed.flags && !/^[gimsuy]+$/.test(parsed.flags))
+        {
+            throw new Error(`Invalid regex flags "${parsed.flags}".`);
+        }
+        return new RegExp(parsed.pattern, parsed.flags);
+    }
+    catch (error)
+    {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new ApiSearchError(
+            'INVALID_REGEX',
+            `Invalid regex pattern "${rawPattern}". ${message}`,
+            { pattern: rawPattern }
+        );
+    }
+}
+
+function regexTest(regex: RegExp, text: string): boolean
+{
+    if (regex.global || regex.sticky)
+    {
+        regex.lastIndex = 0;
+    }
+    return regex.test(text);
 }
 
 function getResultKind(result: ApiSearchResult): SearchKind | null
@@ -425,38 +538,36 @@ export async function buildSearchPayload(
     isCancelled: () => boolean
 ): Promise<ApiResponsePayload>
 {
-    const query = typeof params.query === 'string' ? params.query.trim() : '';
+    const labelQuery = typeof params.labelQuery === 'string' ? params.labelQuery.trim() : '';
     const includeDocs = params.includeDocs === true;
     const searchIndex = Number(params.searchIndex);
     const maxBatchResults = resolveMaxBatchResults(params.maxBatchResults);
+    const labelQueryUseRegex = params.labelQueryUseRegex === true;
+    const signatureRegexPattern = typeof params.signatureRegex === 'string'
+        ? params.signatureRegex.trim()
+        : '';
+    const hasSignatureRegex = signatureRegexPattern.length > 0;
 
-    if (!query)
+    if (!labelQuery)
     {
-        ensureValidSearchIndex(searchIndex, 0);
-        return {
-            query,
-            searchIndex,
-            nextSearchIndex: null,
-            remainingCount: 0,
-            total: 0,
-            returned: 0,
-            truncated: false,
-            items: []
-        };
+        throw new ApiSearchError(
+            'MISSING_LABEL_QUERY',
+            'Missing labelQuery. Please provide labelQuery.'
+        );
     }
 
     const now = Date.now();
     const kindFilter = normalizeKinds(params.kinds);
-    const cacheKey = getCacheKey(query, kindFilter);
-    let filteredResults = getCachedResults(cacheKey, now);
-    if (!filteredResults)
+    const cacheKey = getCacheKey(labelQuery, kindFilter);
+    let baseResults = getCachedResults(cacheKey, now);
+    if (!baseResults)
     {
-        const results = await client.sendRequest(GetAPISearchRequest, query);
+        const results = await client.sendRequest(GetAPISearchRequest, labelQuery);
         if (!Array.isArray(results) || results.length === 0)
         {
             ensureValidSearchIndex(searchIndex, 0);
             return {
-                query,
+                labelQuery,
                 searchIndex,
                 nextSearchIndex: null,
                 remainingCount: 0,
@@ -467,16 +578,149 @@ export async function buildSearchPayload(
             };
         }
 
-        const normalizedResults = sortByRelevance(normalizeSearchResults(results), query);
-        filteredResults = kindFilter.size === 0
+        const normalizedResults = sortByRelevance(normalizeSearchResults(results), labelQuery);
+        baseResults = kindFilter.size === 0
             ? normalizedResults
             : normalizedResults.filter((result) =>
             {
                 const kind = getResultKind(result);
                 return kind ? kindFilter.has(kind) : false;
             });
-        setCachedResults(cacheKey, filteredResults, now);
+        setCachedResults(cacheKey, baseResults, now);
     }
+    let filteredResults = baseResults;
+    if (labelQueryUseRegex)
+    {
+        const regex = buildRegex(labelQuery, true);
+        filteredResults = baseResults.filter((result) => regexTest(regex, result.label));
+    }
+    if (hasSignatureRegex)
+    {
+        const signatureCacheKey = getSignatureCacheKey(
+            labelQuery,
+            kindFilter,
+            labelQueryUseRegex,
+            signatureRegexPattern
+        );
+        const cachedSignatureMatches = getCachedSignatureMatches(signatureCacheKey, now);
+        if (cachedSignatureMatches)
+        {
+            ensureValidSearchIndex(searchIndex, cachedSignatureMatches.length);
+            const startIndex = searchIndex;
+            const endIndex = Math.min(startIndex + maxBatchResults, cachedSignatureMatches.length);
+            const pagedMatches = cachedSignatureMatches.slice(startIndex, endIndex);
+            const nextSearchIndex = endIndex < cachedSignatureMatches.length ? endIndex : null;
+            const remainingCount = nextSearchIndex === null
+                ? 0
+                : Math.max(0, cachedSignatureMatches.length - endIndex);
+            const payloadBase: ApiResponsePayload = {
+                labelQuery,
+                searchIndex,
+                nextSearchIndex,
+                remainingCount,
+                total: cachedSignatureMatches.length,
+                returned: pagedMatches.length,
+                truncated: endIndex < cachedSignatureMatches.length,
+                items: []
+            };
+
+            if (pagedMatches.length === 0)
+            {
+                return payloadBase;
+            }
+
+            payloadBase.items = pagedMatches.map((entry) => ({
+                signature: entry.parsed.signature,
+                docs: includeDocs ? entry.parsed.docs : undefined,
+                type: entry.item.type ?? undefined,
+                data: entry.item.data ?? undefined
+            }));
+            return payloadBase;
+        }
+
+        const regex = buildRegex(signatureRegexPattern, true);
+        if (filteredResults.length === 0)
+        {
+            ensureValidSearchIndex(searchIndex, 0);
+            return {
+                labelQuery,
+                searchIndex,
+                nextSearchIndex: null,
+                remainingCount: 0,
+                total: 0,
+                returned: 0,
+                truncated: false,
+                items: []
+            };
+        }
+
+        let detailsList: string[] = [];
+        try
+        {
+            const requestPayload = filteredResults.map((item) => item.data);
+            const response = await client.sendRequest(GetAPIDetailsBatchRequest, requestPayload);
+            if (Array.isArray(response))
+            {
+                detailsList = response as string[];
+            }
+        } catch
+        {
+            throw new ApiSearchError(
+                'DETAILS_UNAVAILABLE',
+                'Failed to fetch details for signatureRegex filtering.'
+            );
+        }
+
+        const signatureMatches: Array<{
+            item: ApiSearchResult;
+            parsed: ParsedDetails;
+        }> = [];
+
+        for (let index = 0; index < filteredResults.length; index += 1)
+        {
+            const resultItem = filteredResults[index];
+            const parsed = parseDetails(detailsList[index]);
+            const signature = parsed.signature || resultItem.label;
+            if (regexTest(regex, signature))
+            {
+                signatureMatches.push({ item: resultItem, parsed: { signature, docs: parsed.docs } });
+            }
+        }
+
+        setCachedSignatureMatches(signatureCacheKey, signatureMatches, now);
+        ensureValidSearchIndex(searchIndex, signatureMatches.length);
+        const startIndex = searchIndex;
+        const endIndex = Math.min(startIndex + maxBatchResults, signatureMatches.length);
+        const pagedMatches = signatureMatches.slice(startIndex, endIndex);
+        const nextSearchIndex = endIndex < signatureMatches.length ? endIndex : null;
+        const remainingCount = nextSearchIndex === null
+            ? 0
+            : Math.max(0, signatureMatches.length - endIndex);
+        const payloadBase: ApiResponsePayload = {
+            labelQuery,
+            searchIndex,
+            nextSearchIndex,
+            remainingCount,
+            total: signatureMatches.length,
+            returned: pagedMatches.length,
+            truncated: endIndex < signatureMatches.length,
+            items: []
+        };
+
+        if (pagedMatches.length === 0)
+        {
+            return payloadBase;
+        }
+
+        payloadBase.items = pagedMatches.map((entry) => ({
+            signature: entry.parsed.signature,
+            docs: includeDocs ? entry.parsed.docs : undefined,
+            type: entry.item.type ?? undefined,
+            data: entry.item.data ?? undefined
+        }));
+        return payloadBase;
+    }
+
     ensureValidSearchIndex(searchIndex, filteredResults.length);
     const startIndex = searchIndex;
     const endIndex = Math.min(startIndex + maxBatchResults, filteredResults.length);
@@ -486,7 +730,7 @@ export async function buildSearchPayload(
         ? 0
         : Math.max(0, filteredResults.length - endIndex);
     const payloadBase: ApiResponsePayload = {
-        query,
+        labelQuery,
         searchIndex,
         nextSearchIndex,
         remainingCount,

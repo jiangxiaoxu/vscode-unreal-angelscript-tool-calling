@@ -235,11 +235,17 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
     ): Promise<vscode.LanguageModelToolResult>
     {
         const searchIndex = Number(options?.input?.searchIndex);
-        const query = typeof options?.input?.query === "string" ? options.input.query.trim() : "";
-        if (!query)
+        const labelQuery = typeof options?.input?.labelQuery === "string" ? options.input.labelQuery.trim() : "";
+        if (!labelQuery)
         {
             return new vscode.LanguageModelToolResult([
-                new vscode.LanguageModelTextPart("No query provided. Please supply a search query.")
+                new vscode.LanguageModelTextPart(JSON.stringify({
+                    ok: false,
+                    error: {
+                        code: "MISSING_LABEL_QUERY",
+                        message: "Missing labelQuery. Please provide labelQuery."
+                    }
+                }, null, 2))
             ]);
         }
         const maxBatchResults = options?.input?.maxBatchResults;
@@ -252,18 +258,26 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
             {
                 return new vscode.LanguageModelToolResult([
                     new vscode.LanguageModelTextPart(
-                        "Unable to connect to the UE5 engine; the angelscript_searchApi tool is unavailable."
+                        JSON.stringify({
+                            ok: false,
+                            error: {
+                                code: "UE_UNAVAILABLE",
+                                message: "Unable to connect to the UE5 engine; the angelscript_searchApi tool is unavailable."
+                            }
+                        }, null, 2)
                     )
                 ]);
             }
             const payload = await buildSearchPayload(
                 this.client,
                 {
-                    query,
+                    labelQuery,
                     searchIndex,
                     maxBatchResults: maxBatchResults,
                     includeDocs: options?.input?.includeDocs,
-                    kinds: options?.input?.kinds
+                    kinds: options?.input?.kinds,
+                    labelQueryUseRegex: options?.input?.labelQueryUseRegex,
+                    signatureRegex: options?.input?.signatureRegex
                 },
                 () => token.isCancellationRequested
             );
@@ -271,7 +285,7 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
             if (payload.items.length === 0)
             {
                 return new vscode.LanguageModelToolResult([
-                    new vscode.LanguageModelTextPart(`No Angelscript API results for "${query}".`)
+                    new vscode.LanguageModelTextPart(`No Angelscript API results for "${labelQuery}".`)
                 ]);
             }
 
@@ -291,7 +305,13 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
             console.error("angelscript_searchApi tool failed:", error);
             return new vscode.LanguageModelToolResult([
                 new vscode.LanguageModelTextPart(
-                    "The Angelscript API tool failed to run. Please ensure the language server is running and try again."
+                    JSON.stringify({
+                        ok: false,
+                        error: {
+                            code: "INTERNAL_ERROR",
+                            message: "The Angelscript API tool failed to run. Please ensure the language server is running and try again."
+                        }
+                    }, null, 2)
                 )
             ]);
         }
