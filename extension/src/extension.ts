@@ -13,7 +13,7 @@ import * as vscode from 'vscode';
 import { WorkspaceFolder, DebugConfiguration, ProviderResult, CancellationToken } from 'vscode';
 import { ASDebugSession } from './debug';
 import * as Net from 'net';
-import { buildSearchPayload, AngelscriptSearchParams, isUnrealConnected } from './angelscriptApiSearch';
+import { buildSearchPayload, AngelscriptSearchParams, isUnrealConnected, toApiErrorPayload } from './angelscriptApiSearch';
 import {
     GetAPIRequest,
     GetAPIDetailsRequest,
@@ -234,6 +234,7 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
         token: CancellationToken
     ): Promise<vscode.LanguageModelToolResult>
     {
+        const searchIndex = Number(options?.input?.searchIndex);
         const query = typeof options?.input?.query === "string" ? options.input.query.trim() : "";
         if (!query)
         {
@@ -241,6 +242,7 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
                 new vscode.LanguageModelTextPart("No query provided. Please supply a search query.")
             ]);
         }
+        const maxBatchResults = options?.input?.maxBatchResults;
 
         try
         {
@@ -258,8 +260,10 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
                 this.client,
                 {
                     query,
-                    maxResults: options?.input?.maxResults,
-                    includeDetails: options?.input?.includeDetails
+                    searchIndex,
+                    maxBatchResults: maxBatchResults,
+                    includeDocs: options?.input?.includeDocs,
+                    kinds: options?.input?.kinds
                 },
                 () => token.isCancellationRequested
             );
@@ -277,6 +281,13 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
         }
         catch (error)
         {
+            const apiError = toApiErrorPayload(error);
+            if (apiError)
+            {
+                return new vscode.LanguageModelToolResult([
+                    new vscode.LanguageModelTextPart(JSON.stringify(apiError, null, 2))
+                ]);
+            }
             console.error("angelscript_searchApi tool failed:", error);
             return new vscode.LanguageModelToolResult([
                 new vscode.LanguageModelTextPart(

@@ -5,6 +5,7 @@ export const GetUnrealConnectionStatusRequest = new RequestType0<boolean, void>(
 export const ProvideInlineValuesRequest = new RequestType<TextDocumentPositionParams, any[], void>('angelscript/provideInlineValues');
 export const GetAPIRequest = new RequestType<any, any[], void>('angelscript/getAPI');
 export const GetAPIDetailsRequest = new RequestType<any, string, void>('angelscript/getAPIDetails');
+export const GetAPIDetailsBatchRequest = new RequestType<any[], string[], void>('angelscript/getAPIDetailsBatch');
 export const GetAPISearchRequest = new RequestType<any, any[], void>('angelscript/getAPISearch');
 export type ResolveSymbolAtPositionParams = {
     uri: string;

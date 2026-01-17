@@ -13,7 +13,8 @@ import
     ApiResponsePayload,
     ApiResultItem,
     buildSearchPayload,
-    isUnrealConnected
+    isUnrealConnected,
+    toApiErrorPayload
 } from './angelscriptApiSearch';
 import { GetAPIDetailsRequest, ResolveSymbolAtPositionRequest } from './apiRequests';
 
@@ -32,7 +33,7 @@ type McpHttpServerState = {
 
 const SERVER_ID = 'angelscript-api-mcp';
 const RESOURCE_BASE = `mcp://${SERVER_ID}/`;
-const SEARCH_RESOURCE_TEMPLATE = `${RESOURCE_BASE}search{?query,maxResults,includeDetails}`;
+const SEARCH_RESOURCE_TEMPLATE = `${RESOURCE_BASE}search{?query,searchIndex,maxBatchResults,includeDocs,kinds}`;
 const SYMBOL_RESOURCE_TEMPLATE = `${RESOURCE_BASE}symbol/{id}`;
 const HEALTH_TIMEOUT_MS = 400;
 const POLL_INTERVAL_OK_MS = 3000;
@@ -55,6 +56,20 @@ function getSingleVariable(variables: TemplateVariables, key: string): string | 
     return undefined;
 }
 
+function getMultiVariable(variables: TemplateVariables, key: string): string[]
+{
+    const raw = variables[key];
+    if (Array.isArray(raw))
+    {
+        return raw;
+    }
+    if (typeof raw === 'string')
+    {
+        return [raw];
+    }
+    return [];
+}
+
 function decodeURIComponentSafe(value: string | undefined): string | undefined
 {
     if (typeof value !== 'string')
@@ -70,21 +85,35 @@ function decodeURIComponentSafe(value: string | undefined): string | undefined
     }
 }
 
-function parseMaxResults(raw: string | undefined): number | undefined
+function parseSearchIndex(raw: string | undefined): number
 {
-    if (!raw)
+    if (raw === undefined)
     {
-        return undefined;
+        return Number.NaN;
     }
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed < 1 || !Number.isInteger(parsed))
+    const trimmed = raw.trim();
+    if (trimmed.length === 0)
     {
-        return undefined;
+        return Number.NaN;
     }
-    return parsed;
+    return Number(trimmed);
 }
 
-function parseIncludeDetails(raw: string | undefined): boolean | undefined
+function parseMaxBatchResults(raw: string | undefined): number | undefined
+{
+    if (raw === undefined)
+    {
+        return undefined;
+    }
+    const trimmed = raw.trim();
+    if (trimmed.length === 0)
+    {
+        return Number.NaN;
+    }
+    return Number(trimmed);
+}
+
+function parseIncludeDocs(raw: string | undefined): boolean | undefined
 {
     if (raw === undefined)
     {
@@ -104,6 +133,32 @@ function parseIncludeDetails(raw: string | undefined): boolean | undefined
         return false;
     }
     return undefined;
+}
+
+function parseKinds(rawValues: string[]): string[] | undefined
+{
+    if (rawValues.length === 0)
+    {
+        return undefined;
+    }
+    const parsed: string[] = [];
+    for (const value of rawValues)
+    {
+        const decoded = decodeURIComponentSafe(value);
+        if (!decoded)
+        {
+            continue;
+        }
+        for (const part of decoded.split(','))
+        {
+            const trimmed = part.trim();
+            if (trimmed.length > 0)
+            {
+                parsed.push(trimmed);
+            }
+        }
+    }
+    return parsed.length > 0 ? parsed : undefined;
 }
 
 function encodeSymbolId(data: unknown): string | undefined
@@ -278,15 +333,18 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
     server.registerTool(
         'angelscript_searchApi',
         {
-            description: 'Search Angelscript API symbols and docs. Spaces act as ordered wildcards; use "a b" to match a...b. Use "|" to separate alternate queries (OR). Use "." or "::" to require those separators; without a space they must be adjacent (e.g., "UObject." or "Math::"), with a space they stay fuzzy (e.g., "UObject ." or "Math ::"). Defaults: maxResults=1000, includeDetails=true.',
+            description: 'Search Angelscript API symbols and docs. Spaces act as ordered wildcards; use "a b" to match a...b. Use "|" to separate alternate queries (OR). Use "." or "::" to require those separators; without a space they must be adjacent (e.g., "UObject." or "Math::"), with a space they stay fuzzy (e.g., "UObject ." or "Math ::"). Optional kinds filter: class, struct, enum, method, function, property, globalVariable (case-insensitive, multiple allowed). Signature is always returned; includeDocs controls documentation payload. Paging uses searchIndex (required) and maxBatchResults (default 200).',
             inputSchema: {
                 query: z.string().describe('Search query text for Angelscript API symbols.'),
-                maxResults: z.number().min(1000).optional().describe('Maximum number of results. Minimum is 1000. Default is 1000. Do NOT pass this parameter unless you need a specific value. Never pass values below 1000.'),
-                includeDetails: z.boolean().optional().describe('Include documentation details for top matches. Default is true. Do NOT pass this parameter unless you specifically need to exclude documentation. Omit to use the default.')
+                searchIndex: z.number().int().describe('0-based start index for paged results.'),
+                maxBatchResults: z.number().int().optional().describe('Maximum number of results to return in this batch. Default is 200.'),
+                includeDocs: z.boolean().optional().describe('Include documentation text in the docs field. Default is false.'),
+                kinds: z.array(z.string().min(1)).optional().describe('Filter results by kinds. Supported values: class, struct, enum, method, function, property, globalVariable. Case-insensitive; multiple values allowed.')
             }
         },
         async (args, extra) =>
         {
+            const searchIndex = Number(args?.searchIndex);
             const query = typeof args?.query === 'string' ? args.query.trim() : '';
             if (!query)
             {
@@ -299,6 +357,7 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                     ]
                 };
             }
+            const maxBatchResults = args?.maxBatchResults;
 
             try
             {
@@ -319,9 +378,11 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                     client,
                     {
                         query,
-                        maxResults: args?.maxResults,
-                        includeDetails: args?.includeDetails
-                    },
+                    searchIndex,
+                    maxBatchResults,
+                    includeDocs: args?.includeDocs,
+                    kinds: args?.kinds
+                },
                     () => extra.signal.aborted
                 );
                 const payloadWithUris = attachResourceUris(payload);
@@ -346,8 +407,20 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                         }
                     ]
                 };
-            } catch
+            } catch (error)
             {
+                const apiError = toApiErrorPayload(error);
+                if (apiError)
+                {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify(apiError, null, 2)
+                            }
+                        ]
+                    };
+                }
                 return {
                     content: [
                         {
@@ -437,31 +510,13 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
         },
         async (uri, variables, extra) =>
         {
-            const query = decodeURIComponentSafe(getSingleVariable(variables, 'query'))?.trim() ?? '';
-            const maxResults = parseMaxResults(getSingleVariable(variables, 'maxResults'));
-            const includeDetailsParam = parseIncludeDetails(getSingleVariable(variables, 'includeDetails'));
-            // Default to true when unspecified to match buildSearchPayload behavior (includeDetails !== false).
-            const includeDetails = includeDetailsParam ?? true;
+            const searchIndex = parseSearchIndex(getSingleVariable(variables, 'searchIndex'));
+            const maxBatchResults = parseMaxBatchResults(getSingleVariable(variables, 'maxBatchResults'));
+            const includeDocsParam = parseIncludeDocs(getSingleVariable(variables, 'includeDocs'));
+            const kinds = parseKinds(getMultiVariable(variables, 'kinds'));
+            const includeDocs = includeDocsParam ?? false;
 
-            if (!query)
-            {
-                const emptyPayload: ApiResponsePayload = {
-                    query,
-                    total: 0,
-                    returned: 0,
-                    truncated: false,
-                    items: []
-                };
-                return {
-                    contents: [
-                        {
-                            uri: uri.toString(),
-                            mimeType: 'application/json',
-                            text: JSON.stringify(emptyPayload, null, 2)
-                        }
-                    ]
-                };
-            }
+            const query = decodeURIComponentSafe(getSingleVariable(variables, 'query'))?.trim() ?? '';
 
             try
             {
@@ -483,8 +538,10 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                     client,
                     {
                         query,
-                        maxResults,
-                        includeDetails
+                        searchIndex,
+                        maxBatchResults,
+                        includeDocs,
+                        kinds
                     },
                     () => extra.signal?.aborted ?? false
                 );
@@ -499,8 +556,21 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
                         }
                     ]
                 };
-            } catch
+            } catch (error)
             {
+                const apiError = toApiErrorPayload(error);
+                if (apiError)
+                {
+                    return {
+                        contents: [
+                            {
+                                uri: uri.toString(),
+                                mimeType: 'application/json',
+                                text: JSON.stringify(apiError, null, 2)
+                            }
+                        ]
+                    };
+                }
                 return {
                     contents: [
                         {

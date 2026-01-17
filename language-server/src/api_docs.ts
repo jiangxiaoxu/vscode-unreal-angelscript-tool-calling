@@ -303,6 +303,14 @@ export function GetAPIDetails(data: any): any
     return "";
 }
 
+export function GetAPIDetailsBatch(dataList: any[]): any
+{
+    if (!Array.isArray(dataList) || dataList.length == 0)
+        return [];
+
+    return dataList.map((data) => GetAPIDetails(data));
+}
+
 export function GetAPISearch(filter: string): any
 {
     let list: any[] = [];

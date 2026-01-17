@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8011",
+    "version": "1.8.8012",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -42,7 +42,7 @@
                 ],
                 "toolReferenceName": "angelscript_searchApi",
                 "displayName": "Angelscript API Search",
-                "modelDescription": "Search Angelscript API symbols and docs. Spaces act as ordered wildcards; use 'a b' to match a...b. Use '|' to separate alternate queries (OR). Use '.' or '::' to require those separators; without a space before them they must be adjacent (e.g., 'UObject.' or 'Math::'), with a space they stay fuzzy (e.g., 'UObject .' or 'Math ::'). Defaults: maxResults=1000, includeDetails=true.",
+                "modelDescription": "Search Angelscript API symbols and docs. Spaces act as ordered wildcards; use 'a b' to match a...b. Use '|' to separate alternate queries (OR). Use '.' or '::' to require those separators; without a space before them they must be adjacent (e.g., 'UObject.' or 'Math::'), with a space they stay fuzzy (e.g., 'UObject .' or 'Math ::'). Optional kinds filter: class, struct, enum, method, function, property, globalVariable (case-insensitive, multiple allowed). Signature is always returned; includeDocs controls documentation payload. Paging uses searchIndex (required) and maxBatchResults (default 200).",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(search)",
                 "inputSchema": {
@@ -52,20 +52,40 @@
                             "type": "string",
                             "description": "Search query text for Angelscript API symbols."
                         },
-                        "maxResults": {
+                        "searchIndex": {
                             "type": "number",
-                            "description": "Maximum number of results. Minimum is 1000. Default is 1000. Do NOT pass this parameter unless you need a specific value. Never pass values below 1000.",
-                            "default": 1000,
-                            "minimum": 1000
+                            "description": "0-based start index for paged results."
                         },
-                        "includeDetails": {
+                        "maxBatchResults": {
+                            "type": "number",
+                            "description": "Maximum number of results to return in this batch. Default is 200.",
+                            "default": 200
+                        },
+                        "includeDocs": {
                             "type": "boolean",
-                            "description": "Include documentation details for top matches. Default is true. Do NOT pass this parameter unless you specifically need to exclude documentation. Omit to use the default.",
-                            "default": true
+                            "description": "Include documentation text in the docs field. Default is false.",
+                            "default": false
+                        },
+                        "kinds": {
+                            "type": "array",
+                            "description": "Filter results by kinds. Supported values: class, struct, enum, method, function, property, globalVariable. Case-insensitive; multiple values allowed.",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "class",
+                                    "struct",
+                                    "enum",
+                                    "method",
+                                    "function",
+                                    "property",
+                                    "globalVariable"
+                                ]
+                            }
                         }
                     },
                     "required": [
-                        "query"
+                        "query",
+                        "searchIndex"
                     ]
                 }
             },
