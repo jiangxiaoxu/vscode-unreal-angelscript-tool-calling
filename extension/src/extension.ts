@@ -13,7 +13,7 @@ import * as vscode from 'vscode';
 import { WorkspaceFolder, DebugConfiguration, ProviderResult, CancellationToken } from 'vscode';
 import { ASDebugSession } from './debug';
 import * as Net from 'net';
-import { buildSearchPayload, AngelscriptSearchParams, SearchSource, isUnrealConnected, toApiErrorPayload } from './angelscriptApiSearch';
+import { buildSearchPayload, AngelscriptSearchParams, SearchSource, toApiErrorPayload } from './angelscriptApiSearch';
 import {
     GetAPIRequest,
     GetAPIDetailsRequest,
@@ -328,21 +328,6 @@ class AngelscriptSearchApiTool implements vscode.LanguageModelTool<AngelscriptSe
         try
         {
             await this.startedClient;
-            const isConnected = await isUnrealConnected(this.client);
-            if (!isConnected)
-            {
-                return new vscode.LanguageModelToolResult([
-                    new vscode.LanguageModelTextPart(
-                        JSON.stringify({
-                            ok: false,
-                            error: {
-                                code: "UE_UNAVAILABLE",
-                                message: "Unable to connect to the UE5 engine; the angelscript_searchApi tool is unavailable."
-                            }
-                        }, null, 2)
-                    )
-                ]);
-            }
             const payload = await buildSearchPayload(
                 this.client,
                 {
@@ -546,22 +531,6 @@ class AngelscriptGetTypeMembersTool implements vscode.LanguageModelTool<GetTypeM
         try
         {
             await this.startedClient;
-            const isConnected = await isUnrealConnected(this.client);
-            if (!isConnected)
-            {
-                return new vscode.LanguageModelToolResult([
-                    new vscode.LanguageModelTextPart(
-                        JSON.stringify({
-                            ok: false,
-                            error: {
-                                code: "UE_UNAVAILABLE",
-                                message: "Unable to connect to the UE5 engine; the angelscript_getTypeMembers tool is unavailable."
-                            }
-                        }, null, 2)
-                    )
-                ]);
-            }
-
             const result = await this.client.sendRequest<GetTypeMembersResult>(
                 GetTypeMembersRequest.method,
                 {

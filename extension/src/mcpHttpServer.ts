@@ -14,7 +14,6 @@ import
     ApiResultItem,
     SearchSource,
     buildSearchPayload,
-    isUnrealConnected,
     toApiErrorPayload
 } from './angelscriptApiSearch';
 import { GetAPIDetailsRequest, GetTypeMembersRequest, GetTypeMembersResult, ResolveSymbolAtPositionRequest } from './apiRequests';
@@ -256,13 +255,12 @@ let isPolling = false;
 function getMcpPort(): number
 {
     const config = vscode.workspace.getConfiguration('UnrealAngelscript');
-    const explicitPort = config.get<number>('mcp.port', 0);
+    const explicitPort = config.get<number>('mcp.port', 27199);
     if (typeof explicitPort === 'number' && explicitPort > 0)
     {
         return explicitPort;
     }
-    const unrealPort = config.get<number>('unrealConnectionPort', 27099);
-    return (typeof unrealPort === 'number' ? unrealPort : 27099) + 100;
+    return 27199;
 }
 
 function isMcpEnabled(): boolean
@@ -413,24 +411,6 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
             try
             {
                 await startedClient;
-                const isConnected = await isUnrealConnected(client);
-                if (!isConnected)
-                {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: JSON.stringify({
-                                    ok: false,
-                                    error: {
-                                        code: 'UE_UNAVAILABLE',
-                                        message: 'Unable to connect to the UE5 engine; the angelscript_searchApi tool is unavailable.'
-                                    }
-                                }, null, 2)
-                            }
-                        ]
-                    };
-                }
                 const payload = await buildSearchPayload(
                     client,
                     {
@@ -637,24 +617,6 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
             try
             {
                 await startedClient;
-                const isConnected = await isUnrealConnected(client);
-                if (!isConnected)
-                {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: JSON.stringify({
-                                    ok: false,
-                                    error: {
-                                        code: 'UE_UNAVAILABLE',
-                                        message: 'Unable to connect to the UE5 engine; the angelscript_getTypeMembers tool is unavailable.'
-                                    }
-                                }, null, 2)
-                            }
-                        ]
-                    };
-                }
                 const result = await client.sendRequest<GetTypeMembersResult>(
                     GetTypeMembersRequest.method,
                     {
@@ -737,25 +699,6 @@ function createMcpServer(client: LanguageClient, startedClient: Promise<void>): 
             try
             {
                 await startedClient;
-                const isConnected = await isUnrealConnected(client);
-                if (!isConnected)
-                {
-                    return {
-                        contents: [
-                            {
-                                uri: uri.toString(),
-                                mimeType: 'application/json',
-                                text: JSON.stringify({
-                                    ok: false,
-                                    error: {
-                                        code: 'UE_UNAVAILABLE',
-                                        message: 'Unable to connect to the UE5 engine; the angelscript_searchApi tool is unavailable.'
-                                    }
-                                }, null, 2)
-                            }
-                        ]
-                    };
-                }
                 const payload = await buildSearchPayload(
                     client,
                     {

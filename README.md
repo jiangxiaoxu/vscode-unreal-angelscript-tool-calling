@@ -44,7 +44,7 @@
 ```json
 {
   "UnrealAngelscript.mcp.enabled": true,
-  "UnrealAngelscript.mcp.port": 0,
+  "UnrealAngelscript.mcp.port": 27199,
   "UnrealAngelscript.mcp.maxStartupFailures": 5
 }
 ```

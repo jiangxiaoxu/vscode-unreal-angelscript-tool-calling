@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8024",
+    "version": "1.8.8025",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -645,8 +645,8 @@
                 },
                 "UnrealAngelscript.mcp.port": {
                     "type": "number",
-                    "default": 0,
-                    "description": "Port for the MCP server. 0 uses Unreal connection port + 100."
+                    "default": 27199,
+                    "description": "Port for the MCP server."
                 },
                 "UnrealAngelscript.mcp.maxStartupFailures": {
                     "type": "number",
