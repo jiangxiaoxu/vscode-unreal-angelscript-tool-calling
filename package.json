@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8026",
+    "version": "1.8.8027",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -16,7 +16,8 @@
         "onDebug",
         "onLanguageModelTool:angelscript_searchApi",
         "onLanguageModelTool:angelscript_resolveSymbolAtPosition",
-        "onLanguageModelTool:angelscript_getTypeMembers"
+        "onLanguageModelTool:angelscript_getTypeMembers",
+        "onLanguageModelTool:angelscript_getClassHierarchy"
     ],
     "repository": {
         "type": "git",
@@ -204,6 +205,42 @@
                     "required": [
                         "uri",
                         "position"
+                    ]
+                }
+            },
+            {
+                "name": "angelscript_getClassHierarchy",
+                "tags": [
+                    "angelscript",
+                    "class",
+                    "hierarchy"
+                ],
+                "toolReferenceName": "angelscript_getClassHierarchy",
+                "displayName": "Angelscript Class Hierarchy",
+                "modelDescription": "Get a class inheritance chain and derived edges map. Requires an exact class name (e.g., \"APawn\"). Nodes include cppClasses/asClasses arrays. Supertypes include Unreal hierarchy when available. Returns JSON: { ok:true, inheritanceChain:[...], derived:{ root, edges }, nodes:{ cppClasses, asClasses }, limits:{ maxSuperDepth, maxSubDepth }, truncated:{ inheritanceChain, derived } } or { ok:false, error:{ code, message } }.",
+                "userDescription": "Get class inheritance chain and derived edges map.",
+                "canBeReferencedInPrompt": true,
+                "icon": "$(symbol-class)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Exact class name to inspect (e.g., \"APawn\")."
+                        },
+                        "maxSuperDepth": {
+                            "type": "number",
+                            "description": "Optional. Maximum number of supertypes to return. Non-negative integer. Default is 5.",
+                            "default": 5
+                        },
+                        "maxSubDepth": {
+                            "type": "number",
+                            "description": "Optional. Maximum depth for subtype tree. Non-negative integer. Default is 8.",
+                            "default": 8
+                        }
+                    },
+                    "required": [
+                        "name"
                     ]
                 }
             }

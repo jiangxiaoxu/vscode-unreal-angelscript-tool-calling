@@ -3,10 +3,11 @@ import * as z from 'zod';
 import type { ZodType } from 'zod/v4/classic/schemas';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { AngelscriptSearchParams } from './angelscriptApiSearch';
-import { GetTypeMembersParams, ResolveSymbolAtPositionParams } from './apiRequests';
+import { GetTypeHierarchyParams, GetTypeMembersParams, ResolveSymbolAtPositionParams } from './apiRequests';
 import {
     formatSearchPayloadForOutput,
     isErrorPayload,
+    runGetTypeHierarchy,
     runGetTypeMembers,
     runResolveSymbolAtPosition,
     runSearchApi
@@ -71,6 +72,18 @@ function prepareTypeMembersInvocation(input: GetTypeMembersParams | null | undef
     return `Get Angelscript type members ${label} (${details.join(", ")})`;
 }
 
+function prepareTypeHierarchyInvocation(input: GetTypeHierarchyParams | null | undefined): string
+{
+    const name = typeof input?.name === "string" ? input.name.trim() : "";
+    const maxSuperDepth = typeof input?.maxSuperDepth === "number" ? input.maxSuperDepth : 5;
+    const maxSubDepth = typeof input?.maxSubDepth === "number" ? input.maxSubDepth : 8;
+    const details: string[] = [];
+    details.push(`maxSuperDepth=${maxSuperDepth}`);
+    details.push(`maxSubDepth=${maxSubDepth}`);
+    const label = name ? `"${name}"` : "<empty>";
+    return `Get Angelscript type hierarchy ${label} (${details.join(", ")})`;
+}
+
 const toolDefinitions: Array<ToolDefinition<any>> = [
     {
         name: 'angelscript_searchApi',
@@ -130,6 +143,20 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
         run: async (context, input: GetTypeMembersParams | null | undefined) =>
         {
             return await runGetTypeMembers(context.client, context.startedClient, input);
+        }
+    },
+    {
+        name: 'angelscript_getClassHierarchy',
+        description: 'Get a class inheritance chain and derived edges map. Requires an exact class name (e.g., "APawn"). Nodes include cppClasses/asClasses arrays. Supertypes include Unreal hierarchy when available.',
+        inputSchema: z.object({
+            name: z.string().describe('Exact class name to inspect (e.g., "APawn").'),
+            maxSuperDepth: z.number().int().optional().describe('Maximum number of supertypes to return. Non-negative integer. Default is 5.'),
+            maxSubDepth: z.number().int().optional().describe('Maximum depth for subtype tree. Non-negative integer. Default is 8.')
+        }),
+        prepareInvocation: prepareTypeHierarchyInvocation,
+        run: async (context, input: GetTypeHierarchyParams | null | undefined) =>
+        {
+            return await runGetTypeHierarchy(context.client, context.startedClient, input);
         }
     }
 ];

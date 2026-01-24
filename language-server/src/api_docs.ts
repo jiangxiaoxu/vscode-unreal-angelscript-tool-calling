@@ -45,6 +45,39 @@ type TypeMembersResult = {
     };
 };
 
+type TypeHierarchyParams = {
+    name: string;
+    maxSuperDepth?: number;
+    maxSubDepth?: number;
+};
+
+type TypeHierarchyResult = {
+    ok: true;
+    inheritanceChain: string[];
+    derived: {
+        root: string;
+        edges: Record<string, string[]>;
+    };
+    nodes: {
+        cppClasses: string[];
+        asClasses: string[];
+    };
+    limits: {
+        maxSuperDepth: number;
+        maxSubDepth: number;
+    };
+    truncated: {
+        inheritanceChain: boolean;
+        derived: boolean;
+    };
+} | {
+    ok: false;
+    error: {
+        code: "NotFound" | "InvalidParams";
+        message: string;
+    };
+};
+
 function normalizeSearchSource(raw: unknown) : ApiSearchSource
 {
     if (typeof raw !== "string")
@@ -129,6 +162,116 @@ function resolveTypeByName(rawName: unknown, rawNamespace: unknown) : typedb.DBT
     if (!dbType && namespace)
         dbType = typedb.GetTypeByName(name);
     return dbType;
+}
+
+function isClassType(dbType: typedb.DBType) : boolean
+{
+    if (!dbType)
+        return false;
+    return !dbType.isPrimitive && !dbType.isEnum && !dbType.isStruct && !dbType.isDelegate && !dbType.isEvent;
+}
+
+function buildTypeHierarchyEntry(dbType: typedb.DBType) : "cpp" | "as"
+{
+    return dbType.isUnrealType() ? "cpp" : "as";
+}
+
+function resolveHierarchySuperType(dbType: typedb.DBType) : typedb.DBType | null
+{
+    if (!dbType)
+        return null;
+    if (dbType.supertype)
+    {
+        let superType = typedb.LookupType(dbType.namespace, dbType.supertype) ?? typedb.GetTypeByName(dbType.supertype);
+        if (isClassType(superType))
+            return superType;
+    }
+    if (dbType.unrealsuper)
+    {
+        let unrealSuper = typedb.LookupType(dbType.namespace, dbType.unrealsuper) ?? typedb.GetTypeByName(dbType.unrealsuper);
+        if (isClassType(unrealSuper))
+            return unrealSuper;
+    }
+    return null;
+}
+
+function buildSubtypeIndex() : Map<string, Array<typedb.DBType>>
+{
+    let index = new Map<string, Array<typedb.DBType>>();
+    for (let [_, checkType] of typedb.GetAllTypesById())
+    {
+        if (!isClassType(checkType))
+            continue;
+        let parents: Array<string> = [];
+        if (checkType.supertype)
+            parents.push(checkType.supertype);
+        if (checkType.unrealsuper && checkType.unrealsuper != checkType.supertype)
+            parents.push(checkType.unrealsuper);
+
+        for (let parentName of parents)
+        {
+            let parentType = typedb.LookupType(checkType.namespace, parentName) ?? typedb.GetTypeByName(parentName);
+            if (parentType && !isClassType(parentType))
+                continue;
+            let bucket = index.get(parentName);
+            if (!bucket)
+            {
+                bucket = [];
+                index.set(parentName, bucket);
+            }
+            if (!bucket.includes(checkType))
+                bucket.push(checkType);
+        }
+    }
+    return index;
+}
+
+function buildDerivedEdges(
+    dbType: typedb.DBType,
+    maxDepth: number,
+    index: Map<string, Array<typedb.DBType>>,
+    visited: Set<typedb.DBType>,
+    cppClasses: Set<string>,
+    asClasses: Set<string>
+) : { edges: Record<string, string[]>; truncated: boolean }
+{
+    let edges: Record<string, string[]> = {};
+    let children = index.get(dbType.name) ?? [];
+    if (maxDepth <= 0)
+    {
+        return {
+            edges,
+            truncated: children.length > 0,
+        };
+    }
+
+    let truncated = false;
+    for (let child of children)
+    {
+        if (visited.has(child))
+            continue;
+        visited.add(child);
+        let childType = buildTypeHierarchyEntry(child);
+        if (childType == "cpp")
+            cppClasses.add(child.name);
+        else
+            asClasses.add(child.name);
+        if (!edges[dbType.name])
+            edges[dbType.name] = [];
+        edges[dbType.name].push(child.name);
+        let childResult = buildDerivedEdges(child, maxDepth - 1, index, visited, cppClasses, asClasses);
+        for (let key in childResult.edges)
+        {
+            edges[key] = childResult.edges[key];
+        }
+        if (childResult.truncated)
+            truncated = true;
+    }
+
+    return {
+        edges,
+        truncated,
+    };
 }
 
 function getTypeVisibility(isPrivate: boolean, isProtected: boolean) : TypeMemberVisibility
@@ -775,6 +918,103 @@ export function GetTypeMembers(params: TypeMembersParams) : TypeMembersResult
             qualifiedName: qualifiedName,
         },
         members: members,
+    };
+}
+
+export function GetTypeHierarchy(params: TypeHierarchyParams) : TypeHierarchyResult
+{
+    if (!params || typeof params !== "object")
+        return { ok: false, error: { code: "InvalidParams", message: "Invalid params. Provide { name: string, maxSuperDepth?: number, maxSubDepth?: number }." } };
+
+    let name = typeof params.name === "string" ? params.name.trim() : "";
+    if (name.length == 0)
+        return { ok: false, error: { code: "InvalidParams", message: "Invalid params. 'name' must be a non-empty string." } };
+
+    let dbType = resolveTypeByName(name, undefined);
+    if (!dbType)
+        return { ok: false, error: { code: "NotFound", message: "Type not found." } };
+    if (!isClassType(dbType))
+        return { ok: false, error: { code: "InvalidParams", message: `Type "${name}" is not a class. Provide a class name such as "APawn".` } };
+
+    let maxSuperDepth = 5;
+    if (params.maxSuperDepth !== undefined)
+    {
+        if (typeof params.maxSuperDepth !== "number" || !Number.isInteger(params.maxSuperDepth) || params.maxSuperDepth < 0)
+            return { ok: false, error: { code: "InvalidParams", message: "Invalid params. 'maxSuperDepth' must be a non-negative integer." } };
+        maxSuperDepth = params.maxSuperDepth;
+    }
+
+    let maxSubDepth = 8;
+    if (params.maxSubDepth !== undefined)
+    {
+        if (typeof params.maxSubDepth !== "number" || !Number.isInteger(params.maxSubDepth) || params.maxSubDepth < 0)
+            return { ok: false, error: { code: "InvalidParams", message: "Invalid params. 'maxSubDepth' must be a non-negative integer." } };
+        maxSubDepth = params.maxSubDepth;
+    }
+
+    if (maxSuperDepth == 0 && maxSubDepth == 0)
+        return { ok: false, error: { code: "InvalidParams", message: "Invalid params. 'maxSuperDepth' and 'maxSubDepth' cannot both be 0." } };
+
+    let cppClasses = new Set<string>();
+    let asClasses = new Set<string>();
+    let rootType = buildTypeHierarchyEntry(dbType);
+    if (rootType == "cpp")
+        cppClasses.add(dbType.name);
+    else
+        asClasses.add(dbType.name);
+
+    let inheritanceChain: string[] = [dbType.name];
+    let superVisited = new Set<typedb.DBType>();
+    let current = dbType;
+    let superDepth = 0;
+    while (superDepth < maxSuperDepth)
+    {
+        let next = resolveHierarchySuperType(current);
+        if (!next || superVisited.has(next))
+            break;
+        superVisited.add(next);
+        let nextType = buildTypeHierarchyEntry(next);
+        if (nextType == "cpp")
+            cppClasses.add(next.name);
+        else
+            asClasses.add(next.name);
+        inheritanceChain.push(next.name);
+        current = next;
+        superDepth += 1;
+    }
+
+    let superTruncated = false;
+    if (superDepth >= maxSuperDepth)
+    {
+        let next = resolveHierarchySuperType(current);
+        if (next && !superVisited.has(next))
+            superTruncated = true;
+    }
+
+    let subtypeIndex = buildSubtypeIndex();
+    let subtypeVisited = new Set<typedb.DBType>();
+    subtypeVisited.add(dbType);
+    let derived = buildDerivedEdges(dbType, maxSubDepth, subtypeIndex, subtypeVisited, cppClasses, asClasses);
+
+    return {
+        ok: true,
+        inheritanceChain: inheritanceChain,
+        derived: {
+            root: dbType.name,
+            edges: derived.edges,
+        },
+        nodes: {
+            cppClasses: Array.from(cppClasses),
+            asClasses: Array.from(asClasses),
+        },
+        limits: {
+            maxSuperDepth,
+            maxSubDepth,
+        },
+        truncated: {
+            inheritanceChain: superTruncated,
+            derived: derived.truncated,
+        },
     };
 }
 

@@ -45,6 +45,39 @@ export type GetTypeMembersResult = {
     };
 };
 export const GetTypeMembersRequest = new RequestType<GetTypeMembersParams, GetTypeMembersResult, void>('angelscript/getTypeMembers');
+export type GetTypeHierarchyParams = {
+    name: string;
+    maxSuperDepth?: number;
+    maxSubDepth?: number;
+};
+export type TypeHierarchyEntry = {
+    cppClasses: string[];
+    asClasses: string[];
+};
+export type GetTypeHierarchyResult = {
+    ok: true;
+    inheritanceChain: string[];
+    derived: {
+        root: string;
+        edges: Record<string, string[]>;
+    };
+    nodes: TypeHierarchyEntry;
+    limits: {
+        maxSuperDepth: number;
+        maxSubDepth: number;
+    };
+    truncated: {
+        inheritanceChain: boolean;
+        derived: boolean;
+    };
+} | {
+    ok: false;
+    error: {
+        code: 'NotFound' | 'InvalidParams';
+        message: string;
+    };
+};
+export const GetTypeHierarchyRequest = new RequestType<GetTypeHierarchyParams, GetTypeHierarchyResult, void>('angelscript/getTypeHierarchy');
 export type GetAPISearchParams = {
     filter: string;
     source?: SearchSource;

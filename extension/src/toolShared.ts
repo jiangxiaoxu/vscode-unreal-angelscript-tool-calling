@@ -11,6 +11,9 @@ import {
     GetTypeMembersParams,
     GetTypeMembersRequest,
     GetTypeMembersResult,
+    GetTypeHierarchyParams,
+    GetTypeHierarchyRequest,
+    GetTypeHierarchyResult,
     ResolveSymbolAtPositionParams,
     ResolveSymbolAtPositionRequest,
     ResolveSymbolAtPositionResult
@@ -194,5 +197,58 @@ export async function runGetTypeMembers(
     {
         console.error("angelscript_getTypeMembers tool failed:", error);
         return makeError('INTERNAL_ERROR', 'The angelscript_getTypeMembers tool failed to run. Please ensure the language server is running and try again.');
+    }
+}
+
+export async function runGetTypeHierarchy(
+    client: LanguageClient,
+    startedClient: Promise<void>,
+    input: unknown
+): Promise<GetTypeHierarchyResult | ApiErrorPayload>
+{
+    const raw = input as GetTypeHierarchyParams | null | undefined;
+    const name = typeof raw?.name === 'string' ? raw.name.trim() : '';
+    if (!name)
+    {
+        return makeError('InvalidParams', "Invalid params. 'name' must be a non-empty string.");
+    }
+
+    const maxSuperDepth = typeof raw?.maxSuperDepth === 'number' ? raw.maxSuperDepth : undefined;
+    const maxSubDepth = typeof raw?.maxSubDepth === 'number' ? raw.maxSubDepth : undefined;
+    if (maxSuperDepth !== undefined)
+    {
+        if (!Number.isInteger(maxSuperDepth) || maxSuperDepth < 0)
+        {
+            return makeError('InvalidParams', "Invalid params. 'maxSuperDepth' must be a non-negative integer.");
+        }
+    }
+    if (maxSubDepth !== undefined)
+    {
+        if (!Number.isInteger(maxSubDepth) || maxSubDepth < 0)
+        {
+            return makeError('InvalidParams', "Invalid params. 'maxSubDepth' must be a non-negative integer.");
+        }
+    }
+    if ((maxSuperDepth ?? 4) === 0 && (maxSubDepth ?? 5) === 0)
+    {
+        return makeError('InvalidParams', "Invalid params. 'maxSuperDepth' and 'maxSubDepth' cannot both be 0.");
+    }
+
+    try
+    {
+        await startedClient;
+        return await client.sendRequest<GetTypeHierarchyResult>(
+            GetTypeHierarchyRequest.method,
+            {
+                name,
+                maxSuperDepth,
+                maxSubDepth
+            }
+        ) as GetTypeHierarchyResult;
+    }
+    catch (error)
+    {
+        console.error("angelscript_getClassHierarchy tool failed:", error);
+        return makeError('INTERNAL_ERROR', 'The angelscript_getClassHierarchy tool failed to run. Please ensure the language server is running and try again.');
     }
 }
