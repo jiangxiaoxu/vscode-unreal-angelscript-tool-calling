@@ -45,7 +45,9 @@ import * as inlinevalues from './inline_values';
 import * as colorpicker from './color_picker';
 import * as typehierarchy from './type_hierarchy';
 import * as api_docs from './api_docs';
+import * as cache from './cache';
 import * as fs from 'fs';
+import * as path from 'path';
 import glob from 'glob';
 
 import {
@@ -76,6 +78,10 @@ let ReceivingTypesTimeout : any = null;
 let SetTypeTimeout = false;
 let UnrealTypesTimedOut = false;
 let UnrealConnected = false;
+let CacheRootPath : string = null;
+let DebugDatabaseChunks : Array<any> = [];
+let DebugDatabaseComplete = false;
+let UnrealCacheWriteTimeout : any = null;
 
 let settings : any = null;
 let reconnectTimeoutId : any = undefined;
@@ -159,6 +165,7 @@ function connect_unreal()
                 let dbStr = msg.readString();
                 let dbObj = JSON.parse(dbStr);
                 typedb.AddTypesFromUnreal(dbObj);
+                DebugDatabaseChunks.push(dbObj);
 
                 UnrealTypesTimedOut = false;
                 if (ReceivingTypesTimeout)
@@ -170,12 +177,14 @@ function connect_unreal()
                 if (ReceivingTypesTimeout)
                     clearTimeout(ReceivingTypesTimeout);
                 typedb.FinishTypesFromUnreal();
+                DebugDatabaseComplete = true;
 
                 let scriptSettings = scriptfiles.GetScriptSettings()
                 typedb.AddPrimitiveTypes(scriptSettings.floatIsFloat64);
 
                 // Make sure no modules are resolved anymore
                 ReResolveAllModules();
+                ScheduleUnrealCacheWrite();
             }
             else if(msg.type == MessageType.AssetDatabase)
             {
@@ -229,6 +238,7 @@ function connect_unreal()
                     scriptSettings.deprecateActorGenerics = msg.readBool();
                     scriptSettings.disallowActorGenerics = msg.readBool();
                 }
+                ScheduleUnrealCacheWrite();
             }
             else if(msg.type == MessageType.ReplaceAssetDefinition)
             {
@@ -271,6 +281,7 @@ function connect_unreal()
     {
         // connection.console.log('Connection to unreal editor established.');
         UnrealConnected = true;
+        ResetUnrealCacheState();
         setTimeout(function()
         {
             if (!unreal)
@@ -285,6 +296,135 @@ function connect_unreal()
 }
 
 connect_unreal();
+
+function GetCurrentScriptSettings() : cache.CachedScriptSettings
+{
+    let scriptSettings = scriptfiles.GetScriptSettings();
+    return {
+        automaticImports: scriptSettings.automaticImports,
+        floatIsFloat64: scriptSettings.floatIsFloat64,
+        useAngelscriptHaze: scriptSettings.useAngelscriptHaze,
+        deprecateStaticClass: scriptSettings.deprecateStaticClass,
+        disallowStaticClass: scriptSettings.disallowStaticClass,
+        exposeGlobalFunctions: scriptSettings.exposeGlobalFunctions,
+        deprecateActorGenerics: scriptSettings.deprecateActorGenerics,
+        disallowActorGenerics: scriptSettings.disallowActorGenerics,
+    };
+}
+
+function ApplyCachedScriptSettings(settings : cache.CachedScriptSettings, engineSupportsCreateBlueprint : boolean)
+{
+    if (!settings)
+        return;
+
+    let scriptSettings = scriptfiles.GetScriptSettings();
+    if (typeof settings.automaticImports === "boolean")
+        scriptSettings.automaticImports = settings.automaticImports;
+    if (typeof settings.floatIsFloat64 === "boolean")
+        scriptSettings.floatIsFloat64 = settings.floatIsFloat64;
+    if (typeof settings.useAngelscriptHaze === "boolean")
+        scriptSettings.useAngelscriptHaze = settings.useAngelscriptHaze;
+    if (typeof settings.deprecateStaticClass === "boolean")
+        scriptSettings.deprecateStaticClass = settings.deprecateStaticClass;
+    if (typeof settings.disallowStaticClass === "boolean")
+        scriptSettings.disallowStaticClass = settings.disallowStaticClass;
+    if (typeof settings.exposeGlobalFunctions === "boolean")
+        scriptSettings.exposeGlobalFunctions = settings.exposeGlobalFunctions;
+    if (typeof settings.deprecateActorGenerics === "boolean")
+        scriptSettings.deprecateActorGenerics = settings.deprecateActorGenerics;
+    if (typeof settings.disallowActorGenerics === "boolean")
+        scriptSettings.disallowActorGenerics = settings.disallowActorGenerics;
+
+    if (typeof engineSupportsCreateBlueprint === "boolean")
+        scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint = engineSupportsCreateBlueprint;
+}
+
+function ResetUnrealCacheState()
+{
+    DebugDatabaseChunks = [];
+    DebugDatabaseComplete = false;
+}
+
+function ResolveCacheRoot(roots : Array<string>) : string
+{
+    if (!roots || roots.length == 0)
+        return null;
+    let primaryRoot = roots[0];
+    if (!primaryRoot)
+        return null;
+    let rootName = path.basename(primaryRoot).toLowerCase();
+    if (rootName == "script")
+        return primaryRoot;
+    let scriptRoot = path.join(primaryRoot, "Script");
+    try
+    {
+        let stat = fs.statSync(scriptRoot);
+        if (stat.isDirectory())
+            return scriptRoot;
+    }
+    catch
+    {
+    }
+    return null;
+}
+
+function LoadCacheFromDisk()
+{
+    if (!CacheRootPath)
+        return;
+
+    cache.SetCacheRoot(CacheRootPath);
+    if (typedb.HasTypesFromUnreal())
+        return;
+
+    let unrealCache = cache.LoadUnrealCache();
+    if (unrealCache && unrealCache.debugDatabaseChunks && unrealCache.debugDatabaseChunks.length != 0)
+    {
+        ApplyCachedScriptSettings(unrealCache.scriptSettings, unrealCache.engineSupportsCreateBlueprint);
+
+        for (let chunk of unrealCache.debugDatabaseChunks)
+            typedb.AddTypesFromUnreal(chunk);
+        typedb.FinishTypesFromUnreal();
+
+        let scriptSettings = scriptfiles.GetScriptSettings();
+        typedb.AddPrimitiveTypes(scriptSettings.floatIsFloat64);
+
+    }
+
+    if (UnrealConnected)
+    {
+        ScheduleUnrealCacheWrite();
+    }
+}
+
+function ScheduleUnrealCacheWrite()
+{
+    if (!CacheRootPath || !UnrealConnected)
+        return;
+    if (!DebugDatabaseComplete)
+        return;
+    if (UnrealCacheWriteTimeout)
+        clearTimeout(UnrealCacheWriteTimeout);
+    UnrealCacheWriteTimeout = setTimeout(function()
+    {
+        UnrealCacheWriteTimeout = null;
+        if (!CacheRootPath || !UnrealConnected)
+            return;
+        if (!DebugDatabaseComplete)
+            return;
+        if (DebugDatabaseChunks.length == 0)
+            return;
+
+        cache.SaveUnrealCache({
+            version: 0,
+            createdAt: "",
+            workspaceRoot: "",
+            debugDatabaseChunks: DebugDatabaseChunks,
+            scriptSettings: GetCurrentScriptSettings(),
+            engineSupportsCreateBlueprint: scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint,
+        });
+    }, 500);
+}
 
 // Create a simple text document manager. The text document manager
 // supports full document sync only
@@ -313,6 +453,9 @@ connection.onInitialize((_params): InitializeResult => {
 
 
     connection.console.log("Workspace roots: " + Roots);
+
+    CacheRootPath = ResolveCacheRoot(Roots);
+    LoadCacheFromDisk();
 
     //connection.console.log("RootPath: "+RootPath);
     //connection.console.log("RootUri: "+RootUri+" from "+_params.rootUri);
