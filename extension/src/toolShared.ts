@@ -229,7 +229,7 @@ export async function runGetTypeHierarchy(
             return makeError('InvalidParams', "Invalid params. 'maxSubDepth' must be a non-negative integer.");
         }
     }
-    if ((maxSuperDepth ?? 4) === 0 && (maxSubDepth ?? 5) === 0)
+    if ((maxSuperDepth ?? 5) === 0 && (maxSubDepth ?? 8) === 0)
     {
         return makeError('InvalidParams', "Invalid params. 'maxSuperDepth' and 'maxSubDepth' cannot both be 0.");
     }
