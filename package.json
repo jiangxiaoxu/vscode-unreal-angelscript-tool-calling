@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8030",
+    "version": "1.8.8031",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -45,8 +45,8 @@
                 ],
                 "toolReferenceName": "angelscript_searchApi",
                 "displayName": "Angelscript API Search",
-                "modelDescription": "Search Angelscript API symbols and docs from the connected Unreal Editor. Spaces act as ordered wildcards; use 'a b' to match a...b. Use '|' to separate alternate queries (OR). Use '.' or '::' to require those separators; without a space before them they must be adjacent (e.g., 'UObject.' or 'Math::'), with a space they stay fuzzy (e.g., 'UObject .' or 'Math ::'). Optional filters: kinds (class/struct/enum/method/function/property/globalVariable, case-insensitive, multi-select) and source (native/script/both, default both). includeDocs toggles docs payload. Paging uses searchIndex (required) and maxBatchResults (default 200); response includes total/returned/nextSearchIndex/remainingCount/truncated plus items with signature/docs/type/data. labelQueryUseRegex applies a regex to labels after kind filtering (supports /pattern/flags; omit i for case-sensitive; non-literal defaults to ignore case). signatureRegex filters parsed signatures with the same regex syntax.",
-                "userDescription": "Search Angelscript API symbols and docs from the connected Unreal Editor.",
+                "modelDescription": "Search Angelscript API symbols/docs. Query: space=ordered tokens(\"a b\"->a...b); \"|\"=OR; \".\"/\"::\" require exact separators(\"UObject.\"/\"Math::\"); with space they stay fuzzy(\"UObject .\"/\"Math ::\"). Filters: kinds=[class|struct|enum|method|function|property|globalVariable], case-insensitive, multi; source=native|script|both(default both). includeDocs toggles docs. Paging: searchIndex required, maxBatchResults default 200. Response: total,returned,nextSearchIndex,remainingCount,truncated, items{signature,docs,type,data}. Regex: labelQueryUseRegex applies /pattern/flags (omit i=case-sensitive; non-literal default ignore case); signatureRegex filters parsed signatures with same regex syntax.",
+                "userDescription": "Search Angelscript API symbols and docs.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(search)",
                 "inputSchema": {
@@ -120,7 +120,7 @@
                 ],
                 "toolReferenceName": "angelscript_getTypeMembers",
                 "displayName": "Angelscript Type Members",
-                "modelDescription": "List members for a given Angelscript type, optionally including inherited members. Returns methods, properties, accessors, and mixins with visibility-qualified signatures and plain-text descriptions. Returns JSON: { ok:true, type:{ name, namespace, qualifiedName }, members:[{ kind, name, signature, description, declaredIn, declaredInKind, isInherited, isMixin, isAccessor, accessorKind?, propertyName?, visibility }] } or { ok:false, error:{ code, message } }.",
+                "modelDescription": "List members for a given Angelscript type, optionally including inherited members. Returns methods, properties, accessors, and mixins with visibility-qualified signatures. description is included only when includeDocs=true. Returns JSON: { ok:true, type:{ name, namespace, qualifiedName }, members:[{ kind, name, signature, description, declaredIn, declaredInKind, isInherited, isMixin, isAccessor, accessorKind?, propertyName?, visibility }] } or { ok:false, error:{ code, message } }.",
                 "userDescription": "List members for a given Angelscript type, optionally including inherited members.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-class)",
@@ -170,7 +170,7 @@
                 ],
                 "toolReferenceName": "angelscript_resolveSymbolAtPosition",
                 "displayName": "Angelscript Resolve Symbol At Position",
-                "modelDescription": "Resolve the symbol at a given document position and return its kind, full signature, definition location, and optional documentation. Input filePath must be an absolute path; output filePath is absolute. Returns JSON: { ok:true, symbol:{ kind, name, signature, definition?, doc? } } or { ok:false, error:{ code, message, retryable?, hint? } }.",
+                "modelDescription": "Resolve the symbol at a given document position (0-based line/character) and return its kind, full signature, definition location, and optional documentation. Input filePath must be an absolute path; output filePath is absolute. Returns JSON: { ok:true, symbol:{ kind, name, signature, definition?, doc? } } or { ok:false, error:{ code, message, retryable?, hint? } }.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-method)",
                 "inputSchema": {
