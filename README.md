@@ -35,14 +35,17 @@
 - `angelscript_resolveSymbolAtPosition`
 - `angelscript_getTypeMembers`
 - `angelscript_getClassHierarchy`
+- `angelscript_findReferences`
 
-工具均返回 JSON 字符串. 详细字段定义见实现文件 `language-server/src/api_docs.ts` 和 `language-server/src/server.ts`.
+工具均返回 JSON 字符串. 详细字段定义见实现文件 `extension/src/toolRegistry.ts` 与 `extension/src/toolShared.ts`.
+注意: `filePath` 必须是绝对路径, 输出中的 `filePath` 也始终为绝对路径.
 
 使用建议:
 - `angelscript_searchApi`: 需要搜索符号或文档时使用. 例如需要通过关键词搜索 AngelScript API、类型、常量、函数、方法等, 或需要模糊匹配 API.
-- `angelscript_resolveSymbolAtPosition`: 已知文件与位置, 想解析该符号的定义/签名/文档时使用,会返回其种类、签名、定义位置与可选文档.
+- `angelscript_resolveSymbolAtPosition`: 已知文件与位置, 想解析该符号的定义/签名/文档时使用,会返回其种类、签名、定义位置与可选文档. 输入使用绝对 `filePath`, 行列为 0-based.
 - `angelscript_getTypeMembers`: 使用精确类型名称（class/struct/enum）列出成员(方法/属性),可选包含继承来的成员和文档.
 - `angelscript_getClassHierarchy`: 需要类的继承链与派生关系时使用. 传入精确类名, 通过输出的 `inheritanceChain` 查看父类链, `derived.edges` 查看子类树.
+- `angelscript_findReferences`: 已知文件与位置, 查找该符号在脚本侧的引用. 输入使用绝对 `filePath`, 行列为 0-based, 输出为绝对 `filePath` 列表.
 
 ## MCP(HTTP) 支持
 内置 Streamable HTTP MCP server, 复用 Angelscript language server 的 API 搜索逻辑.

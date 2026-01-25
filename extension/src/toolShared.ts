@@ -1,4 +1,6 @@
 import { LanguageClient } from 'vscode-languageclient/node';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import * as path from 'path';
 import {
     AngelscriptSearchParams,
     ApiErrorPayload,
@@ -14,7 +16,11 @@ import {
     GetTypeHierarchyParams,
     GetTypeHierarchyRequest,
     GetTypeHierarchyResult,
-    ResolveSymbolAtPositionParams,
+    FindReferencesParams,
+    FindReferencesResult,
+    FindReferencesLocation,
+    ResolveSymbolAtPositionToolParams,
+    ResolveSymbolAtPositionToolResult,
     ResolveSymbolAtPositionRequest,
     ResolveSymbolAtPositionResult
 } from './apiRequests';
@@ -24,6 +30,41 @@ export type SearchOutputPayload = ApiResponsePayload & {
     text?: string;
     request?: Record<string, unknown>;
 };
+
+type LspLocation = {
+    uri: string;
+    range: {
+        start: { line: number; character: number };
+        end: { line: number; character: number };
+    };
+};
+
+function resolveFilePathInput(filePath: string): { filePath: string; uri: string } | null
+{
+    const absolutePath = path.normalize(filePath.trim());
+    try
+    {
+        return { filePath: absolutePath, uri: pathToFileURL(absolutePath).toString() };
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+function fileUriToAbsolutePath(uri: string): string | null
+{
+    if (!uri.startsWith('file://'))
+        return null;
+    try
+    {
+        return path.normalize(fileURLToPath(uri));
+    }
+    catch
+    {
+        return null;
+    }
+}
 
 export function isErrorPayload(value: unknown): value is ApiErrorPayload
 {
@@ -127,17 +168,30 @@ export async function runResolveSymbolAtPosition(
     client: LanguageClient,
     startedClient: Promise<void>,
     input: unknown
-): Promise<ResolveSymbolAtPositionResult | ApiErrorPayload>
+): Promise<ResolveSymbolAtPositionToolResult | ApiErrorPayload>
 {
-    const raw = input as ResolveSymbolAtPositionParams | null | undefined;
-    const uri = raw?.uri;
+    const raw = input as ResolveSymbolAtPositionToolParams | null | undefined;
+    const filePath = raw?.filePath;
     const position = raw?.position;
     const line = position?.line;
     const character = position?.character;
 
-    if (typeof uri !== 'string' || typeof line !== 'number' || typeof character !== 'number')
+    if (typeof filePath !== 'string' || typeof line !== 'number' || typeof character !== 'number')
     {
-        return makeError('InvalidParams', 'Invalid params. Provide uri and position { line, character }.');
+        return makeError('InvalidParams', 'Invalid params. Provide filePath and position { line, character }.');
+    }
+    const trimmedPath = filePath.trim();
+    if (trimmedPath.startsWith('file://'))
+    {
+        return makeError('InvalidParams', "Invalid params. 'filePath' must be an absolute path without the file:// scheme.");
+    }
+    if (!path.isAbsolute(trimmedPath))
+    {
+        return makeError('InvalidParams', "Invalid params. 'filePath' must be an absolute path.");
+    }
+    if (!Number.isInteger(line) || line < 0 || !Number.isInteger(character) || character < 0)
+    {
+        return makeError('InvalidParams', "Invalid params. 'line' and 'character' must be non-negative integers.");
     }
 
     const includeDocumentation = raw?.includeDocumentation !== false;
@@ -145,14 +199,53 @@ export async function runResolveSymbolAtPosition(
     try
     {
         await startedClient;
+        const resolved = resolveFilePathInput(trimmedPath);
+        if (!resolved)
+        {
+            return makeError('INTERNAL_ERROR', 'Failed to convert filePath to file URI.');
+        }
         return await client.sendRequest(
             ResolveSymbolAtPositionRequest,
             {
-                uri,
+                uri: resolved.uri,
                 position: { line, character },
                 includeDocumentation
             }
-        ) as ResolveSymbolAtPositionResult;
+        ).then((result) =>
+        {
+            const lspResult = result as ResolveSymbolAtPositionResult;
+            if (!lspResult || lspResult.ok === false)
+                return lspResult as ResolveSymbolAtPositionToolResult;
+
+            const definition = lspResult.symbol.definition;
+            if (definition && !definition.uri.startsWith('file://'))
+            {
+                return makeError('INTERNAL_ERROR', 'Language server returned a non-file path for definition.');
+            }
+            const absoluteDefinitionPath = definition ? fileUriToAbsolutePath(definition.uri) : null;
+            if (definition && !absoluteDefinitionPath)
+            {
+                return makeError('INTERNAL_ERROR', 'Failed to resolve definition file path from language server result.');
+            }
+            const mappedDefinition = (definition && absoluteDefinitionPath)
+                ? {
+                    filePath: absoluteDefinitionPath,
+                    startLine: definition.startLine,
+                    endLine: definition.endLine
+                }
+                : undefined;
+
+            return {
+                ok: true,
+                symbol: {
+                    kind: lspResult.symbol.kind,
+                    name: lspResult.symbol.name,
+                    signature: lspResult.symbol.signature,
+                    definition: mappedDefinition,
+                    doc: lspResult.symbol.doc
+                }
+            } as ResolveSymbolAtPositionToolResult;
+        });
     }
     catch (error)
     {
@@ -250,5 +343,87 @@ export async function runGetTypeHierarchy(
     {
         console.error("angelscript_getClassHierarchy tool failed:", error);
         return makeError('INTERNAL_ERROR', 'The angelscript_getClassHierarchy tool failed to run. Please ensure the language server is running and try again.');
+    }
+}
+
+export async function runFindReferences(
+    client: LanguageClient,
+    startedClient: Promise<void>,
+    input: unknown
+): Promise<FindReferencesResult | ApiErrorPayload>
+{
+    const raw = input as FindReferencesParams | null | undefined;
+    const filePath = raw?.filePath;
+    const position = raw?.position;
+    const line = position?.line;
+    const character = position?.character;
+
+    if (typeof filePath !== 'string' || typeof line !== 'number' || typeof character !== 'number')
+    {
+        return makeError('InvalidParams', 'Invalid params. Provide filePath and position { line, character }.');
+    }
+    const trimmedPath = filePath.trim();
+    if (trimmedPath.startsWith('file://'))
+    {
+        return makeError('InvalidParams', "Invalid params. 'filePath' must be an absolute path without the file:// scheme.");
+    }
+    if (!path.isAbsolute(trimmedPath))
+    {
+        return makeError('InvalidParams', "Invalid params. 'filePath' must be an absolute path.");
+    }
+    if (!Number.isInteger(line) || line < 0 || !Number.isInteger(character) || character < 0)
+    {
+        return makeError('InvalidParams', "Invalid params. 'line' and 'character' must be non-negative integers.");
+    }
+
+    try
+    {
+        await startedClient;
+        const resolved = resolveFilePathInput(trimmedPath);
+        if (!resolved)
+        {
+            return makeError('INTERNAL_ERROR', 'Failed to convert filePath to file URI.');
+        }
+        const result = await client.sendRequest(
+            'textDocument/references',
+            {
+                textDocument: { uri: resolved.uri },
+                position: { line, character },
+                context: { includeDeclaration: true }
+            }
+        ) as LspLocation[] | null;
+
+        if (!result)
+        {
+            return makeError('NotReady', 'References are not available yet. Please wait for script parsing to finish and try again.');
+        }
+
+        const references: FindReferencesLocation[] = [];
+        for (const location of result)
+        {
+            if (!location.uri.startsWith('file://'))
+            {
+                return makeError('INTERNAL_ERROR', 'Language server returned a non-file path in references.');
+            }
+            const absolutePath = fileUriToAbsolutePath(location.uri);
+            if (!absolutePath)
+            {
+                return makeError('INTERNAL_ERROR', 'Failed to resolve reference file path from language server result.');
+            }
+            references.push({
+                filePath: absolutePath,
+                range: location.range
+            });
+        }
+
+        return {
+            ok: true,
+            references
+        };
+    }
+    catch (error)
+    {
+        console.error("angelscript_findReferences tool failed:", { filePath, line, character, error });
+        return makeError('INTERNAL_ERROR', 'The angelscript_findReferences tool failed to run. Please ensure the language server is running and try again.');
     }
 }

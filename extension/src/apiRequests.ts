@@ -92,6 +92,41 @@ export type ResolveSymbolAtPositionParams = {
     includeDocumentation?: boolean;
 };
 
+export type ResolveSymbolAtPositionToolParams = {
+    filePath: string;
+    position: {
+        line: number;
+        character: number;
+    };
+    includeDocumentation?: boolean;
+};
+
+export type ResolveSymbolAtPositionToolResult = {
+    ok: true;
+    symbol: {
+        kind: string;
+        name: string;
+        signature: string;
+        definition?: {
+            filePath: string;
+            startLine: number;
+            endLine: number;
+        };
+        doc?: {
+            format: 'markdown' | 'plaintext';
+            text: string;
+        };
+    };
+} | {
+    ok: false;
+    error: {
+        code: string;
+        message: string;
+        retryable?: boolean;
+        hint?: string;
+    };
+};
+
 export type ResolveSymbolAtPositionResult = {
     ok: true;
     symbol: {
@@ -119,3 +154,32 @@ export type ResolveSymbolAtPositionResult = {
 };
 
 export const ResolveSymbolAtPositionRequest = new RequestType<ResolveSymbolAtPositionParams, ResolveSymbolAtPositionResult, void>('angelscript/resolveSymbolAtPosition');
+
+export type FindReferencesParams = {
+    filePath: string;
+    position: {
+        line: number;
+        character: number;
+    };
+};
+
+export type FindReferencesLocation = {
+    filePath: string;
+    range: {
+        start: { line: number; character: number };
+        end: { line: number; character: number };
+    };
+};
+
+export type FindReferencesResult = {
+    ok: true;
+    references: FindReferencesLocation[];
+} | {
+    ok: false;
+    error: {
+        code: string;
+        message: string;
+        retryable?: boolean;
+        hint?: string;
+    };
+};

@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8029",
+    "version": "1.8.8030",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -17,7 +17,8 @@
         "onLanguageModelTool:angelscript_searchApi",
         "onLanguageModelTool:angelscript_resolveSymbolAtPosition",
         "onLanguageModelTool:angelscript_getTypeMembers",
-        "onLanguageModelTool:angelscript_getClassHierarchy"
+        "onLanguageModelTool:angelscript_getClassHierarchy",
+        "onLanguageModelTool:angelscript_findReferences"
     ],
     "repository": {
         "type": "git",
@@ -169,15 +170,15 @@
                 ],
                 "toolReferenceName": "angelscript_resolveSymbolAtPosition",
                 "displayName": "Angelscript Resolve Symbol At Position",
-                "modelDescription": "Resolve the symbol at a given document position and return its kind, full signature, definition location, and optional documentation. Returns JSON: { ok:true, symbol:{ kind, name, signature, definition?, doc? } } or { ok:false, error:{ code, message, retryable?, hint? } }.",
+                "modelDescription": "Resolve the symbol at a given document position and return its kind, full signature, definition location, and optional documentation. Input filePath must be an absolute path; output filePath is absolute. Returns JSON: { ok:true, symbol:{ kind, name, signature, definition?, doc? } } or { ok:false, error:{ code, message, retryable?, hint? } }.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-method)",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "uri": {
+                        "filePath": {
                             "type": "string",
-                            "description": "Document URI for the file containing the symbol."
+                            "description": "Absolute path to the file containing the symbol."
                         },
                         "position": {
                             "type": "object",
@@ -203,7 +204,7 @@
                         }
                     },
                     "required": [
-                        "uri",
+                        "filePath",
                         "position"
                     ]
                 }
@@ -241,6 +242,50 @@
                     },
                     "required": [
                         "name"
+                    ]
+                }
+            },
+            {
+                "name": "angelscript_findReferences",
+                "tags": [
+                    "angelscript",
+                    "references",
+                    "symbol"
+                ],
+                "toolReferenceName": "angelscript_findReferences",
+                "displayName": "Angelscript Find References",
+                "modelDescription": "Find references for the symbol at a given document position. Line/character are 0-based. Input filePath must be an absolute path; output filePath is absolute. Returns JSON: { ok:true, references:[{ filePath, range:{ start:{ line, character }, end:{ line, character } } }] } or { ok:false, error:{ code, message, retryable?, hint? } }.",
+                "userDescription": "Find references for the symbol at a given document position.",
+                "canBeReferencedInPrompt": true,
+                "icon": "$(references)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "filePath": {
+                            "type": "string",
+                            "description": "Absolute path to the file containing the symbol."
+                        },
+                        "position": {
+                            "type": "object",
+                            "properties": {
+                                "line": {
+                                    "type": "number",
+                                    "description": "0-based line number."
+                                },
+                                "character": {
+                                    "type": "number",
+                                    "description": "0-based character offset."
+                                }
+                            },
+                            "required": [
+                                "line",
+                                "character"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "filePath",
+                        "position"
                     ]
                 }
             }

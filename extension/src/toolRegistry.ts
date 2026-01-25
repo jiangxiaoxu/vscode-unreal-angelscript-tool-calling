@@ -3,10 +3,11 @@ import * as z from 'zod';
 import type { ZodType } from 'zod/v4/classic/schemas';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { AngelscriptSearchParams } from './angelscriptApiSearch';
-import { GetTypeHierarchyParams, GetTypeMembersParams, ResolveSymbolAtPositionParams } from './apiRequests';
+import { GetTypeHierarchyParams, GetTypeMembersParams, ResolveSymbolAtPositionToolParams, FindReferencesParams } from './apiRequests';
 import {
     formatSearchPayloadForOutput,
     isErrorPayload,
+    runFindReferences,
     runGetTypeHierarchy,
     runGetTypeMembers,
     runResolveSymbolAtPosition,
@@ -84,6 +85,16 @@ function prepareTypeHierarchyInvocation(input: GetTypeHierarchyParams | null | u
     return `Get Angelscript type hierarchy ${label} (${details.join(", ")})`;
 }
 
+function prepareFindReferencesInvocation(input: { filePath?: string; position?: { line?: number; character?: number } } | null | undefined): string
+{
+    const filePath = typeof input?.filePath === "string" ? input.filePath.trim() : "";
+    const line = typeof input?.position?.line === "number" ? input.position.line : undefined;
+    const character = typeof input?.position?.character === "number" ? input.position.character : undefined;
+    const location = (typeof line === "number" && typeof character === "number") ? `${line}:${character}` : "<unknown>";
+    const label = filePath ? `"${filePath}"` : "<unknown>";
+    return `Find Angelscript references ${label} (${location})`;
+}
+
 const toolDefinitions: Array<ToolDefinition<any>> = [
     {
         name: 'angelscript_searchApi',
@@ -115,16 +126,16 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_resolveSymbolAtPosition',
-        description: 'Resolve a symbol at a given document position and return its kind, full signature, definition location, and optional documentation.',
+        description: 'Resolve a symbol at a given document position and return its kind, full signature, definition location, and optional documentation. Input filePath must be an absolute path; output filePath is absolute.',
         inputSchema: z.object({
-            uri: z.string().describe('Document URI for the file containing the symbol.'),
+            filePath: z.string().describe('Absolute path to the file containing the symbol.'),
             position: z.object({
                 line: z.number().int().min(0).describe('0-based line number.'),
                 character: z.number().int().min(0).describe('0-based character offset.'),
             }),
             includeDocumentation: z.boolean().optional().describe('Include documentation when available. Default is true.')
         }),
-        run: async (context, input: ResolveSymbolAtPositionParams | null | undefined) =>
+        run: async (context, input: ResolveSymbolAtPositionToolParams | null | undefined) =>
         {
             return await runResolveSymbolAtPosition(context.client, context.startedClient, input);
         }
@@ -157,6 +168,22 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
         run: async (context, input: GetTypeHierarchyParams | null | undefined) =>
         {
             return await runGetTypeHierarchy(context.client, context.startedClient, input);
+        }
+    },
+    {
+        name: 'angelscript_findReferences',
+        description: 'Find references for the symbol at a given document position. Input filePath must be an absolute path; output filePath is absolute. Returns JSON: { ok:true, references:[{ filePath, range:{ start:{ line, character }, end:{ line, character } } }] } or { ok:false, error:{ code, message, retryable?, hint? } }.',
+        inputSchema: z.object({
+            filePath: z.string().describe('Absolute path to the file containing the symbol.'),
+            position: z.object({
+                line: z.number().int().min(0).describe('0-based line number.'),
+                character: z.number().int().min(0).describe('0-based character offset.')
+            })
+        }),
+        prepareInvocation: prepareFindReferencesInvocation,
+        run: async (context, input: FindReferencesParams | null | undefined) =>
+        {
+            return await runFindReferences(context.client, context.startedClient, input);
         }
     }
 ];
