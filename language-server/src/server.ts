@@ -82,6 +82,8 @@ let CacheRootPath : string = null;
 let DebugDatabaseChunks : Array<any> = [];
 let DebugDatabaseComplete = false;
 let UnrealCacheWriteTimeout : any = null;
+let PendingReResolveAfterInitialParse = false;
+let SemanticTokensRefreshTimeout : any = null;
 
 let settings : any = null;
 let reconnectTimeoutId : any = undefined;
@@ -183,6 +185,8 @@ function connect_unreal()
                 typedb.AddPrimitiveTypes(scriptSettings.floatIsFloat64);
 
                 // Make sure no modules are resolved anymore
+                if (PendingReResolveAfterInitialParse)
+                    PendingReResolveAfterInitialParse = false;
                 ReResolveAllModules();
                 ScheduleUnrealCacheWrite();
             }
@@ -558,6 +562,8 @@ function DetectUnrealTypeListTimeout()
     typedb.AddPrimitiveTypes(scriptSettings.floatIsFloat64);
 
     // Make sure no modules are resolved anymore
+    if (PendingReResolveAfterInitialParse)
+        PendingReResolveAfterInitialParse = false;
     ReResolveAllModules();
 }
 
@@ -595,6 +601,7 @@ function TickQueues()
         ParseQueue = [];
         ParseQueueIndex = 0;
         scriptfiles.SetInitialParseDone();
+        PendingReResolveAfterInitialParse = true;
     }
     else if (PostProcessTypesQueueIndex < PostProcessTypesQueue.length)
     {
@@ -656,6 +663,7 @@ function TickQueues()
     else
     {
         IsServicingQueues = false;
+        MaybeReResolveAfterInitialParse();
         // console.log("Finished servicing queues");
     }
 }
@@ -707,6 +715,7 @@ function ReResolveAllModules()
             if (moduleIndex >= moduleList.length)
             {
                 clearInterval(timerHandle);
+                ScheduleSemanticTokensRefresh();
                 return;
             }
 
@@ -724,6 +733,37 @@ function ReResolveAllModules()
 function CanResolveModules()
 {
     return typedb.HasTypesFromUnreal() && LoadQueue.length == 0;
+}
+
+function ScheduleSemanticTokensRefresh()
+{
+    if (SemanticTokensRefreshTimeout)
+        return;
+
+    SemanticTokensRefreshTimeout = setTimeout(function()
+    {
+        SemanticTokensRefreshTimeout = null;
+        try
+        {
+            connection.languages.semanticTokens.refresh();
+        }
+        catch
+        {
+        }
+    }, 50);
+}
+
+function MaybeReResolveAfterInitialParse()
+{
+    if (!PendingReResolveAfterInitialParse)
+        return;
+    if (!typedb.HasTypesFromUnreal())
+        return;
+    if (IsServicingQueues)
+        return;
+
+    PendingReResolveAfterInitialParse = false;
+    ReResolveAllModules();
 }
 
 function IsInitialParseDone()
