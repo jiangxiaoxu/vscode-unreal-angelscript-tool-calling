@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8032",
+    "version": "1.8.8033",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -45,7 +45,7 @@
                 ],
                 "toolReferenceName": "angelscript_searchApi",
                 "displayName": "Angelscript API Search",
-                "modelDescription": "Search Angelscript API symbols/docs. Query: space=ordered tokens(\"a b\"->a...b); \"|\"=OR; \".\"/\"::\" require exact separators(\"UObject.\"/\"Math::\"); with space they stay fuzzy(\"UObject .\"/\"Math ::\"). Filters: kinds=[class|struct|enum|method|function|property|globalVariable], case-insensitive, multi; source=native|script|both(default both). includeDocs toggles docs. Paging: searchIndex required, maxBatchResults default 200. Response: total,returned,nextSearchIndex,remainingCount,truncated, items{signature,docs,type,data}. Regex: labelQueryUseRegex applies /pattern/flags (omit i=case-sensitive; non-literal default ignore case); signatureRegex filters parsed signatures with same regex syntax.",
+                "modelDescription": "Search Angelscript API symbols/docs. Query: space=ordered tokens(\"a b\"->a...b); \"|\"=OR; \".\"/\"::\" require exact separators(\"UObject.\"/\"Math::\"); with space they stay fuzzy(\"UObject .\"/\"Math ::\"). Filters: kinds=[class|struct|enum|method|function|property|globalVariable], case-insensitive, multi; source=native|script|both(default both). includeDocs toggles docs. Paging: searchIndex required, maxBatchResults default 200. Response: total,returned,nextSearchIndex,remainingCount,truncated, items{signature,docs,type}. Regex: labelQueryUseRegex applies /pattern/flags (omit i=case-sensitive; non-literal default ignore case); signatureRegex filters parsed signatures with same regex syntax.",
                 "userDescription": "Search Angelscript API symbols and docs.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(search)",
@@ -170,7 +170,7 @@
                 ],
                 "toolReferenceName": "angelscript_resolveSymbolAtPosition",
                 "displayName": "Angelscript Resolve Symbol At Position",
-                "modelDescription": "Resolve the symbol at a given document position (0-based line/character) and return its kind, full signature, definition location, and optional documentation. Input filePath must be an absolute path; output filePath is absolute. Returns JSON: { ok:true, symbol:{ kind, name, signature, definition?, doc? } } or { ok:false, error:{ code, message, retryable?, hint? } }.",
+                "modelDescription": "Resolve the symbol at a given document position (1-based line/character) and return its kind, full signature, definition location, and optional documentation. Input filePath must be an absolute path; output filePath is absolute. Returned definition startLine/endLine are 1-based. Returns JSON: { ok:true, symbol:{ kind, name, signature, definition?, doc? } } or { ok:false, error:{ code, message, retryable?, hint? } }.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-method)",
                 "inputSchema": {
@@ -185,11 +185,13 @@
                             "properties": {
                                 "line": {
                                     "type": "number",
-                                    "description": "0-based line number."
+                                    "minimum": 1,
+                                    "description": "1-based line number."
                                 },
                                 "character": {
                                     "type": "number",
-                                    "description": "0-based character offset."
+                                    "minimum": 1,
+                                    "description": "1-based character offset."
                                 }
                             },
                             "required": [
@@ -254,7 +256,7 @@
                 ],
                 "toolReferenceName": "angelscript_findReferences",
                 "displayName": "Angelscript Find References",
-                "modelDescription": "Find references for the symbol at a given document position. Line/character are 0-based. Input filePath must be an absolute path; output filePath is absolute. Returns JSON: { ok:true, references:[{ filePath, range:{ start:{ line, character }, end:{ line, character } } }] } or { ok:false, error:{ code, message, retryable?, hint? } }.",
+                "modelDescription": "Find references for the symbol at a given document position. Line/character are 1-based. Input filePath must be an absolute path. On success, returns preview text only (not structured references JSON). On failure, returns JSON: { ok:false, error:{ code, message, retryable?, hint? } }.",
                 "userDescription": "Find references for the symbol at a given document position.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(references)",
@@ -270,11 +272,13 @@
                             "properties": {
                                 "line": {
                                     "type": "number",
-                                    "description": "0-based line number."
+                                    "minimum": 1,
+                                    "description": "1-based line number."
                                 },
                                 "character": {
                                     "type": "number",
-                                    "description": "0-based character offset."
+                                    "minimum": 1,
+                                    "description": "1-based character offset."
                                 }
                             },
                             "required": [

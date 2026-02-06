@@ -126,12 +126,12 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_resolveSymbolAtPosition',
-        description: 'Resolve a symbol at a given document position and return its kind, full signature, definition location, and optional documentation. Input filePath must be an absolute path; output filePath is absolute.',
+        description: 'Resolve a symbol at a given document position and return its kind, full signature, definition location, and optional documentation. Input line/character are 1-based. Input filePath must be an absolute path; output filePath is absolute. Returned definition startLine/endLine are 1-based.',
         inputSchema: z.object({
             filePath: z.string().describe('Absolute path to the file containing the symbol.'),
             position: z.object({
-                line: z.number().int().min(0).describe('0-based line number.'),
-                character: z.number().int().min(0).describe('0-based character offset.'),
+                line: z.number().int().min(1).describe('1-based line number.'),
+                character: z.number().int().min(1).describe('1-based character offset.'),
             }),
             includeDocumentation: z.boolean().optional().describe('Include documentation when available. Default is true.')
         }),
@@ -172,12 +172,12 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_findReferences',
-        description: 'Find references for the symbol at a given document position. Input filePath must be an absolute path; output filePath is absolute. Returns JSON: { ok:true, references:[{ filePath, range:{ start:{ line, character }, end:{ line, character } } }] } or { ok:false, error:{ code, message, retryable?, hint? } }.',
+        description: 'Find references for the symbol at a given document position. Input line/character are 1-based. Input filePath must be an absolute path. On success, returns preview text only (not structured references JSON). On failure, returns JSON: { ok:false, error:{ code, message, retryable?, hint? } }.',
         inputSchema: z.object({
             filePath: z.string().describe('Absolute path to the file containing the symbol.'),
             position: z.object({
-                line: z.number().int().min(0).describe('0-based line number.'),
-                character: z.number().int().min(0).describe('0-based character offset.')
+                line: z.number().int().min(1).describe('1-based line number.'),
+                character: z.number().int().min(1).describe('1-based character offset.')
             })
         }),
         prepareInvocation: prepareFindReferencesInvocation,
@@ -225,8 +225,9 @@ class SharedLmTool<TInput> implements vscode.LanguageModelTool<TInput>
             },
             options?.input ?? undefined
         );
+        const outputText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
         return new vscode.LanguageModelToolResult([
-            new vscode.LanguageModelTextPart(JSON.stringify(result, null, 2))
+            new vscode.LanguageModelTextPart(outputText)
         ]);
     }
 }
@@ -277,7 +278,7 @@ export function registerMcpTools(
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(result, null, 2)
+                            text: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
                         }
                     ]
                 };

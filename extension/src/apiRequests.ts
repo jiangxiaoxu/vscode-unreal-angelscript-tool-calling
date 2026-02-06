@@ -172,9 +172,6 @@ export type FindReferencesLocation = {
 };
 
 export type FindReferencesResult = {
-    ok: true;
-    references: FindReferencesLocation[];
-} | {
     ok: false;
     error: {
         code: string;
@@ -182,4 +179,4 @@ export type FindReferencesResult = {
         retryable?: boolean;
         hint?: string;
     };
-};
+} | string;

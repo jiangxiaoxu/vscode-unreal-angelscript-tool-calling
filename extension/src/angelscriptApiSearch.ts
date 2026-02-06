@@ -19,7 +19,6 @@ export type ApiResultItem = {
     signature: string;
     docs?: string;
     type?: string;
-    data?: unknown;
 };
 
 export type ApiResponsePayload = {
@@ -666,8 +665,7 @@ export async function buildSearchPayload(
             payloadBase.items = pagedMatches.map((entry) => ({
                 signature: entry.parsed.signature,
                 docs: includeDocs ? entry.parsed.docs : undefined,
-                type: entry.item.type ?? undefined,
-                data: entry.item.data ?? undefined
+                type: entry.item.type ?? undefined
             }));
             return payloadBase;
         }
@@ -749,8 +747,7 @@ export async function buildSearchPayload(
         payloadBase.items = pagedMatches.map((entry) => ({
             signature: entry.parsed.signature,
             docs: includeDocs ? entry.parsed.docs : undefined,
-            type: entry.item.type ?? undefined,
-            data: entry.item.data ?? undefined
+            type: entry.item.type ?? undefined
         }));
         return payloadBase;
     }
@@ -783,8 +780,7 @@ export async function buildSearchPayload(
     {
         payloadBase.items = items.map((item) => ({
             signature: item.label,
-            type: item.type ?? undefined,
-            data: item.data ?? undefined
+            type: item.type ?? undefined
         }));
         return payloadBase;
     }
@@ -810,8 +806,7 @@ export async function buildSearchPayload(
         return {
             signature,
             docs: includeDocs ? parsed.docs : undefined,
-            type: item.type ?? undefined,
-            data: item.data ?? undefined
+            type: item.type ?? undefined
         };
     });
 

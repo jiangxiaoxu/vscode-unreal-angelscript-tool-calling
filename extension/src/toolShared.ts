@@ -1,5 +1,7 @@
+import * as vscode from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { promises as fs } from 'node:fs';
 import * as path from 'path';
 import {
     AngelscriptSearchParams,
@@ -39,6 +41,9 @@ type LspLocation = {
     };
 };
 
+const MAX_REFERENCE_PREVIEW_LINES = 20;
+const SOURCE_UNAVAILABLE_TEXT = '<source unavailable>';
+
 function resolveFilePathInput(filePath: string): { filePath: string; uri: string } | null
 {
     const absolutePath = path.normalize(filePath.trim());
@@ -64,6 +69,102 @@ function fileUriToAbsolutePath(uri: string): string | null
     {
         return null;
     }
+}
+
+function toLspPositionFromOneBased(line: number, character: number): { line: number; character: number }
+{
+    return {
+        line: line - 1,
+        character: character - 1
+    };
+}
+
+function toOneBasedLine(value: number): number
+{
+    return value + 1;
+}
+
+function getDisplayPath(filePath: string): string
+{
+    const absolutePath = path.normalize(filePath);
+    const relativePath = vscode.workspace.asRelativePath(absolutePath, false);
+    if (!relativePath)
+        return absolutePath.split(path.sep).join('/');
+
+    const normalizedRelativePath = path.normalize(relativePath);
+    if (path.isAbsolute(normalizedRelativePath) || normalizedRelativePath === absolutePath)
+        return absolutePath.split(path.sep).join('/');
+
+    return normalizedRelativePath.split(path.sep).join('/');
+}
+
+function getPreviewEndLine(range: FindReferencesLocation['range']): number
+{
+    const startLine = range.start.line;
+    let endLine = range.end.line;
+    if (endLine < startLine)
+        endLine = startLine;
+    if (endLine > startLine && range.end.character === 0)
+        endLine -= 1;
+    if (endLine < startLine)
+        endLine = startLine;
+    return endLine;
+}
+
+async function formatFindReferencesPreview(references: FindReferencesLocation[]): Promise<string>
+{
+    if (references.length === 0)
+        return 'No references found.';
+
+    const fileLinesCache = new Map<string, Promise<string[] | null>>();
+    const getFileLines = async (filePath: string): Promise<string[] | null> =>
+    {
+        const absolutePath = path.normalize(filePath);
+        const cached = fileLinesCache.get(absolutePath);
+        if (cached)
+            return cached;
+
+        const reader = fs.readFile(absolutePath, 'utf8')
+            .then((content) => content.split(/\r?\n/))
+            .catch(() => null);
+        fileLinesCache.set(absolutePath, reader);
+        return reader;
+    };
+
+    const chunks: string[] = [];
+    for (const reference of references)
+    {
+        const startLine = reference.range.start.line;
+        const endLine = getPreviewEndLine(reference.range);
+        const startLineOneBased = toOneBasedLine(startLine);
+        const endLineOneBased = toOneBasedLine(endLine);
+        const locationLabel = startLineOneBased === endLineOneBased
+            ? `${startLineOneBased}`
+            : `${startLineOneBased}-${endLineOneBased}`;
+        const header = `// ${getDisplayPath(reference.filePath)}:${locationLabel}`;
+
+        const fileLines = await getFileLines(reference.filePath);
+        if (!fileLines || startLine < 0 || startLine >= fileLines.length)
+        {
+            chunks.push(`${header}\n${SOURCE_UNAVAILABLE_TEXT}`);
+            continue;
+        }
+
+        const safeEndLine = Math.max(startLine, Math.min(endLine, fileLines.length - 1));
+        const maxEndLine = Math.min(safeEndLine, startLine + MAX_REFERENCE_PREVIEW_LINES - 1);
+        const previewLines: string[] = [];
+        for (let lineIndex = startLine; lineIndex <= maxEndLine; lineIndex += 1)
+        {
+            previewLines.push(fileLines[lineIndex] ?? '');
+        }
+        if (safeEndLine > maxEndLine)
+        {
+            previewLines.push('... (truncated)');
+        }
+        chunks.push(`${header}\n${previewLines.join('\n')}`);
+    }
+
+    return chunks.join('\n---\n');
 }
 
 export function isErrorPayload(value: unknown): value is ApiErrorPayload
@@ -189,9 +290,9 @@ export async function runResolveSymbolAtPosition(
     {
         return makeError('InvalidParams', "Invalid params. 'filePath' must be an absolute path.");
     }
-    if (!Number.isInteger(line) || line < 0 || !Number.isInteger(character) || character < 0)
+    if (!Number.isInteger(line) || line < 1 || !Number.isInteger(character) || character < 1)
     {
-        return makeError('InvalidParams', "Invalid params. 'line' and 'character' must be non-negative integers.");
+        return makeError('InvalidParams', "Invalid params. 'line' and 'character' must be positive integers (1-based).");
     }
 
     const includeDocumentation = raw?.includeDocumentation !== false;
@@ -204,11 +305,12 @@ export async function runResolveSymbolAtPosition(
         {
             return makeError('INTERNAL_ERROR', 'Failed to convert filePath to file URI.');
         }
+        const lspPosition = toLspPositionFromOneBased(line, character);
         return await client.sendRequest(
             ResolveSymbolAtPositionRequest,
             {
                 uri: resolved.uri,
-                position: { line, character },
+                position: lspPosition,
                 includeDocumentation
             }
         ).then((result) =>
@@ -230,8 +332,8 @@ export async function runResolveSymbolAtPosition(
             const mappedDefinition = (definition && absoluteDefinitionPath)
                 ? {
                     filePath: absoluteDefinitionPath,
-                    startLine: definition.startLine,
-                    endLine: definition.endLine
+                    startLine: toOneBasedLine(definition.startLine),
+                    endLine: toOneBasedLine(definition.endLine)
                 }
                 : undefined;
 
@@ -371,9 +473,9 @@ export async function runFindReferences(
     {
         return makeError('InvalidParams', "Invalid params. 'filePath' must be an absolute path.");
     }
-    if (!Number.isInteger(line) || line < 0 || !Number.isInteger(character) || character < 0)
+    if (!Number.isInteger(line) || line < 1 || !Number.isInteger(character) || character < 1)
     {
-        return makeError('InvalidParams', "Invalid params. 'line' and 'character' must be non-negative integers.");
+        return makeError('InvalidParams', "Invalid params. 'line' and 'character' must be positive integers (1-based).");
     }
 
     try
@@ -384,11 +486,12 @@ export async function runFindReferences(
         {
             return makeError('INTERNAL_ERROR', 'Failed to convert filePath to file URI.');
         }
+        const lspPosition = toLspPositionFromOneBased(line, character);
         const result = await client.sendRequest(
             'textDocument/references',
             {
                 textDocument: { uri: resolved.uri },
-                position: { line, character },
+                position: lspPosition,
                 context: { includeDeclaration: true }
             }
         ) as LspLocation[] | null;
@@ -416,10 +519,7 @@ export async function runFindReferences(
             });
         }
 
-        return {
-            ok: true,
-            references
-        };
+        return await formatFindReferencesPreview(references);
     }
     catch (error)
     {
