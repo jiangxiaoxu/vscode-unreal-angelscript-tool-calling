@@ -1,55 +1,148 @@
 # Unreal Angelscript VS Code Extension
 
-面向开发者与使用者的 UnrealEngine-Angelscript VS Code 扩展. 本分支增加了 Language Model Tool 调用与 MCP(HTTP) 支持.
+[English](#english) | [中文](#中文)
 
-## 快速开始(使用者)
-1. 使用带 Angelscript 插件的 Unreal Editor 版本.
-2. 用 VS Code 打开项目下的 `Script` 文件夹作为工作区根目录.
-3. 启动 Unreal Editor, 扩展会自动建立连接.
+---
 
-提示:
-- 多工作区时仅主 workspace 生效.
-- 需要 `Script` 为根目录或 `<workspace>/Script` 存在.
+## English
 
-## 主要功能
-- 代码补全, 跳转, 重命名, 引用查找, 语义高亮.
-- 保存时从 Unreal Editor 获取编译错误并显示.
-- 调试支持, 断点与异常暂停.
-- 右键命令: Go to Symbol, Add Import To, Quick Open Import.
+### Overview
+This extension provides language server and debugger support for UnrealEngine-Angelscript, with additional LM tools and built-in MCP(HTTP) support in this fork.
 
-部分功能依赖 Unreal Editor 连接, 未连接时会降级.
+### Quick Start
+1. Use an Unreal Editor build with Angelscript enabled.
+2. Open your project's `Script` folder in VS Code as the workspace root.
+3. Start Unreal Editor. The extension connects automatically.
 
-## 离线缓存
-扩展启动时会尝试从缓存恢复内存数据, 以便在未连接引擎时提供基础功能.
+Notes:
+- In multi-root workspaces, only the primary workspace is used.
+- The workspace must be `Script` itself, or contain `<workspace>/Script`.
 
-- 缓存路径: `Script/.vscode/angelscript/unreal-cache.json`.
-- 写入时机: 收到 `DebugDatabaseFinished` 或 `DebugDatabaseSettings` 后触发刷新.
-- 内容包含: DebugDatabase chunks, scriptSettings, engineSupportsCreateBlueprint.
-- 不包含: assets, script-index.
-- 缓存损坏或版本不匹配时会被忽略, 不会加载.
-- 写入为临时文件 + fsync + rename, 用于降低中断写入导致的损坏概率.
+### Core Features
+- Code completion, go to definition, rename, find references, semantic highlighting.
+- Compile errors from Unreal Editor on save.
+- Debugging support, breakpoints and exception pause.
+- Context commands: `Go to Symbol`, `Add Import To`, `Quick Open Import`.
 
-## Language Model Tool
-本分支暴露以下工具调用, 供 Copilot 或其它 LM 使用:
+Some features degrade when Unreal Editor is disconnected.
+
+### Offline Cache
+The extension restores cache data at startup to provide baseline capabilities without an active engine connection.
+
+- Cache path: `Script/.vscode/angelscript/unreal-cache.json`
+- Refresh trigger: `DebugDatabaseFinished` or `DebugDatabaseSettings`
+- Includes: DebugDatabase chunks, scriptSettings, engineSupportsCreateBlueprint
+- Excludes: assets, script-index
+- Corrupt or version-mismatched cache is ignored safely
+- Write strategy: temp file + fsync + rename
+
+### Language Model Tools
+Exposed tools:
 - `angelscript_searchApi`
 - `angelscript_resolveSymbolAtPosition`
 - `angelscript_getTypeMembers`
 - `angelscript_getClassHierarchy`
 - `angelscript_findReferences`
 
-工具默认返回 JSON 字符串, 其中 `angelscript_findReferences` 成功时返回 text 预览(失败时返回 JSON error). 详细字段定义见实现文件 `extension/src/toolRegistry.ts` 与 `extension/src/toolShared.ts`.
-注意: 输入 `filePath` 必须是绝对路径.
+Output rules:
+- Most tools return JSON text.
+- `angelscript_findReferences` returns preview text on success, and JSON error on failure.
+- Input `filePath` must be absolute.
 
-使用建议:
-- `angelscript_searchApi`: 需要搜索符号或文档时使用. 例如需要通过关键词搜索 AngelScript API、类型、常量、函数、方法等, 或需要模糊匹配 API.
-- `angelscript_searchApi` 规则提示: 支持空格顺序匹配(`a b`), OR(`a|b`), 精确分隔符(`UObject.`/`Math::`), 可选 filters(kinds/source), 分页(searchIndex/maxBatchResults), 正则(labelQueryUseRegex/signatureRegex).
-- `angelscript_resolveSymbolAtPosition`: 已知文件与位置, 想解析该符号的定义/签名/文档时使用,会返回其种类、签名、定义位置与可选文档. 输入使用绝对 `filePath`, 行列为 1-based, 输出定义行号(`startLine/endLine`)也是 1-based.
-- `angelscript_getTypeMembers`: 使用精确类型名称（class/struct/enum）列出成员(方法/属性),可选包含继承来的成员和文档.
-- `angelscript_getClassHierarchy`: 需要类的继承链与派生关系时使用. 传入精确类名, 通过输出的 `inheritanceChain` 查看父类链, `derived.edges` 查看子类树.
-- `angelscript_findReferences`: 已知文件与位置, 查找该符号在脚本侧的引用. 输入使用绝对 `filePath`, 行列为 1-based. 成功时输出 text 预览(包含路径和源码片段,多结果用 `---` 分隔),失败时输出 JSON error.
+Tool notes:
+- `angelscript_searchApi`: Search Angelscript APIs and docs with fuzzy tokens, OR(`|`), separator constraints(`.`/`::`), optional filters, pagination, and regex.
+- `angelscript_resolveSymbolAtPosition`: Input line/character is 1-based, output definition lines are also 1-based.
+- `angelscript_getTypeMembers`: List members for an exact type name, with optional inherited members/docs.
+- `angelscript_getClassHierarchy`: Return inheritance chain and derived graph for an exact class name.
+- `angelscript_findReferences`: Input line/character is 1-based. Success output is text preview with `---` separators.
 
-## MCP(HTTP) 支持
-内置 Streamable HTTP MCP server, 复用 Angelscript language server 的 API 搜索逻辑.
+### MCP(HTTP) Support
+Built-in Streamable HTTP MCP server reusing Angelscript language server logic.
+
+Example settings:
+```json
+{
+  "UnrealAngelscript.mcp.enabled": true,
+  "UnrealAngelscript.mcp.port": 27199,
+  "UnrealAngelscript.mcp.maxStartupFailures": 5
+}
+```
+
+Codex example:
+```toml
+[mcp_servers.angelscript]
+url = "http://127.0.0.1:27199/mcp"
+```
+
+### Build
+```bash
+npm run compile
+```
+
+### Known Limits
+- When engine is disconnected, details depend on cached DebugDatabase and available `doc` fields.
+- Cache is not written before DebugDatabase processing completes.
+
+### Upstream
+Language Server and Debug Adapter for UnrealEngine-Angelscript:
+https://angelscript.hazelight.se
+
+---
+
+## 中文
+
+### 概览
+这是 UnrealEngine-Angelscript 的 VS Code 扩展分支版本,提供语言服务与调试能力,并新增 LM tools 和内置 MCP(HTTP) 支持.
+
+### 快速开始
+1. 使用启用 Angelscript 的 Unreal Editor 版本.
+2. 在 VS Code 中把项目 `Script` 文件夹作为工作区根目录打开.
+3. 启动 Unreal Editor,扩展会自动连接.
+
+说明:
+- 多工作区场景下仅主工作区生效.
+- 工作区必须是 `Script` 本身,或包含 `<workspace>/Script`.
+
+### 核心功能
+- 代码补全、定义跳转、重命名、引用查找、语义高亮.
+- 保存时展示 Unreal Editor 返回的编译错误.
+- 调试支持,含断点与异常暂停.
+- 右键命令: `Go to Symbol`、`Add Import To`、`Quick Open Import`.
+
+部分能力依赖 Unreal Editor 连接,断开时会降级.
+
+### 离线缓存
+扩展启动时会恢复缓存,在未连接引擎时提供基础能力.
+
+- 缓存路径: `Script/.vscode/angelscript/unreal-cache.json`
+- 刷新时机: `DebugDatabaseFinished` 或 `DebugDatabaseSettings`
+- 包含: DebugDatabase chunks、scriptSettings、engineSupportsCreateBlueprint
+- 不包含: assets、script-index
+- 缓存损坏或版本不匹配会被安全忽略
+- 写入策略: 临时文件 + fsync + rename
+
+### Language Model Tools
+提供以下工具:
+- `angelscript_searchApi`
+- `angelscript_resolveSymbolAtPosition`
+- `angelscript_getTypeMembers`
+- `angelscript_getClassHierarchy`
+- `angelscript_findReferences`
+
+输出规则:
+- 大多数工具返回 JSON 文本.
+- `angelscript_findReferences` 成功返回预览文本,失败返回 JSON error.
+- 输入 `filePath` 必须是绝对路径.
+
+工具说明:
+- `angelscript_searchApi`: 支持模糊 token、OR(`|`)、分隔符约束(`.`/`::`)、过滤、分页与正则搜索.
+- `angelscript_resolveSymbolAtPosition`: 输入行列是 1-based,输出定义行号也是 1-based.
+- `angelscript_getTypeMembers`: 按精确类型名列出成员,可选包含继承成员和文档.
+- `angelscript_getClassHierarchy`: 按精确类名返回继承链和派生图.
+- `angelscript_findReferences`: 输入行列是 1-based,成功返回文本预览,多结果用 `---` 分隔.
+
+### MCP(HTTP) 支持
+内置 Streamable HTTP MCP server,复用 Angelscript language server 能力.
 
 配置示例:
 ```json
@@ -66,158 +159,16 @@ Codex 配置示例:
 url = "http://127.0.0.1:27199/mcp"
 ```
 
-## 开发者构建
+### 构建
 ```bash
 npm run compile
 ```
 
-## 已知限制
-- 未连接引擎时, 仅能使用缓存中的 DebugDatabase 信息, 详细文档取决于引擎是否提供 `doc` 字段.
-- 缓存在 DebugDatabase 完整结束前不会写入.
+### 已知限制
+- 引擎断开时,详情能力依赖缓存 DebugDatabase 与 `doc` 字段可用性.
+- DebugDatabase 完整结束前不会写入缓存.
 
-## 上游
+### 上游
 Language Server and Debug Adapter for UnrealEngine-Angelscript:
 https://angelscript.hazelight.se
 
-## 原始说明(保留)
-Language Server and Debug Adapter for use with the UnrealEngine-Angelscript plugin from https://angelscript.hazelight.se
-
-## Getting Started
-After building or downloading the Unreal Editor version with Angelscript
-enabled from the github page linked above, start the editor and use visual
-studio code to open the 'Script' folder created in your project directory.
-Your 'Script' folder must be set as the root/opened folder for the extension to
-function.
-
-## Features
-### Editor Connection
-The unreal-angelscript extension automatically makes a connection to the
-running Unreal Editor instance for most of its functionality. If the editor
-is not running, certain features will not be available.
-
-### Code Completion
-The extension will try to complete your angelscript code as you type it
-using normal visual studio code language server features.
-
-### Error Display
-When saving a file the unreal editor automatically compiles and reloads it,
-sending any errors to the visual code extension. Errors will be highlighted
-in the code display and in the problems window.
-
-### Debugging
-You can start debugging from the Debug sidebar or by pressing F5. While
-debug mode is active, breakpoints can be set in angelscript files and
-the unreal editor will automatically break and stop execution when
-they are reached.
-
-Hitting 'Stop' on the debug toolbar will not close the unreal editor,
-it merely stops the debug connection, causing breakpoints to be ignored.
-
-When the debug connection is active, any exceptions that occur during
-angelscript execution will automatically cause the editor and visual
-studio code to pause execution and show the exception.
-
-### Go to Symbol
-The default visual studio code 'Go to Definition' (F12) is implemented for
-angelscript symbols. A separate command is added to the right click menu
-(default shortcut: Alt+G), named 'Go to Symbol'. This command functions
-identically to 'Go to Definition' for angelscript symbols.
-
-If you have the Unreal Editor open as well as Visual Studio proper showing
-the C++ source code for unreal, the extension will try to use its
-unreal editor connection to browse your Visual Studio to the right place,
-similar to double clicking a C++ class or function in blueprints.
-
-This uses the standard unreal source navigation system, which is only
-implemented for classes and functions.
-
-### Region Blocks
-The editor context menu includes a "Wrap with //#region" command for angelscript.
-If there is no selection, it inserts a region template and places the cursor on the label.
-Selections are expanded to full lines before wrapping.
-
-### Add Import To
-The 'Add Import To' (default shortcut: Shift+Alt+I) command from the
-right click menu will try to automatically add an import statement
-to the top of the file to import the type that the command was run on.
-
-### Quick Open Import
-The 'Quick Open Import' (default shortcut: Ctrl+E or Ctrl+P) command from the
-right click menu will try to open the quick open navigation with the import
-statement.
-
-### More Language Features
-This extension acts as a full language server for angelscript code. This includes
-semantic highlighting, signature help, reference search, rename symbol and a number
-of helpful code actions and quickfixes.
-
-Some of these features require an active connection to the unreal editor.
-
-### Semantic Symbol Colors
-There are more types of semantic symbols generated by the extension than there
-are colors specified by most color themes.
-
-The default visual studio code color theme will display all variables in blue,
-for example, regardless of whether the variable is a member, parameter or local.
-
-You can add a snippet to your `.vscode/settings.json` inside your project folder
-to add extra colors to make these differences more visible.
-
-For example, to add extra colors to the default vscode dark theme:
-
-```
-    "editor.tokenColorCustomizations": {
-		"[Default Dark+]": {
-			"textMateRules": [
-				{
-					"scope": "support.type.component.angelscript",
-					"settings": {
-						"foreground": "#4ec962"
-					}
-				},
-				{
-					"scope": "support.type.actor.angelscript",
-					"settings": {
-						"foreground": "#2eb0c9"
-					}
-				},
-				{
-					"scope": "variable.parameter.angelscript",
-					"settings": {
-						"foreground": "#ffe5d9"
-					}
-				},
-				{
-					"scope": "variable.other.local.angelscript",
-					"settings": {
-						"foreground": "#e8ffed"
-					}
-				},
-				{
-					"scope": "variable.other.global.angelscript",
-					"settings": {
-						"foreground": "#b99cfe"
-					}
-				},
-				{
-					"scope": "variable.other.global.accessor.angelscript",
-					"settings": {
-						"foreground": "#b99cfe"
-					}
-				},
-				{
-					"scope": "entity.name.function.angelscript",
-					"settings": {
-						"foreground": "#b99cfe"
-					}
-				},
-				{
-					"scope": "invalid.unimported.angelscript",
-					"settings": {
-						"foreground": "#ff9000"
-					}
-				},
-			]
-		}
-	}
-```
