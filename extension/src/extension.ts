@@ -24,8 +24,25 @@ import {
 import { startMcpHttpServerManager } from './mcpHttpServer';
 import { registerLmTools } from './toolRegistry';
 
+const CONFLICT_EXTENSION_ID = 'Hazelight.unreal-angelscript';
+
 export function activate(context: ExtensionContext)
 {
+    const conflictExtension = vscode.extensions.getExtension(CONFLICT_EXTENSION_ID);
+    if (conflictExtension)
+    {
+        void vscode.window.showErrorMessage(
+            `Detected incompatible extension: ${CONFLICT_EXTENSION_ID}. Please uninstall it before using this extension.`,
+            'Open Extensions'
+        ).then((selection) =>
+        {
+            if (selection === 'Open Extensions')
+            {
+                void vscode.commands.executeCommand('workbench.extensions.search', `@id:${CONFLICT_EXTENSION_ID}`);
+            }
+        });
+        return;
+    }
 
     // The server is implemented in node
     let serverModule = context.asAbsolutePath(path.join('language-server', 'out', 'server.js'));

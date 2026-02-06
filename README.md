@@ -82,6 +82,7 @@ npm run compile
 ### Known Limits
 - When engine is disconnected, details depend on cached DebugDatabase and available `doc` fields.
 - Cache is not written before DebugDatabase processing completes.
+- This extension is incompatible with `Hazelight.unreal-angelscript`. On each startup, if that extension is installed, this extension shows an uninstall prompt and stops initialization.
 
 ### Upstream
 Language Server and Debug Adapter for UnrealEngine-Angelscript:
@@ -167,6 +168,7 @@ npm run compile
 ### 已知限制
 - 引擎断开时,详情能力依赖缓存 DebugDatabase 与 `doc` 字段可用性.
 - DebugDatabase 完整结束前不会写入缓存.
+- 本扩展与 `Hazelight.unreal-angelscript` 不兼容. 每次启动如果检测到该扩展已安装,会弹窗提示卸载并停止初始化.
 
 ### 上游
 Language Server and Debug Adapter for UnrealEngine-Angelscript:

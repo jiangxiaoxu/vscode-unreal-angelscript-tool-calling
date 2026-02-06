@@ -6,6 +6,22 @@ Maintenance rule:
 - For each release, keep both `### English` and `### 中文` sections.
 - Keep section order aligned to reduce translation drift.
 
+## [1.8.8035] - 2026-02-06
+
+### English
+
+#### Changed
+- Added startup conflict detection for `Hazelight.unreal-angelscript`.
+- On every startup, when the conflicting extension is detected, this extension now shows an uninstall prompt and skips initialization.
+- Updated README compatibility notes to document this behavior.
+
+### 中文
+
+#### 变更
+- 新增对 `Hazelight.unreal-angelscript` 的启动冲突检测.
+- 每次启动时,如果检测到冲突扩展,本扩展会弹窗提示卸载并跳过初始化.
+- 已在 README 中补充该兼容性说明.
+
 ## [1.8.8033] - 2026-02-06
 
 ### English
