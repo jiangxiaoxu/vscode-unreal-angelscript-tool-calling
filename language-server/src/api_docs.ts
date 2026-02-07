@@ -206,6 +206,57 @@ function getModuleRelativePath(modulename: string) : string
     return modulename.replace(/\./g, "/") + ".as";
 }
 
+function findLastMatchIndex(text: string, regex: RegExp) : number
+{
+    let flags = regex.flags;
+    if (!flags.includes("g"))
+        flags += "g";
+
+    let matchRegex = new RegExp(regex.source, flags);
+    let match : RegExpExecArray = null;
+    let foundIndex = -1;
+    while ((match = matchRegex.exec(text)) !== null)
+    {
+        foundIndex = match.index ?? -1;
+        if (match[0].length == 0)
+            matchRegex.lastIndex += 1;
+    }
+
+    return foundIndex;
+}
+
+function getClassStartOffset(content: string, scopeStartOffset: number, nameOffset: number) : number
+{
+    if (!content)
+        return nameOffset;
+
+    let safeScopeStart = scopeStartOffset;
+    let safeNameOffset = nameOffset;
+    if (safeScopeStart < 0)
+        safeScopeStart = 0;
+    if (safeScopeStart > content.length)
+        safeScopeStart = content.length;
+
+    if (safeNameOffset < safeScopeStart)
+        safeNameOffset = safeScopeStart;
+    if (safeNameOffset > content.length)
+        safeNameOffset = content.length;
+
+    let header = content.substring(safeScopeStart, safeNameOffset);
+    if (header.length == 0)
+        return safeNameOffset;
+
+    let macroIndex = findLastMatchIndex(header, /UCLASS\s*\(/);
+    if (macroIndex >= 0)
+        return safeScopeStart + macroIndex;
+
+    let classIndex = findLastMatchIndex(header, /\bclass\b/);
+    if (classIndex >= 0)
+        return safeScopeStart + classIndex;
+
+    return safeNameOffset;
+}
+
 function getScriptClassSourceInfo(dbType: typedb.DBType) : {
     source: "cpp";
 } | {
@@ -231,13 +282,20 @@ function getScriptClassSourceInfo(dbType: typedb.DBType) : {
     }
 
     let module = scriptfiles.GetModule(moduleName);
-    let startOffset = dbType.moduleOffset;
+    let scopeStartOffset = dbType.moduleScopeStart >= 0 ? dbType.moduleScopeStart : dbType.moduleOffset;
+    let nameOffset = dbType.moduleOffset >= 0 ? dbType.moduleOffset : scopeStartOffset;
+    if (nameOffset < scopeStartOffset)
+        nameOffset = scopeStartOffset;
+
     let endOffset = dbType.moduleOffsetEnd;
-    if (endOffset < startOffset)
-        endOffset = startOffset;
+    if (dbType.moduleScopeEnd > nameOffset)
+        endOffset = dbType.moduleScopeEnd;
+    if (endOffset < nameOffset)
+        endOffset = nameOffset;
 
     if (module && module.loaded && module.textDocument)
     {
+        let startOffset = getClassStartOffset(module.content, scopeStartOffset, nameOffset);
         let startLine = module.getPosition(startOffset).line + 1;
         let endLine = module.getPosition(endOffset).line + 1;
         if (endLine < startLine)
@@ -255,6 +313,7 @@ function getScriptClassSourceInfo(dbType: typedb.DBType) : {
         try
         {
             let content = fs.readFileSync(module.filename, "utf8");
+            let startOffset = getClassStartOffset(content, scopeStartOffset, nameOffset);
             let startLine = getLineFromOffset(content, startOffset);
             let endLine = getLineFromOffset(content, endOffset);
             if (endLine < startLine)
