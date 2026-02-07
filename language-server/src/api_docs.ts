@@ -1,6 +1,7 @@
 import * as scriptfiles from './as_parser';
 import * as typedb from './database';
 import * as documentation from './documentation';
+import * as fs from 'fs';
 
 type ApiSearchSource = "native" | "script" | "both";
 
@@ -57,7 +58,14 @@ type TypeHierarchyResult = {
     root: string;
     supers: string[];
     derivedByParent: Record<string, string[]>;
-    sourceByClass: Record<string, "cpp" | "as">;
+    sourceByClass: Record<string, {
+        source: "cpp";
+    } | {
+        source: "as";
+        filePath: string;
+        startLine: number;
+        endLine: number;
+    }>;
     limits: {
         maxSuperDepth: number;
         maxSubDepth: number;
@@ -174,6 +182,103 @@ function buildTypeHierarchyEntry(dbType: typedb.DBType) : "cpp" | "as"
     return dbType.isUnrealType() ? "cpp" : "as";
 }
 
+function getLineFromOffset(content: string, offset: number) : number
+{
+    let safeOffset = offset;
+    if (safeOffset < 0)
+        safeOffset = 0;
+    if (safeOffset > content.length)
+        safeOffset = content.length;
+
+    let line = 1;
+    for (let i = 0; i < safeOffset; ++i)
+    {
+        if (content.charCodeAt(i) == 10)
+            line += 1;
+    }
+    return line;
+}
+
+function getModuleRelativePath(modulename: string) : string
+{
+    if (!modulename || modulename.length == 0)
+        return "";
+    return modulename.replace(/\./g, "/") + ".as";
+}
+
+function getScriptClassSourceInfo(dbType: typedb.DBType) : {
+    source: "cpp";
+} | {
+    source: "as";
+    filePath: string;
+    startLine: number;
+    endLine: number;
+}
+{
+    if (dbType.isUnrealType())
+        return { source: "cpp" };
+
+    let moduleName = dbType.declaredModule;
+    let filePath = getModuleRelativePath(moduleName);
+    if (!moduleName || moduleName.length == 0 || filePath.length == 0)
+    {
+        return {
+            source: "as",
+            filePath: filePath,
+            startLine: 1,
+            endLine: 1,
+        };
+    }
+
+    let module = scriptfiles.GetModule(moduleName);
+    let startOffset = dbType.moduleOffset;
+    let endOffset = dbType.moduleOffsetEnd;
+    if (endOffset < startOffset)
+        endOffset = startOffset;
+
+    if (module && module.loaded && module.textDocument)
+    {
+        let startLine = module.getPosition(startOffset).line + 1;
+        let endLine = module.getPosition(endOffset).line + 1;
+        if (endLine < startLine)
+            endLine = startLine;
+        return {
+            source: "as",
+            filePath: filePath,
+            startLine: startLine,
+            endLine: endLine,
+        };
+    }
+
+    if (module && module.filename && module.filename.length != 0)
+    {
+        try
+        {
+            let content = fs.readFileSync(module.filename, "utf8");
+            let startLine = getLineFromOffset(content, startOffset);
+            let endLine = getLineFromOffset(content, endOffset);
+            if (endLine < startLine)
+                endLine = startLine;
+            return {
+                source: "as",
+                filePath: filePath,
+                startLine: startLine,
+                endLine: endLine,
+            };
+        }
+        catch
+        {
+        }
+    }
+
+    return {
+        source: "as",
+        filePath: filePath,
+        startLine: 1,
+        endLine: 1,
+    };
+}
+
 function resolveHierarchySuperType(dbType: typedb.DBType) : typedb.DBType | null
 {
     if (!dbType)
@@ -231,7 +336,14 @@ function buildDerivedEdges(
     index: Map<string, Array<typedb.DBType>>,
     visited: Set<typedb.DBType>,
     derivedByParent: Record<string, string[]>,
-    sourceByClass: Record<string, "cpp" | "as">,
+    sourceByClass: Record<string, {
+        source: "cpp";
+    } | {
+        source: "as";
+        filePath: string;
+        startLine: number;
+        endLine: number;
+    }>,
     breadthTruncatedByClass: Record<string, number>
 ) : boolean
 {
@@ -271,7 +383,7 @@ function buildDerivedEdges(
     for (let child of keptChildren)
     {
         visited.add(child);
-        sourceByClass[child.name] = buildTypeHierarchyEntry(child);
+        sourceByClass[child.name] = getScriptClassSourceInfo(child);
         derivedByParent[dbType.name].push(child.name);
         if (buildDerivedEdges(child, maxDepth - 1, maxBreadth, index, visited, derivedByParent, sourceByClass, breadthTruncatedByClass))
             depthTruncated = true;
@@ -969,8 +1081,15 @@ export function GetTypeHierarchy(params: TypeHierarchyParams) : TypeHierarchyRes
     if (maxSuperDepth == 0 && maxSubDepth == 0)
         return { ok: false, error: { code: "InvalidParams", message: "Invalid params. 'maxSuperDepth' and 'maxSubDepth' cannot both be 0." } };
 
-    let sourceByClass: Record<string, "cpp" | "as"> = {};
-    sourceByClass[dbType.name] = buildTypeHierarchyEntry(dbType);
+    let sourceByClass: Record<string, {
+        source: "cpp";
+    } | {
+        source: "as";
+        filePath: string;
+        startLine: number;
+        endLine: number;
+    }> = {};
+    sourceByClass[dbType.name] = getScriptClassSourceInfo(dbType);
 
     let supers: string[] = [];
     let superVisited = new Set<typedb.DBType>();
@@ -982,7 +1101,7 @@ export function GetTypeHierarchy(params: TypeHierarchyParams) : TypeHierarchyRes
         if (!next || superVisited.has(next))
             break;
         superVisited.add(next);
-        sourceByClass[next.name] = buildTypeHierarchyEntry(next);
+        sourceByClass[next.name] = getScriptClassSourceInfo(next);
         supers.push(next.name);
         current = next;
         superDepth += 1;

@@ -53,7 +53,7 @@ Tool notes:
 - `angelscript_searchApi`: Search Angelscript APIs and docs with fuzzy tokens, OR(`|`), separator constraints(`.`/`::`), optional filters, pagination, and regex.
 - `angelscript_resolveSymbolAtPosition`: Input line/character is 1-based, output definition lines are also 1-based.
 - `angelscript_getTypeMembers`: List members for an exact type name, with optional inherited members/docs.
-- `angelscript_getClassHierarchy`: Return compact class hierarchy JSON for an exact class name: `root`, `supers`(nearest parent first), `derivedByParent`(parent -> direct children), `sourceByClass`, `limits`, `truncated`. Defaults: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
+- `angelscript_getClassHierarchy`: Return compact class hierarchy JSON for an exact class name: `root`, `supers`(nearest parent first), `derivedByParent`(parent -> direct children), `sourceByClass`, `limits`, `truncated`. In `sourceByClass`, cpp classes are `{ source: "cpp" }`, script classes are `{ source: "as", filePath, startLine, endLine }` (`filePath` is workspace-relative, line numbers are 1-based). Defaults: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
 - `angelscript_findReferences`: Input line/character is 1-based. Success output is text preview with `---` separators.
 
 ### MCP(HTTP) Support
@@ -139,7 +139,7 @@ https://angelscript.hazelight.se
 - `angelscript_searchApi`: 支持模糊 token、OR(`|`)、分隔符约束(`.`/`::`)、过滤、分页与正则搜索.
 - `angelscript_resolveSymbolAtPosition`: 输入行列是 1-based,输出定义行号也是 1-based.
 - `angelscript_getTypeMembers`: 按精确类型名列出成员,可选包含继承成员和文档.
-- `angelscript_getClassHierarchy`: 按精确类名返回紧凑层级 JSON: `root`, `supers`(近父到根), `derivedByParent`(父类 -> 直接子类), `sourceByClass`, `limits`, `truncated`. 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
+- `angelscript_getClassHierarchy`: 按精确类名返回紧凑层级 JSON: `root`, `supers`(近父到根), `derivedByParent`(父类 -> 直接子类), `sourceByClass`, `limits`, `truncated`. `sourceByClass` 中, cpp 类为 `{ source: "cpp" }`, 脚本类为 `{ source: "as", filePath, startLine, endLine }` (`filePath` 是相对工作区路径, 行号是 1-based). 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
 - `angelscript_findReferences`: 输入行列是 1-based,成功返回文本预览,多结果用 `---` 分隔.
 
 ### MCP(HTTP) 支持

@@ -160,7 +160,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_getClassHierarchy',
-        description: 'Get class hierarchy in compact JSON for an exact class name (e.g., "APawn"). Result fields: root, supers, derivedByParent, sourceByClass, limits, truncated. supers is ordered nearest-parent-first up to root. derivedByParent is a map of parent -> direct children (stable name order). Supports depth and breadth limits.',
+        description: 'Get class hierarchy in compact JSON for an exact class name (e.g., "APawn"). Result fields: root, supers, derivedByParent, sourceByClass, limits, truncated. supers is ordered nearest-parent-first up to root. derivedByParent is a map of parent -> direct children (stable name order). sourceByClass[className] is { source: "cpp" } or { source: "as", filePath, startLine, endLine }, where filePath is workspace-relative and line numbers are 1-based. Supports depth and breadth limits.',
         inputSchema: z.object({
             name: z.string().describe('Exact class name to inspect (e.g., "APawn").'),
             maxSuperDepth: z.number().int().optional().describe('Maximum number of supertypes to return. Non-negative integer. Default is 3.'),

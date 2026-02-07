@@ -51,12 +51,20 @@ export type GetTypeHierarchyParams = {
     maxSubDepth?: number;
     maxSubBreadth?: number;
 };
+export type TypeHierarchyClassSource = {
+    source: 'cpp';
+} | {
+    source: 'as';
+    filePath: string;
+    startLine: number;
+    endLine: number;
+};
 export type GetTypeHierarchyResult = {
     ok: true;
     root: string;
     supers: string[];
     derivedByParent: Record<string, string[]>;
-    sourceByClass: Record<string, 'cpp' | 'as'>;
+    sourceByClass: Record<string, TypeHierarchyClassSource>;
     limits: {
         maxSuperDepth: number;
         maxSubDepth: number;
