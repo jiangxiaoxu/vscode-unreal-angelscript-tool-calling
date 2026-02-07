@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8035",
+    "version": "1.8.8036",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -220,8 +220,8 @@
                 ],
                 "toolReferenceName": "angelscript_getClassHierarchy",
                 "displayName": "Angelscript Class Hierarchy",
-                "modelDescription": "Get a class inheritance chain and derived edges map. Requires an exact class name (e.g., \"APawn\"). Nodes include cppClasses/asClasses arrays. Supertypes include Unreal hierarchy when available. Returns JSON: { ok:true, inheritanceChain:[...], derived:{ root, edges }, nodes:{ cppClasses, asClasses }, limits:{ maxSuperDepth, maxSubDepth }, truncated:{ inheritanceChain, derived } } or { ok:false, error:{ code, message } }.",
-                "userDescription": "Get class inheritance chain and derived edges map.",
+                "modelDescription": "Get class hierarchy in compact JSON for an exact class name (e.g., \"APawn\"). Returns JSON: { ok:true, root, supers, derivedByParent, sourceByClass, limits:{ maxSuperDepth, maxSubDepth, maxSubBreadth }, truncated:{ supers, derivedDepth, derivedBreadthByClass } } or { ok:false, error:{ code, message } }. supers order is nearest parent first up to root. derivedByParent is parent -> direct children[] with stable class-name ordering.",
+                "userDescription": "Get compact class hierarchy: root, supers, derivedByParent, sourceByClass.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-class)",
                 "inputSchema": {
@@ -233,13 +233,18 @@
                         },
                         "maxSuperDepth": {
                             "type": "number",
-                            "description": "Optional. Maximum number of supertypes to return. Non-negative integer. Default is 5.",
-                            "default": 5
+                            "description": "Optional. Maximum number of supertypes to return. Non-negative integer. Default is 3.",
+                            "default": 3
                         },
                         "maxSubDepth": {
                             "type": "number",
-                            "description": "Optional. Maximum depth for subtype tree. Non-negative integer. Default is 8.",
-                            "default": 8
+                            "description": "Optional. Maximum depth for subtype tree. Non-negative integer. Default is 2.",
+                            "default": 2
+                        },
+                        "maxSubBreadth": {
+                            "type": "number",
+                            "description": "Optional. Maximum number of direct children returned per class. Non-negative integer. Default is 10. Truncation per class is reported in truncated.derivedBreadthByClass.",
+                            "default": 10
                         }
                     },
                     "required": [

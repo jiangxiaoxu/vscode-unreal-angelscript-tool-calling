@@ -410,6 +410,7 @@ export async function runGetTypeHierarchy(
 
     const maxSuperDepth = typeof raw?.maxSuperDepth === 'number' ? raw.maxSuperDepth : undefined;
     const maxSubDepth = typeof raw?.maxSubDepth === 'number' ? raw.maxSubDepth : undefined;
+    const maxSubBreadth = typeof raw?.maxSubBreadth === 'number' ? raw.maxSubBreadth : undefined;
     if (maxSuperDepth !== undefined)
     {
         if (!Number.isInteger(maxSuperDepth) || maxSuperDepth < 0)
@@ -424,7 +425,14 @@ export async function runGetTypeHierarchy(
             return makeError('InvalidParams', "Invalid params. 'maxSubDepth' must be a non-negative integer.");
         }
     }
-    if ((maxSuperDepth ?? 5) === 0 && (maxSubDepth ?? 8) === 0)
+    if (maxSubBreadth !== undefined)
+    {
+        if (!Number.isInteger(maxSubBreadth) || maxSubBreadth < 0)
+        {
+            return makeError('InvalidParams', "Invalid params. 'maxSubBreadth' must be a non-negative integer.");
+        }
+    }
+    if ((maxSuperDepth ?? 3) === 0 && (maxSubDepth ?? 2) === 0)
     {
         return makeError('InvalidParams', "Invalid params. 'maxSuperDepth' and 'maxSubDepth' cannot both be 0.");
     }
@@ -437,7 +445,8 @@ export async function runGetTypeHierarchy(
             {
                 name,
                 maxSuperDepth,
-                maxSubDepth
+                maxSubDepth,
+                maxSubBreadth
             }
         ) as GetTypeHierarchyResult;
     }

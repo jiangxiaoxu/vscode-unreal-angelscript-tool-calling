@@ -76,11 +76,13 @@ function prepareTypeMembersInvocation(input: GetTypeMembersParams | null | undef
 function prepareTypeHierarchyInvocation(input: GetTypeHierarchyParams | null | undefined): string
 {
     const name = typeof input?.name === "string" ? input.name.trim() : "";
-    const maxSuperDepth = typeof input?.maxSuperDepth === "number" ? input.maxSuperDepth : 5;
-    const maxSubDepth = typeof input?.maxSubDepth === "number" ? input.maxSubDepth : 8;
+    const maxSuperDepth = typeof input?.maxSuperDepth === "number" ? input.maxSuperDepth : 3;
+    const maxSubDepth = typeof input?.maxSubDepth === "number" ? input.maxSubDepth : 2;
+    const maxSubBreadth = typeof input?.maxSubBreadth === "number" ? input.maxSubBreadth : 10;
     const details: string[] = [];
     details.push(`maxSuperDepth=${maxSuperDepth}`);
     details.push(`maxSubDepth=${maxSubDepth}`);
+    details.push(`maxSubBreadth=${maxSubBreadth}`);
     const label = name ? `"${name}"` : "<empty>";
     return `Get Angelscript type hierarchy ${label} (${details.join(", ")})`;
 }
@@ -158,11 +160,12 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_getClassHierarchy',
-        description: 'Get a class inheritance chain and derived edges map. Requires an exact class name (e.g., "APawn"). Nodes include cppClasses/asClasses arrays. Supertypes include Unreal hierarchy when available.',
+        description: 'Get class hierarchy in compact JSON for an exact class name (e.g., "APawn"). Result fields: root, supers, derivedByParent, sourceByClass, limits, truncated. supers is ordered nearest-parent-first up to root. derivedByParent is a map of parent -> direct children (stable name order). Supports depth and breadth limits.',
         inputSchema: z.object({
             name: z.string().describe('Exact class name to inspect (e.g., "APawn").'),
-            maxSuperDepth: z.number().int().optional().describe('Maximum number of supertypes to return. Non-negative integer. Default is 5.'),
-            maxSubDepth: z.number().int().optional().describe('Maximum depth for subtype tree. Non-negative integer. Default is 8.')
+            maxSuperDepth: z.number().int().optional().describe('Maximum number of supertypes to return. Non-negative integer. Default is 3.'),
+            maxSubDepth: z.number().int().optional().describe('Maximum depth for subtype tree. Non-negative integer. Default is 2.'),
+            maxSubBreadth: z.number().int().optional().describe('Maximum number of direct children returned per class. Non-negative integer. Default is 10. Truncation count is reported in truncated.derivedBreadthByClass.')
         }),
         prepareInvocation: prepareTypeHierarchyInvocation,
         run: async (context, input: GetTypeHierarchyParams | null | undefined) =>

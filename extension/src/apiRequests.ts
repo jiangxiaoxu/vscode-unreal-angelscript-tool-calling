@@ -49,26 +49,23 @@ export type GetTypeHierarchyParams = {
     name: string;
     maxSuperDepth?: number;
     maxSubDepth?: number;
-};
-export type TypeHierarchyEntry = {
-    cppClasses: string[];
-    asClasses: string[];
+    maxSubBreadth?: number;
 };
 export type GetTypeHierarchyResult = {
     ok: true;
-    inheritanceChain: string[];
-    derived: {
-        root: string;
-        edges: Record<string, string[]>;
-    };
-    nodes: TypeHierarchyEntry;
+    root: string;
+    supers: string[];
+    derivedByParent: Record<string, string[]>;
+    sourceByClass: Record<string, 'cpp' | 'as'>;
     limits: {
         maxSuperDepth: number;
         maxSubDepth: number;
+        maxSubBreadth: number;
     };
     truncated: {
-        inheritanceChain: boolean;
-        derived: boolean;
+        supers: boolean;
+        derivedDepth: boolean;
+        derivedBreadthByClass: Record<string, number>;
     };
 } | {
     ok: false;
