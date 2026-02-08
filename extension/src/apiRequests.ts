@@ -7,6 +7,25 @@ export const ProvideInlineValuesRequest = new RequestType<TextDocumentPositionPa
 export const GetAPIRequest = new RequestType<any, any[], void>('angelscript/getAPI');
 export const GetAPIDetailsRequest = new RequestType<any, string, void>('angelscript/getAPIDetails');
 export const GetAPIDetailsBatchRequest = new RequestType<any[], string[], void>('angelscript/getAPIDetailsBatch');
+
+export type ToolFailure = {
+    ok: false;
+    error: {
+        code: string;
+        message: string;
+        retryable?: boolean;
+        hint?: string;
+        details?: Record<string, unknown>;
+    };
+};
+
+export type ToolSuccess<TData> = {
+    ok: true;
+    data: TData;
+};
+
+export type ToolResult<TData> = ToolSuccess<TData> | ToolFailure;
+
 export type GetTypeMembersParams = {
     name: string;
     namespace?: string;
@@ -29,7 +48,7 @@ export type TypeMemberInfo = {
     propertyName?: string;
     visibility: TypeMemberVisibility;
 };
-export type GetTypeMembersResult = {
+export type GetTypeMembersLspResult = {
     ok: true;
     type: {
         name: string;
@@ -44,7 +63,19 @@ export type GetTypeMembersResult = {
         message: string;
     };
 };
-export const GetTypeMembersRequest = new RequestType<GetTypeMembersParams, GetTypeMembersResult, void>('angelscript/getTypeMembers');
+
+export type GetTypeMembersToolData = {
+    type: {
+        name: string;
+        namespace: string;
+        qualifiedName: string;
+    };
+    members: TypeMemberInfo[];
+};
+
+export type GetTypeMembersResult = ToolResult<GetTypeMembersToolData>;
+
+export const GetTypeMembersRequest = new RequestType<GetTypeMembersParams, GetTypeMembersLspResult, void>('angelscript/getTypeMembers');
 export type GetTypeHierarchyParams = {
     name: string;
     maxSuperDepth?: number;
@@ -58,8 +89,9 @@ export type TypeHierarchyClassSource = {
     filePath: string;
     startLine: number;
     endLine: number;
+    preview?: string;
 };
-export type GetTypeHierarchyResult = {
+export type GetTypeHierarchyLspResult = {
     ok: true;
     root: string;
     supers: string[];
@@ -82,7 +114,27 @@ export type GetTypeHierarchyResult = {
         message: string;
     };
 };
-export const GetTypeHierarchyRequest = new RequestType<GetTypeHierarchyParams, GetTypeHierarchyResult, void>('angelscript/getTypeHierarchy');
+
+export type GetTypeHierarchyToolData = {
+    root: string;
+    supers: string[];
+    derivedByParent: Record<string, string[]>;
+    sourceByClass: Record<string, TypeHierarchyClassSource>;
+    limits: {
+        maxSuperDepth: number;
+        maxSubDepth: number;
+        maxSubBreadth: number;
+    };
+    truncated: {
+        supers: boolean;
+        derivedDepth: boolean;
+        derivedBreadthByClass: Record<string, number>;
+    };
+};
+
+export type GetTypeHierarchyResult = ToolResult<GetTypeHierarchyToolData>;
+
+export const GetTypeHierarchyRequest = new RequestType<GetTypeHierarchyParams, GetTypeHierarchyLspResult, void>('angelscript/getTypeHierarchy');
 export type GetAPISearchParams = {
     filter: string;
     source?: SearchSource;
@@ -106,15 +158,25 @@ export type ResolveSymbolAtPositionToolParams = {
     includeDocumentation?: boolean;
 };
 
-export type ResolveSymbolAtPositionToolResult = string | {
-    ok: false;
-    error: {
-        code: string;
-        message: string;
-        retryable?: boolean;
-        hint?: string;
+export type ResolveSymbolAtPositionToolData = {
+    symbol: {
+        kind: string;
+        name: string;
+        signature: string;
+        definition?: {
+            filePath: string;
+            startLine: number;
+            endLine: number;
+            preview: string;
+        };
+        doc?: {
+            format: 'markdown' | 'plaintext';
+            text: string;
+        };
     };
 };
+
+export type ResolveSymbolAtPositionToolResult = ToolResult<ResolveSymbolAtPositionToolData>;
 
 export type ResolveSymbolAtPositionResult = {
     ok: true;
@@ -160,12 +222,20 @@ export type FindReferencesLocation = {
     };
 };
 
-export type FindReferencesResult = {
-    ok: false;
-    error: {
-        code: string;
-        message: string;
-        retryable?: boolean;
-        hint?: string;
+export type FindReferencesItem = {
+    filePath: string;
+    startLine: number;
+    endLine: number;
+    range: {
+        start: { line: number; character: number };
+        end: { line: number; character: number };
     };
-} | string;
+    preview: string;
+};
+
+export type FindReferencesData = {
+    total: number;
+    references: FindReferencesItem[];
+};
+
+export type FindReferencesResult = ToolResult<FindReferencesData>;

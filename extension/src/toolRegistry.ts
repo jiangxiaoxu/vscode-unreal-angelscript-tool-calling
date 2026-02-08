@@ -5,8 +5,6 @@ import { LanguageClient } from 'vscode-languageclient/node';
 import { AngelscriptSearchParams } from './angelscriptApiSearch';
 import { GetTypeHierarchyParams, GetTypeMembersParams, ResolveSymbolAtPositionToolParams, FindReferencesParams } from './apiRequests';
 import {
-    formatSearchPayloadForOutput,
-    isErrorPayload,
     runFindReferences,
     runGetTypeHierarchy,
     runGetTypeMembers,
@@ -101,7 +99,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     {
         name: 'angelscript_searchApi',
         description:
-            'Search Angelscript API symbols and docs. Spaces act as ordered wildcards; use "a b" to match a...b. Use "|" to separate alternate queries (OR). Use "." or "::" to require those separators; without a space they must be adjacent (e.g., "UObject." or "Math::"), with a space they stay fuzzy (e.g., "UObject ." or "Math ::"). Optional kinds filter: class, struct, enum, method, function, property, globalVariable (case-insensitive, multiple allowed). Optional source filter: native, script, both (default). Signature is always returned; includeDocs controls documentation payload. Paging uses searchIndex (required) and maxBatchResults (default 200). Set labelQueryUseRegex to true to apply a regex to labelQuery after kind filtering; supports /pattern/flags (omit i for case-sensitive). If not using /pattern/flags, default ignore case. Set signatureRegex to filter parsed signatures using a regex (supports /pattern/flags).',
+            'Search Angelscript API symbols and docs. Spaces act as ordered wildcards; use "a b" to match a...b. Use "|" to separate alternate queries (OR). Use "." or "::" to require those separators; without a space they must be adjacent (e.g., "UObject." or "Math::"), with a space they stay fuzzy (e.g., "UObject ." or "Math ::"). Optional kinds filter: class, struct, enum, method, function, property, globalVariable (case-insensitive, multiple allowed). Optional source filter: native, script, both (default). Signature is always returned; includeDocs controls documentation payload. Paging uses searchIndex (required) and maxBatchResults (default 200). Set labelQueryUseRegex to true to apply a regex to labelQuery after kind filtering; supports /pattern/flags (omit i for case-sensitive). If not using /pattern/flags, default ignore case. Set signatureRegex to filter parsed signatures using a regex (supports /pattern/flags). Returns JSON envelope: success { ok:true, data:{...} }, failure { ok:false, error:{ code, message, details? } }.',
         inputSchema: z.object({
             labelQuery: z.string().describe('Search query text for Angelscript API symbols.'),
             searchIndex: z.number().int().describe('0-based start index for paged results.'),
@@ -115,20 +113,17 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
         prepareInvocation: prepareSearchInvocation,
         run: async (context, input: AngelscriptSearchParams | null | undefined) =>
         {
-            const result = await runSearchApi(
+            return await runSearchApi(
                 context.client,
                 context.startedClient,
                 input,
                 context.shouldCancel
             );
-            if (isErrorPayload(result))
-                return result;
-            return formatSearchPayloadForOutput(result, input);
         }
     },
     {
         name: 'angelscript_resolveSymbolAtPosition',
-        description: 'Resolve a symbol at a given document position and return summary text with kind/name/signature, definition preview header, optional documentation block, and source snippet. Input line/character are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). On success, returns preview text only. On failure, returns JSON: { ok:false, error:{ code, message, retryable?, hint? } }. The preview header path prefers workspace-relative path with root prefix, falling back to absolute path when outside workspace.',
+        description: 'Resolve a symbol at a given document position. Input line/character are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Returns JSON envelope: success { ok:true, data:{ symbol:{ kind, name, signature, definition?, doc? } } }, failure { ok:false, error:{ code, message, retryable?, hint?, details? } }. When definition exists, definition contains { filePath, startLine, endLine, preview }; preview is source text for that line range and checks one line above start for Unreal macros UCLASS/UPROPERTY/UFUNCTION/UENUM.',
         inputSchema: z.object({
             filePath: z.string().describe('Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/...").'),
             position: z.object({
@@ -144,7 +139,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_getTypeMembers',
-        description: 'List all members (methods, properties, accessors, mixins) for a type, including inherited members when requested.',
+        description: 'List all members (methods, properties, accessors, mixins) for a type, including inherited members when requested. Returns JSON envelope: success { ok:true, data:{ type, members } }, failure { ok:false, error:{ code, message, details? } }.',
         inputSchema: z.object({
             name: z.string().describe('Type name to inspect.'),
             namespace: z.string().optional().describe('Optional namespace to disambiguate type name. Use empty string for root namespace.'),
@@ -160,7 +155,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_getClassHierarchy',
-        description: 'Get class hierarchy in compact JSON for an exact class name (e.g., "APawn"). Result fields: root, supers, derivedByParent, sourceByClass, limits, truncated. supers is ordered nearest-parent-first up to root. derivedByParent is a map of parent -> direct children (stable name order). sourceByClass[className] is { source: "cpp" } or { source: "as", filePath, startLine, endLine }, where filePath prefers workspace-relative path with root prefix and falls back to absolute path when outside workspace; line numbers are 1-based. Supports depth and breadth limits.',
+        description: 'Get class hierarchy in compact JSON for an exact class name (e.g., "APawn"). Returns JSON envelope: success { ok:true, data:{ root, supers, derivedByParent, sourceByClass, limits, truncated } }, failure { ok:false, error:{ code, message, details? } }. sourceByClass[className] is { source:"cpp" } or { source:"as", filePath, startLine, endLine, preview }, where filePath prefers workspace-relative path with root prefix and falls back to absolute path when outside workspace; line numbers are 1-based. preview is source text for the class range (max 20 lines). Supports depth and breadth limits.',
         inputSchema: z.object({
             name: z.string().describe('Exact class name to inspect (e.g., "APawn").'),
             maxSuperDepth: z.number().int().optional().describe('Maximum number of supertypes to return. Non-negative integer. Default is 3.'),
@@ -175,7 +170,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_findReferences',
-        description: 'Find references for the symbol at a given document position. Input line/character are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). On success, returns preview text only (not structured references JSON), and each preview header path prefers workspace-relative path with root prefix, falling back to absolute path when outside workspace. On failure, returns JSON: { ok:false, error:{ code, message, retryable?, hint? } }.',
+        description: 'Find references for the symbol at a given document position. Input line/character are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Returns JSON envelope: success { ok:true, data:{ total, references[] } }, failure { ok:false, error:{ code, message, retryable?, hint?, details? } }. Each references[] item includes { filePath, startLine, endLine, range, preview }, where preview is source text for that location range (max 20 lines). range keeps raw LSP offsets (0-based).',
         inputSchema: z.object({
             filePath: z.string().describe('Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/...").'),
             position: z.object({

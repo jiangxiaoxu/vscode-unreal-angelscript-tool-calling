@@ -12,22 +12,30 @@ import {
     toApiErrorPayload
 } from './angelscriptApiSearch';
 import {
+    ToolFailure,
+    ToolResult,
     GetTypeMembersParams,
     GetTypeMembersRequest,
+    GetTypeMembersLspResult,
     GetTypeMembersResult,
+    GetTypeMembersToolData,
     GetTypeHierarchyParams,
     GetTypeHierarchyRequest,
+    GetTypeHierarchyLspResult,
     GetTypeHierarchyResult,
+    GetTypeHierarchyToolData,
+    TypeHierarchyClassSource,
     FindReferencesParams,
     FindReferencesResult,
+    FindReferencesItem,
     FindReferencesLocation,
     ResolveSymbolAtPositionToolParams,
+    ResolveSymbolAtPositionToolData,
     ResolveSymbolAtPositionToolResult,
     ResolveSymbolAtPositionRequest,
     ResolveSymbolAtPositionResult
 } from './apiRequests';
 
-export type ToolErrorPayload = ApiErrorPayload;
 export type SearchOutputPayload = ApiResponsePayload & {
     text?: string;
     request?: Record<string, unknown>;
@@ -44,7 +52,6 @@ type LspLocation = {
 const MAX_REFERENCE_PREVIEW_LINES = 20;
 const MAX_RESOLVE_PREVIEW_LINES = 20;
 const SOURCE_UNAVAILABLE_TEXT = '<source unavailable>';
-const DEFINITION_UNAVAILABLE_TEXT = '<definition unavailable>';
 
 type WorkspacePathResolutionSuccess = {
     ok: true;
@@ -406,64 +413,88 @@ function isUnrealReflectionMacroLine(lineText: string): boolean
     return /^\s*U(?:CLASS|PROPERTY|FUNCTION|ENUM)\b/.test(lineText);
 }
 
-function formatResolveDocBlock(docText: string): string
-{
-    const escaped = docText.replace(/\*\//g, '*\\/');
-    return `/*\n${escaped}\n*/`;
-}
-
-type ResolveDefinitionSection = {
-    header: string;
-    snippet: string;
+type SourcePreviewSection = {
+    startLine: number;
+    endLine: number;
+    preview: string;
 };
 
-async function buildResolveDefinitionSection(
+async function getFileLinesCached(
     absolutePath: string,
-    startLineOneBased: number,
-    endLineOneBased: number
-): Promise<ResolveDefinitionSection>
+    fileLinesCache?: Map<string, Promise<string[] | null>>
+): Promise<string[] | null>
 {
     const normalizedPath = path.normalize(absolutePath);
-    const displayPath = formatOutputFilePath(normalizedPath);
+    if (!fileLinesCache)
+    {
+        try
+        {
+            const content = await fs.readFile(normalizedPath, 'utf8');
+            return content.split(/\r?\n/);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    const cached = fileLinesCache.get(normalizedPath);
+    if (cached)
+        return await cached;
+
+    const reader = fs.readFile(normalizedPath, 'utf8')
+        .then((content) => content.split(/\r?\n/))
+        .catch(() => null);
+    fileLinesCache.set(normalizedPath, reader);
+    return await reader;
+}
+
+async function buildSourcePreviewSection(
+    absolutePath: string,
+    startLineOneBased: number,
+    endLineOneBased: number,
+    options?: {
+        includeMacroBacktrack?: boolean;
+        maxLines?: number;
+        fileLinesCache?: Map<string, Promise<string[] | null>>;
+    }
+): Promise<SourcePreviewSection>
+{
+    const normalizedPath = path.normalize(absolutePath);
     let safeStartLine = Number.isInteger(startLineOneBased) && startLineOneBased > 0 ? startLineOneBased : 1;
     let safeEndLine = Number.isInteger(endLineOneBased) && endLineOneBased > 0 ? endLineOneBased : safeStartLine;
     if (safeEndLine < safeStartLine)
         safeEndLine = safeStartLine;
 
-    let fileLines: string[] | null = null;
-    try
-    {
-        const content = await fs.readFile(normalizedPath, 'utf8');
-        fileLines = content.split(/\r?\n/);
-    }
-    catch
-    {
-        fileLines = null;
-    }
+    const maxLines = typeof options?.maxLines === 'number' && options.maxLines > 0
+        ? options.maxLines
+        : MAX_REFERENCE_PREVIEW_LINES;
+    const fileLines = await getFileLinesCached(normalizedPath, options?.fileLinesCache);
 
     if (!fileLines || safeStartLine > fileLines.length)
     {
-        const locationLabel = safeStartLine === safeEndLine ? `${safeStartLine}` : `${safeStartLine}-${safeEndLine}`;
         return {
-            header: `// ${displayPath}:${locationLabel}`,
-            snippet: SOURCE_UNAVAILABLE_TEXT
+            startLine: safeStartLine,
+            endLine: safeEndLine,
+            preview: SOURCE_UNAVAILABLE_TEXT
         };
     }
 
     let effectiveStartLine = safeStartLine;
-    if (safeStartLine > 1)
+    if (options?.includeMacroBacktrack === true && safeStartLine > 1)
     {
         const previousLine = fileLines[safeStartLine - 2] ?? '';
         if (isUnrealReflectionMacroLine(previousLine))
             effectiveStartLine = safeStartLine - 1;
     }
+    if (safeEndLine > fileLines.length)
+        safeEndLine = fileLines.length;
+    if (safeEndLine < effectiveStartLine)
+        safeEndLine = effectiveStartLine;
 
     const snippetStartIndex = effectiveStartLine - 1;
-    const snippetEndIndex = Math.max(
-        snippetStartIndex,
-        Math.min(safeEndLine - 1, fileLines.length - 1)
-    );
-    const maxSnippetEndIndex = Math.min(snippetEndIndex, snippetStartIndex + MAX_RESOLVE_PREVIEW_LINES - 1);
+    const snippetEndIndex = safeEndLine - 1;
+    const maxSnippetEndIndex = Math.min(snippetEndIndex, snippetStartIndex + maxLines - 1);
     const snippetLines: string[] = [];
     for (let lineIndex = snippetStartIndex; lineIndex <= maxSnippetEndIndex; lineIndex += 1)
     {
@@ -472,118 +503,86 @@ async function buildResolveDefinitionSection(
     if (snippetEndIndex > maxSnippetEndIndex)
         snippetLines.push('... (truncated)');
 
-    const locationLabel = effectiveStartLine === safeEndLine ? `${effectiveStartLine}` : `${effectiveStartLine}-${safeEndLine}`;
     return {
-        header: `// ${displayPath}:${locationLabel}`,
-        snippet: snippetLines.join('\n')
+        startLine: effectiveStartLine,
+        endLine: safeEndLine,
+        preview: snippetLines.join('\n')
     };
 }
 
-async function formatResolveSuccessOutput(
+async function buildResolveSuccessData(
     symbol: ResolveSymbolInfo
-): Promise<string>
+): Promise<ResolveSymbolAtPositionToolData>
 {
     const kind = typeof symbol.kind === 'string' ? symbol.kind : 'unknown';
     const name = typeof symbol.name === 'string' ? symbol.name : '';
     const signature = typeof symbol.signature === 'string' && symbol.signature.length > 0 ? symbol.signature : name;
-
-    const lines: string[] = [];
-    lines.push(`kind=${kind}  name=${name}  signature=${signature}`);
+    const resolvedSymbol: ResolveSymbolAtPositionToolData['symbol'] = {
+        kind,
+        name,
+        signature
+    };
+    if (symbol.doc)
+    {
+        resolvedSymbol.doc = {
+            format: symbol.doc.format,
+            text: symbol.doc.text
+        };
+    }
 
     const definition = symbol.definition;
-    if (!definition || !definition.uri.startsWith('file://'))
-    {
-        lines.push(`// ${DEFINITION_UNAVAILABLE_TEXT}`);
-    }
-    else
+    if (definition && definition.uri.startsWith('file://'))
     {
         const absoluteDefinitionPath = fileUriToAbsolutePath(definition.uri);
-        if (!absoluteDefinitionPath)
+        if (absoluteDefinitionPath)
         {
-            lines.push(`// ${DEFINITION_UNAVAILABLE_TEXT}`);
-        }
-        else
-        {
-            const definitionSection = await buildResolveDefinitionSection(
+            const definitionPreview = await buildSourcePreviewSection(
                 absoluteDefinitionPath,
                 toOneBasedLine(definition.startLine),
-                toOneBasedLine(definition.endLine)
+                toOneBasedLine(definition.endLine),
+                {
+                    includeMacroBacktrack: true,
+                    maxLines: MAX_RESOLVE_PREVIEW_LINES
+                }
             );
-            lines.push(definitionSection.header);
-
-            const docText = typeof symbol.doc?.text === 'string' ? symbol.doc.text.trim() : '';
-            if (docText)
-                lines.push(formatResolveDocBlock(docText));
-
-            lines.push(definitionSection.snippet);
+            resolvedSymbol.definition = {
+                filePath: formatOutputFilePath(absoluteDefinitionPath),
+                startLine: definitionPreview.startLine,
+                endLine: definitionPreview.endLine,
+                preview: definitionPreview.preview
+            };
         }
     }
 
-    return lines.join('\n');
+    return { symbol: resolvedSymbol };
 }
 
-async function formatFindReferencesPreview(references: FindReferencesLocation[]): Promise<string>
+async function buildFindReferencesItems(references: FindReferencesLocation[]): Promise<FindReferencesItem[]>
 {
-    if (references.length === 0)
-        return 'No references found.';
-
     const fileLinesCache = new Map<string, Promise<string[] | null>>();
-    const getFileLines = async (filePath: string): Promise<string[] | null> =>
-    {
-        const absolutePath = path.normalize(filePath);
-        const cached = fileLinesCache.get(absolutePath);
-        if (cached)
-            return cached;
-
-        const reader = fs.readFile(absolutePath, 'utf8')
-            .then((content) => content.split(/\r?\n/))
-            .catch(() => null);
-        fileLinesCache.set(absolutePath, reader);
-        return reader;
-    };
-
-    const chunks: string[] = [];
+    const items: FindReferencesItem[] = [];
     for (const reference of references)
     {
-        const startLine = reference.range.start.line;
-        const endLine = getPreviewEndLine(reference.range);
-        const startLineOneBased = toOneBasedLine(startLine);
-        const endLineOneBased = toOneBasedLine(endLine);
-        const locationLabel = startLineOneBased === endLineOneBased
-            ? `${startLineOneBased}`
-            : `${startLineOneBased}-${endLineOneBased}`;
-        const header = `// ${formatOutputFilePath(reference.filePath)}:${locationLabel}`;
+        const previewEndLine = getPreviewEndLine(reference.range);
+        const previewSection = await buildSourcePreviewSection(
+            reference.filePath,
+            toOneBasedLine(reference.range.start.line),
+            toOneBasedLine(previewEndLine),
+            {
+                maxLines: MAX_REFERENCE_PREVIEW_LINES,
+                fileLinesCache
+            }
+        );
 
-        const fileLines = await getFileLines(reference.filePath);
-        if (!fileLines || startLine < 0 || startLine >= fileLines.length)
-        {
-            chunks.push(`${header}\n${SOURCE_UNAVAILABLE_TEXT}`);
-            continue;
-        }
-
-        const safeEndLine = Math.max(startLine, Math.min(endLine, fileLines.length - 1));
-        const maxEndLine = Math.min(safeEndLine, startLine + MAX_REFERENCE_PREVIEW_LINES - 1);
-        const previewLines: string[] = [];
-        for (let lineIndex = startLine; lineIndex <= maxEndLine; lineIndex += 1)
-        {
-            previewLines.push(fileLines[lineIndex] ?? '');
-        }
-        if (safeEndLine > maxEndLine)
-        {
-            previewLines.push('... (truncated)');
-        }
-        chunks.push(`${header}\n${previewLines.join('\n')}`);
+        items.push({
+            filePath: formatOutputFilePath(reference.filePath),
+            startLine: previewSection.startLine,
+            endLine: previewSection.endLine,
+            range: reference.range,
+            preview: previewSection.preview
+        });
     }
-
-    return chunks.join('\n---\n');
-}
-
-export function isErrorPayload(value: unknown): value is ApiErrorPayload
-{
-    if (!value || typeof value !== 'object')
-        return false;
-    const maybe = value as { ok?: unknown; error?: { code?: unknown } };
-    return maybe.ok === false && typeof maybe.error?.code === 'string';
+    return items;
 }
 
 export function formatSearchPayloadForOutput(
@@ -617,7 +616,7 @@ export function formatSearchPayloadForOutput(
     };
 }
 
-function makeError(code: string, message: string, details?: Record<string, unknown>): ApiErrorPayload
+function makeError(code: string, message: string, details?: Record<string, unknown>): ToolFailure
 {
     return {
         ok: false,
@@ -629,47 +628,124 @@ function makeError(code: string, message: string, details?: Record<string, unkno
     };
 }
 
-async function normalizeTypeHierarchySourcePaths(
-    result: GetTypeHierarchyResult
-): Promise<GetTypeHierarchyResult | ApiErrorPayload>
+function makeErrorFromLsp(
+    error: {
+        code: string;
+        message: string;
+        retryable?: boolean;
+        hint?: string;
+    },
+    details?: Record<string, unknown>
+): ToolFailure
 {
-    if (!result || result.ok === false)
-        return result;
+    return {
+        ok: false,
+        error: {
+            code: error.code,
+            message: error.message,
+            retryable: error.retryable,
+            hint: error.hint,
+            details
+        }
+    };
+}
+
+function makeErrorFromApiPayload(payload: ApiErrorPayload): ToolFailure
+{
+    return {
+        ok: false,
+        error: {
+            code: payload.error.code,
+            message: payload.error.message,
+            details: payload.error.details
+        }
+    };
+}
+
+async function buildTypeHierarchyToolData(
+    result: Extract<GetTypeHierarchyLspResult, { ok: true }>
+): Promise<GetTypeHierarchyToolData | ToolFailure>
+{
+    const sourceByClass: Record<string, TypeHierarchyClassSource> = {};
+    const fileLinesCache = new Map<string, Promise<string[] | null>>();
 
     const sourceByClassEntries = Object.entries(result.sourceByClass ?? {});
     for (const [className, sourceInfo] of sourceByClassEntries)
     {
-        if (!sourceInfo || sourceInfo.source !== 'as')
+        if (!sourceInfo)
             continue;
+        if (sourceInfo.source === 'cpp')
+        {
+            sourceByClass[className] = {
+                source: 'cpp'
+            };
+            continue;
+        }
 
         const rawFilePath = typeof sourceInfo.filePath === 'string' ? sourceInfo.filePath.trim() : '';
         if (!rawFilePath)
+        {
+            sourceByClass[className] = {
+                source: 'as',
+                filePath: '',
+                startLine: sourceInfo.startLine,
+                endLine: sourceInfo.endLine,
+                preview: SOURCE_UNAVAILABLE_TEXT
+            };
             continue;
+        }
+
+        let absolutePath = '';
 
         if (path.isAbsolute(rawFilePath))
         {
-            sourceInfo.filePath = formatOutputFilePath(rawFilePath);
-            continue;
+            absolutePath = path.normalize(rawFilePath);
         }
-
-        const resolvedPath = await resolveWorkspaceRelativePathToAbsolute(rawFilePath);
-        if (isWorkspacePathResolutionFailure(resolvedPath))
+        else
         {
-            return makeError(
-                'InvalidParams',
-                `Invalid class hierarchy source path for "${className}". ${resolvedPath.message}`,
-                {
-                    className,
-                    filePath: rawFilePath,
-                    ...(resolvedPath.details ?? {})
-                }
-            );
+            const resolvedPath = await resolveWorkspaceRelativePathToAbsolute(rawFilePath);
+            if (isWorkspacePathResolutionFailure(resolvedPath))
+            {
+                return makeError(
+                    'InvalidParams',
+                    `Invalid class hierarchy source path for "${className}". ${resolvedPath.message}`,
+                    {
+                        className,
+                        filePath: rawFilePath,
+                        ...(resolvedPath.details ?? {})
+                    }
+                );
+            }
+            absolutePath = resolvedPath.absolutePath;
         }
 
-        sourceInfo.filePath = formatOutputFilePath(resolvedPath.absolutePath);
+        const preview = await buildSourcePreviewSection(
+            absolutePath,
+            sourceInfo.startLine,
+            sourceInfo.endLine,
+            {
+                maxLines: MAX_REFERENCE_PREVIEW_LINES,
+                fileLinesCache
+            }
+        );
+
+        sourceByClass[className] = {
+            source: 'as',
+            filePath: formatOutputFilePath(absolutePath),
+            startLine: preview.startLine,
+            endLine: preview.endLine,
+            preview: preview.preview
+        };
     }
 
-    return result;
+    return {
+        root: result.root,
+        supers: result.supers,
+        derivedByParent: result.derivedByParent,
+        sourceByClass,
+        limits: result.limits,
+        truncated: result.truncated
+    };
 }
 
 export async function runSearchApi(
@@ -677,7 +753,7 @@ export async function runSearchApi(
     startedClient: Promise<void>,
     input: unknown,
     shouldCancel?: () => boolean
-): Promise<ApiResponsePayload | ApiErrorPayload>
+): Promise<ToolResult<SearchOutputPayload>>
 {
     const raw = input as Partial<AngelscriptSearchParams> | null | undefined;
     const labelQuery = typeof raw?.labelQuery === 'string' ? raw.labelQuery.trim() : '';
@@ -707,13 +783,16 @@ export async function runSearchApi(
             },
             shouldCancel ?? (() => false)
         );
-        return payload;
+        return {
+            ok: true,
+            data: formatSearchPayloadForOutput(payload, raw)
+        };
     }
     catch (error)
     {
         const apiError = toApiErrorPayload(error);
         if (apiError)
-            return apiError;
+            return makeErrorFromApiPayload(apiError);
         console.error("angelscript_searchApi tool failed:", error);
         return makeError('INTERNAL_ERROR', 'The Angelscript API tool failed to run. Please ensure the language server is running and try again.');
     }
@@ -723,7 +802,7 @@ export async function runResolveSymbolAtPosition(
     client: LanguageClient,
     startedClient: Promise<void>,
     input: unknown
-): Promise<ResolveSymbolAtPositionToolResult | ApiErrorPayload>
+): Promise<ResolveSymbolAtPositionToolResult>
 {
     const raw = input as ResolveSymbolAtPositionToolParams | null | undefined;
     const filePath = raw?.filePath;
@@ -761,8 +840,12 @@ export async function runResolveSymbolAtPosition(
         ).then((result) =>
         {
             const lspResult = result as ResolveSymbolAtPositionResult;
-            if (!lspResult || lspResult.ok === false)
-                return lspResult as ResolveSymbolAtPositionToolResult;
+            if (!lspResult)
+            {
+                return makeError('INTERNAL_ERROR', 'The resolveSymbolAtPosition tool received an invalid response.');
+            }
+            if (lspResult.ok === false)
+                return makeErrorFromLsp(lspResult.error);
             const definition = lspResult.symbol.definition;
             if (definition && !definition.uri.startsWith('file://'))
             {
@@ -772,7 +855,13 @@ export async function runResolveSymbolAtPosition(
             {
                 return makeError('INTERNAL_ERROR', 'Failed to resolve definition file path from language server result.');
             }
-            return formatResolveSuccessOutput(lspResult.symbol);
+            return buildResolveSuccessData(lspResult.symbol).then((data) =>
+            {
+                return {
+                    ok: true,
+                    data
+                };
+            });
         });
     }
     catch (error)
@@ -786,7 +875,7 @@ export async function runGetTypeMembers(
     client: LanguageClient,
     startedClient: Promise<void>,
     input: unknown
-): Promise<GetTypeMembersResult | ApiErrorPayload>
+): Promise<GetTypeMembersResult>
 {
     const raw = input as GetTypeMembersParams | null | undefined;
     const name = typeof raw?.name === 'string' ? raw.name.trim() : '';
@@ -803,7 +892,7 @@ export async function runGetTypeMembers(
     try
     {
         await startedClient;
-        return await client.sendRequest<GetTypeMembersResult>(
+        const result = await client.sendRequest<GetTypeMembersLspResult>(
             GetTypeMembersRequest.method,
             {
                 name,
@@ -812,7 +901,22 @@ export async function runGetTypeMembers(
                 includeDocs,
                 kinds
             }
-        ) as GetTypeMembersResult;
+        ) as GetTypeMembersLspResult;
+        if (!result)
+        {
+            return makeError('INTERNAL_ERROR', 'The angelscript_getTypeMembers tool received an invalid response.');
+        }
+        if (result.ok === false)
+            return makeError(result.error.code, result.error.message);
+
+        const data: GetTypeMembersToolData = {
+            type: result.type,
+            members: result.members
+        };
+        return {
+            ok: true,
+            data
+        };
     }
     catch (error)
     {
@@ -825,7 +929,7 @@ export async function runGetTypeHierarchy(
     client: LanguageClient,
     startedClient: Promise<void>,
     input: unknown
-): Promise<GetTypeHierarchyResult | ApiErrorPayload>
+): Promise<GetTypeHierarchyResult>
 {
     const raw = input as GetTypeHierarchyParams | null | undefined;
     const name = typeof raw?.name === 'string' ? raw.name.trim() : '';
@@ -866,7 +970,7 @@ export async function runGetTypeHierarchy(
     try
     {
         await startedClient;
-        const result = await client.sendRequest<GetTypeHierarchyResult>(
+        const result = await client.sendRequest<GetTypeHierarchyLspResult>(
             GetTypeHierarchyRequest.method,
             {
                 name,
@@ -874,8 +978,22 @@ export async function runGetTypeHierarchy(
                 maxSubDepth,
                 maxSubBreadth
             }
-        ) as GetTypeHierarchyResult;
-        return await normalizeTypeHierarchySourcePaths(result);
+        ) as GetTypeHierarchyLspResult;
+        if (!result)
+        {
+            return makeError('INTERNAL_ERROR', 'The angelscript_getClassHierarchy tool received an invalid response.');
+        }
+        if (result.ok === false)
+            return makeError(result.error.code, result.error.message);
+
+        const data = await buildTypeHierarchyToolData(result);
+        if ((data as ToolFailure).ok === false)
+            return data as ToolFailure;
+
+        return {
+            ok: true,
+            data: data as GetTypeHierarchyToolData
+        };
     }
     catch (error)
     {
@@ -888,7 +1006,7 @@ export async function runFindReferences(
     client: LanguageClient,
     startedClient: Promise<void>,
     input: unknown
-): Promise<FindReferencesResult | ApiErrorPayload>
+): Promise<FindReferencesResult>
 {
     const raw = input as FindReferencesParams | null | undefined;
     const filePath = raw?.filePath;
@@ -946,7 +1064,14 @@ export async function runFindReferences(
             });
         }
 
-        return await formatFindReferencesPreview(references);
+        const items = await buildFindReferencesItems(references);
+        return {
+            ok: true,
+            data: {
+                total: items.length,
+                references: items
+            }
+        };
     }
     catch (error)
     {
