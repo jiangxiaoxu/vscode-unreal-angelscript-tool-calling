@@ -106,23 +106,7 @@ export type ResolveSymbolAtPositionToolParams = {
     includeDocumentation?: boolean;
 };
 
-export type ResolveSymbolAtPositionToolResult = {
-    ok: true;
-    symbol: {
-        kind: string;
-        name: string;
-        signature: string;
-        definition?: {
-            filePath: string;
-            startLine: number;
-            endLine: number;
-        };
-        doc?: {
-            format: 'markdown' | 'plaintext';
-            text: string;
-        };
-    };
-} | {
+export type ResolveSymbolAtPositionToolResult = string | {
     ok: false;
     error: {
         code: string;

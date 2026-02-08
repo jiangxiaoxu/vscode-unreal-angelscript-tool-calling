@@ -15,10 +15,13 @@ Maintenance rule:
 - Path output now prefers workspace-relative format with root prefix (for example `CthulhuGame/Source/...`), and falls back to absolute path only when the file is outside all workspace folders.
 - Multi-root path resolution now detects ambiguity for relative `filePath` and returns `InvalidParams` with candidate paths instead of silently picking one root.
 - `angelscript_getClassHierarchy` `sourceByClass[*].filePath` now follows the same workspace-relative-first output rule.
+- `angelscript_resolveSymbolAtPosition` success output now returns preview text instead of structured success JSON. The preview includes `kind/name/signature`, definition header, optional doc block, and snippet.
+- `angelscript_resolveSymbolAtPosition` preview now checks one line above definition start for Unreal reflection macros (`UCLASS/UPROPERTY/UFUNCTION/UENUM`) and uses that macro line as snippet start when matched.
 - Updated tool descriptions, schema docs, and README to match the new path contract.
 
 #### Breaking Changes
 - Callers that assumed output `filePath` is always absolute should migrate to parse both workspace-relative and absolute path formats.
+- Any caller parsing structured success JSON from `angelscript_resolveSymbolAtPosition` must migrate to preview text parsing.
 
 ### 中文
 
@@ -27,10 +30,13 @@ Maintenance rule:
 - 路径输出改为优先使用带 root 名的工作区路径(例如 `CthulhuGame/Source/...`),仅当文件不在任何工作区时才回退为绝对路径.
 - 多工作区下,相对 `filePath` 若存在歧义会返回带候选路径的 `InvalidParams`,不再静默选择某个 root.
 - `angelscript_getClassHierarchy` 的 `sourceByClass[*].filePath` 也统一为工作区路径优先规则.
+- `angelscript_resolveSymbolAtPosition` 成功输出改为预览文本,不再返回结构化成功 JSON. 预览包含 `kind/name/signature`、定义头、可选文档块与代码片段.
+- `angelscript_resolveSymbolAtPosition` 预览会检查定义起始行上一行是否为 Unreal 反射宏(`UCLASS/UPROPERTY/UFUNCTION/UENUM`),命中时使用该宏行作为片段起始行.
 - 已同步更新工具描述、schema 文案与 README,确保契约一致.
 
 #### Breaking Changes
 - 如果调用方假设输出 `filePath` 永远是绝对路径,需要迁移为同时兼容工作区路径和绝对路径.
+- 如果调用方解析 `angelscript_resolveSymbolAtPosition` 结构化成功 JSON,需要迁移为解析预览文本.
 
 ## [1.8.8035] - 2026-02-06
 

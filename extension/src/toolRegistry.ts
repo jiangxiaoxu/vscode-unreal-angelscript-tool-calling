@@ -128,7 +128,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_resolveSymbolAtPosition',
-        description: 'Resolve a symbol at a given document position and return its kind, full signature, definition location, and optional documentation. Input line/character are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Output definition.filePath prefers workspace-relative path with root prefix, and falls back to absolute path when outside workspace. Returned definition startLine/endLine are 1-based.',
+        description: 'Resolve a symbol at a given document position and return summary text with kind/name/signature, definition preview header, optional documentation block, and source snippet. Input line/character are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). On success, returns preview text only. On failure, returns JSON: { ok:false, error:{ code, message, retryable?, hint? } }. The preview header path prefers workspace-relative path with root prefix, falling back to absolute path when outside workspace.',
         inputSchema: z.object({
             filePath: z.string().describe('Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/...").'),
             position: z.object({

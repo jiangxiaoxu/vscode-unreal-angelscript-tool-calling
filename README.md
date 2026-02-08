@@ -46,13 +46,14 @@ Exposed tools:
 
 Output rules:
 - Most tools return JSON text.
+- `angelscript_resolveSymbolAtPosition` returns preview text on success, and JSON error on failure.
 - `angelscript_findReferences` returns preview text on success, and JSON error on failure.
 - Input `filePath` supports absolute path or workspace-relative path (prefer `<workspaceFolderName>/...`).
 - Output `filePath` prefers workspace-relative path with root prefix; if not in workspace, output falls back to absolute path.
 
 Tool notes:
 - `angelscript_searchApi`: Search Angelscript APIs and docs with fuzzy tokens, OR(`|`), separator constraints(`.`/`::`), optional filters, pagination, and regex.
-- `angelscript_resolveSymbolAtPosition`: Input line/character is 1-based. Input `filePath` supports absolute path or workspace-relative path. Output `definition.filePath` follows workspace-relative-first rule.
+- `angelscript_resolveSymbolAtPosition`: Input line/character is 1-based. Input `filePath` supports absolute path or workspace-relative path. Success output is preview text including `kind/name/signature`, definition header, optional doc block, and source snippet. It checks the line before the definition start for `UCLASS/UPROPERTY/UFUNCTION/UENUM`; when matched, that macro line is used as snippet start. Snippet is capped at 20 lines.
 - `angelscript_getTypeMembers`: List members for an exact type name, with optional inherited members/docs.
 - `angelscript_getClassHierarchy`: Return compact class hierarchy JSON for an exact class name: `root`, `supers`(nearest parent first), `derivedByParent`(parent -> direct children), `sourceByClass`, `limits`, `truncated`. In `sourceByClass`, cpp classes are `{ source: "cpp" }`, script classes are `{ source: "as", filePath, startLine, endLine }` (`filePath` follows workspace-relative-first rule, line numbers are 1-based). Defaults: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
 - `angelscript_findReferences`: Input line/character is 1-based. Success output is text preview with `---` separators, and preview header paths follow workspace-relative-first rule.
@@ -133,13 +134,14 @@ https://angelscript.hazelight.se
 
 输出规则:
 - 大多数工具返回 JSON 文本.
+- `angelscript_resolveSymbolAtPosition` 成功返回预览文本,失败返回 JSON error.
 - `angelscript_findReferences` 成功返回预览文本,失败返回 JSON error.
 - 输入 `filePath` 支持绝对路径和工作区路径(建议 `<workspaceFolderName>/...`).
 - 输出 `filePath` 优先返回带 root 名的工作区路径,不在工作区内时回退为绝对路径.
 
 工具说明:
 - `angelscript_searchApi`: 支持模糊 token、OR(`|`)、分隔符约束(`.`/`::`)、过滤、分页与正则搜索.
-- `angelscript_resolveSymbolAtPosition`: 输入行列是 1-based. 输入 `filePath` 支持绝对路径和工作区路径. 输出 `definition.filePath` 遵循工作区路径优先规则.
+- `angelscript_resolveSymbolAtPosition`: 输入行列是 1-based. 输入 `filePath` 支持绝对路径和工作区路径. 成功输出为预览文本,包含 `kind/name/signature`、定义头、可选文档块和代码片段. 会检查定义起始行上一行是否为 `UCLASS/UPROPERTY/UFUNCTION/UENUM`,命中则把宏行作为片段起始行. 片段最多 20 行.
 - `angelscript_getTypeMembers`: 按精确类型名列出成员,可选包含继承成员和文档.
 - `angelscript_getClassHierarchy`: 按精确类名返回紧凑层级 JSON: `root`, `supers`(近父到根), `derivedByParent`(父类 -> 直接子类), `sourceByClass`, `limits`, `truncated`. `sourceByClass` 中, cpp 类为 `{ source: "cpp" }`, 脚本类为 `{ source: "as", filePath, startLine, endLine }` (`filePath` 遵循工作区路径优先规则,行号是 1-based). 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
 - `angelscript_findReferences`: 输入行列是 1-based,成功返回文本预览,多结果用 `---` 分隔,且预览头路径遵循工作区路径优先规则.

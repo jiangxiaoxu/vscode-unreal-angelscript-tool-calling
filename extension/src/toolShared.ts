@@ -42,12 +42,16 @@ type LspLocation = {
 };
 
 const MAX_REFERENCE_PREVIEW_LINES = 20;
+const MAX_RESOLVE_PREVIEW_LINES = 20;
 const SOURCE_UNAVAILABLE_TEXT = '<source unavailable>';
+const DEFINITION_UNAVAILABLE_TEXT = '<definition unavailable>';
 
 type WorkspacePathResolutionSuccess = {
     ok: true;
     absolutePath: string;
 };
+
+type ResolveSymbolInfo = Exclude<ResolveSymbolAtPositionResult, { ok: false }>['symbol'];
 
 type WorkspacePathResolutionFailure = {
     ok: false;
@@ -397,6 +401,127 @@ function getPreviewEndLine(range: FindReferencesLocation['range']): number
     return endLine;
 }
 
+function isUnrealReflectionMacroLine(lineText: string): boolean
+{
+    return /^\s*U(?:CLASS|PROPERTY|FUNCTION|ENUM)\b/.test(lineText);
+}
+
+function formatResolveDocBlock(docText: string): string
+{
+    const escaped = docText.replace(/\*\//g, '*\\/');
+    return `/*\n${escaped}\n*/`;
+}
+
+type ResolveDefinitionSection = {
+    header: string;
+    snippet: string;
+};
+
+async function buildResolveDefinitionSection(
+    absolutePath: string,
+    startLineOneBased: number,
+    endLineOneBased: number
+): Promise<ResolveDefinitionSection>
+{
+    const normalizedPath = path.normalize(absolutePath);
+    const displayPath = formatOutputFilePath(normalizedPath);
+    let safeStartLine = Number.isInteger(startLineOneBased) && startLineOneBased > 0 ? startLineOneBased : 1;
+    let safeEndLine = Number.isInteger(endLineOneBased) && endLineOneBased > 0 ? endLineOneBased : safeStartLine;
+    if (safeEndLine < safeStartLine)
+        safeEndLine = safeStartLine;
+
+    let fileLines: string[] | null = null;
+    try
+    {
+        const content = await fs.readFile(normalizedPath, 'utf8');
+        fileLines = content.split(/\r?\n/);
+    }
+    catch
+    {
+        fileLines = null;
+    }
+
+    if (!fileLines || safeStartLine > fileLines.length)
+    {
+        const locationLabel = safeStartLine === safeEndLine ? `${safeStartLine}` : `${safeStartLine}-${safeEndLine}`;
+        return {
+            header: `// ${displayPath}:${locationLabel}`,
+            snippet: SOURCE_UNAVAILABLE_TEXT
+        };
+    }
+
+    let effectiveStartLine = safeStartLine;
+    if (safeStartLine > 1)
+    {
+        const previousLine = fileLines[safeStartLine - 2] ?? '';
+        if (isUnrealReflectionMacroLine(previousLine))
+            effectiveStartLine = safeStartLine - 1;
+    }
+
+    const snippetStartIndex = effectiveStartLine - 1;
+    const snippetEndIndex = Math.max(
+        snippetStartIndex,
+        Math.min(safeEndLine - 1, fileLines.length - 1)
+    );
+    const maxSnippetEndIndex = Math.min(snippetEndIndex, snippetStartIndex + MAX_RESOLVE_PREVIEW_LINES - 1);
+    const snippetLines: string[] = [];
+    for (let lineIndex = snippetStartIndex; lineIndex <= maxSnippetEndIndex; lineIndex += 1)
+    {
+        snippetLines.push(fileLines[lineIndex] ?? '');
+    }
+    if (snippetEndIndex > maxSnippetEndIndex)
+        snippetLines.push('... (truncated)');
+
+    const locationLabel = effectiveStartLine === safeEndLine ? `${effectiveStartLine}` : `${effectiveStartLine}-${safeEndLine}`;
+    return {
+        header: `// ${displayPath}:${locationLabel}`,
+        snippet: snippetLines.join('\n')
+    };
+}
+
+async function formatResolveSuccessOutput(
+    symbol: ResolveSymbolInfo
+): Promise<string>
+{
+    const kind = typeof symbol.kind === 'string' ? symbol.kind : 'unknown';
+    const name = typeof symbol.name === 'string' ? symbol.name : '';
+    const signature = typeof symbol.signature === 'string' && symbol.signature.length > 0 ? symbol.signature : name;
+
+    const lines: string[] = [];
+    lines.push(`kind=${kind}  name=${name}  signature=${signature}`);
+
+    const definition = symbol.definition;
+    if (!definition || !definition.uri.startsWith('file://'))
+    {
+        lines.push(`// ${DEFINITION_UNAVAILABLE_TEXT}`);
+    }
+    else
+    {
+        const absoluteDefinitionPath = fileUriToAbsolutePath(definition.uri);
+        if (!absoluteDefinitionPath)
+        {
+            lines.push(`// ${DEFINITION_UNAVAILABLE_TEXT}`);
+        }
+        else
+        {
+            const definitionSection = await buildResolveDefinitionSection(
+                absoluteDefinitionPath,
+                toOneBasedLine(definition.startLine),
+                toOneBasedLine(definition.endLine)
+            );
+            lines.push(definitionSection.header);
+
+            const docText = typeof symbol.doc?.text === 'string' ? symbol.doc.text.trim() : '';
+            if (docText)
+                lines.push(formatResolveDocBlock(docText));
+
+            lines.push(definitionSection.snippet);
+        }
+    }
+
+    return lines.join('\n');
+}
+
 async function formatFindReferencesPreview(references: FindReferencesLocation[]): Promise<string>
 {
     if (references.length === 0)
@@ -638,35 +763,16 @@ export async function runResolveSymbolAtPosition(
             const lspResult = result as ResolveSymbolAtPositionResult;
             if (!lspResult || lspResult.ok === false)
                 return lspResult as ResolveSymbolAtPositionToolResult;
-
             const definition = lspResult.symbol.definition;
             if (definition && !definition.uri.startsWith('file://'))
             {
                 return makeError('INTERNAL_ERROR', 'Language server returned a non-file path for definition.');
             }
-            const absoluteDefinitionPath = definition ? fileUriToAbsolutePath(definition.uri) : null;
-            if (definition && !absoluteDefinitionPath)
+            if (definition && !fileUriToAbsolutePath(definition.uri))
             {
                 return makeError('INTERNAL_ERROR', 'Failed to resolve definition file path from language server result.');
             }
-            const mappedDefinition = (definition && absoluteDefinitionPath)
-                ? {
-                    filePath: formatOutputFilePath(absoluteDefinitionPath),
-                    startLine: toOneBasedLine(definition.startLine),
-                    endLine: toOneBasedLine(definition.endLine)
-                }
-                : undefined;
-
-            return {
-                ok: true,
-                symbol: {
-                    kind: lspResult.symbol.kind,
-                    name: lspResult.symbol.name,
-                    signature: lspResult.symbol.signature,
-                    definition: mappedDefinition,
-                    doc: lspResult.symbol.doc
-                }
-            } as ResolveSymbolAtPositionToolResult;
+            return formatResolveSuccessOutput(lspResult.symbol);
         });
     }
     catch (error)
