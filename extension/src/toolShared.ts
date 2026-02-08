@@ -44,16 +44,316 @@ type LspLocation = {
 const MAX_REFERENCE_PREVIEW_LINES = 20;
 const SOURCE_UNAVAILABLE_TEXT = '<source unavailable>';
 
-function resolveFilePathInput(filePath: string): { filePath: string; uri: string } | null
+type WorkspacePathResolutionSuccess = {
+    ok: true;
+    absolutePath: string;
+};
+
+type WorkspacePathResolutionFailure = {
+    ok: false;
+    message: string;
+    details?: Record<string, unknown>;
+};
+
+type WorkspacePathResolution = WorkspacePathResolutionSuccess | WorkspacePathResolutionFailure;
+
+type ToolPathResolutionSuccess = {
+    ok: true;
+    absolutePath: string;
+    uri: string;
+};
+
+type ToolPathResolutionFailure = {
+    ok: false;
+    message: string;
+    details?: Record<string, unknown>;
+};
+
+type ToolPathResolution = ToolPathResolutionSuccess | ToolPathResolutionFailure;
+
+function isWorkspacePathResolutionFailure(value: WorkspacePathResolution): value is WorkspacePathResolutionFailure
 {
-    const absolutePath = path.normalize(filePath.trim());
+    return value.ok === false;
+}
+
+function isToolPathResolutionFailure(value: ToolPathResolution): value is ToolPathResolutionFailure
+{
+    return value.ok === false;
+}
+
+function toOutputPath(filePath: string): string
+{
+    return path.normalize(filePath).replace(/\\/g, '/');
+}
+
+function samePath(a: string, b: string): boolean
+{
+    if (process.platform === 'win32')
+        return a.toLowerCase() === b.toLowerCase();
+    return a === b;
+}
+
+function isPathInsideRoot(filePath: string, rootPath: string): boolean
+{
+    const normalizedFilePath = path.normalize(filePath);
+    const normalizedRootPath = path.normalize(rootPath);
+    if (samePath(normalizedFilePath, normalizedRootPath))
+        return true;
+
+    const relativePath = path.relative(normalizedRootPath, normalizedFilePath);
+    if (!relativePath)
+        return true;
+    return !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
+}
+
+function getWorkspaceFolders(): readonly vscode.WorkspaceFolder[]
+{
+    return vscode.workspace.workspaceFolders ?? [];
+}
+
+function formatOutputFilePath(filePath: string): string
+{
+    const normalizedPath = path.normalize(filePath);
+    if (!path.isAbsolute(normalizedPath))
+        return toOutputPath(normalizedPath);
+
+    const workspaceFolders = getWorkspaceFolders();
+    let bestFolder: vscode.WorkspaceFolder | null = null;
+    let bestRootPath = '';
+
+    for (const workspaceFolder of workspaceFolders)
+    {
+        const rootPath = path.normalize(workspaceFolder.uri.fsPath);
+        if (!isPathInsideRoot(normalizedPath, rootPath))
+            continue;
+        if (!bestFolder || rootPath.length > bestRootPath.length)
+        {
+            bestFolder = workspaceFolder;
+            bestRootPath = rootPath;
+        }
+    }
+
+    if (!bestFolder)
+        return toOutputPath(normalizedPath);
+
+    const relativePath = path.relative(bestRootPath, normalizedPath);
+    if (!relativePath)
+        return bestFolder.name;
+
+    return `${bestFolder.name}/${toOutputPath(relativePath)}`;
+}
+
+function splitWorkspacePathSegments(inputPath: string): string[]
+{
+    return inputPath
+        .trim()
+        .split(/[\\/]+/)
+        .filter((segment) => segment.length > 0 && segment !== '.');
+}
+
+function containsParentTraversal(segments: string[]): boolean
+{
+    return segments.some((segment) => segment === '..');
+}
+
+function matchWorkspaceFolderByName(name: string): vscode.WorkspaceFolder[]
+{
+    const workspaceFolders = getWorkspaceFolders();
+    if (process.platform === 'win32')
+    {
+        const lowered = name.toLowerCase();
+        return workspaceFolders.filter((folder) => folder.name.toLowerCase() === lowered);
+    }
+    return workspaceFolders.filter((folder) => folder.name === name);
+}
+
+async function pickExistingCandidates(candidates: string[]): Promise<string[]>
+{
+    const existingCandidates = await Promise.all(candidates.map(async (candidate) =>
+    {
+        try
+        {
+            await fs.stat(candidate);
+            return candidate;
+        }
+        catch
+        {
+            return null;
+        }
+    }));
+    return existingCandidates.filter((candidate): candidate is string => typeof candidate === 'string');
+}
+
+function toWorkspaceCandidateLabels(candidates: string[]): string[]
+{
+    return candidates.map((candidate) => formatOutputFilePath(candidate));
+}
+
+async function resolveWorkspaceRelativePathToAbsolute(filePath: string): Promise<WorkspacePathResolution>
+{
+    const segments = splitWorkspacePathSegments(filePath);
+    if (segments.length === 0)
+    {
+        return {
+            ok: false,
+            message: "Invalid params. 'filePath' must be a non-empty path string."
+        };
+    }
+    if (containsParentTraversal(segments))
+    {
+        return {
+            ok: false,
+            message: "Invalid params. 'filePath' must not include '..' segments."
+        };
+    }
+
+    const workspaceFolders = getWorkspaceFolders();
+    if (workspaceFolders.length === 0)
+    {
+        return {
+            ok: false,
+            message: "Invalid params. Relative 'filePath' requires an open workspace folder.",
+            details: {
+                filePath
+            }
+        };
+    }
+
+    const matchedFolders = matchWorkspaceFolderByName(segments[0]);
+    if (matchedFolders.length > 0)
+    {
+        if (segments.length === 1)
+        {
+            return {
+                ok: false,
+                message: "Invalid params. Workspace-relative 'filePath' must include a path after the workspace folder name.",
+                details: {
+                    filePath,
+                    workspaceFolderName: segments[0]
+                }
+            };
+        }
+
+        const relativePath = path.join(...segments.slice(1));
+        const prefixedCandidates = matchedFolders.map((folder) => path.normalize(path.join(folder.uri.fsPath, relativePath)));
+        if (prefixedCandidates.length === 1)
+        {
+            return {
+                ok: true,
+                absolutePath: prefixedCandidates[0]
+            };
+        }
+
+        const existingCandidates = await pickExistingCandidates(prefixedCandidates);
+        if (existingCandidates.length === 1)
+        {
+            return {
+                ok: true,
+                absolutePath: existingCandidates[0]
+            };
+        }
+
+        return {
+            ok: false,
+            message: "Invalid params. Workspace folder name is ambiguous in this multi-root workspace.",
+            details: {
+                filePath,
+                workspaceFolderName: segments[0],
+                candidates: toWorkspaceCandidateLabels(prefixedCandidates)
+            }
+        };
+    }
+
+    const relativePath = path.join(...segments);
+    if (workspaceFolders.length === 1)
+    {
+        return {
+            ok: true,
+            absolutePath: path.normalize(path.join(workspaceFolders[0].uri.fsPath, relativePath))
+        };
+    }
+
+    const candidates = workspaceFolders.map((folder) => path.normalize(path.join(folder.uri.fsPath, relativePath)));
+    const existingCandidates = await pickExistingCandidates(candidates);
+    if (existingCandidates.length === 1)
+    {
+        return {
+            ok: true,
+            absolutePath: existingCandidates[0]
+        };
+    }
+
+    const rootHint = workspaceFolders[0].name;
+    const hintPath = `${rootHint}/${segments.join('/')}`;
+    const hasManyMatches = existingCandidates.length > 1;
+    return {
+        ok: false,
+        message: hasManyMatches
+            ? "Invalid params. Relative 'filePath' is ambiguous across workspace folders. Please prefix it with the workspace folder name."
+            : "Invalid params. Relative 'filePath' cannot be resolved uniquely in a multi-root workspace. Please prefix it with the workspace folder name.",
+        details: {
+            filePath,
+            workspaceFolders: workspaceFolders.map((folder) => folder.name),
+            candidates: toWorkspaceCandidateLabels(hasManyMatches ? existingCandidates : candidates),
+            hint: hintPath
+        }
+    };
+}
+
+async function resolveToolFilePathInput(filePath: string): Promise<ToolPathResolution>
+{
+    const trimmedPath = filePath.trim();
+    if (!trimmedPath)
+    {
+        return {
+            ok: false,
+            message: "Invalid params. 'filePath' must be a non-empty string."
+        };
+    }
+    if (trimmedPath.startsWith('file://'))
+    {
+        return {
+            ok: false,
+            message: "Invalid params. 'filePath' must not include the file:// scheme."
+        };
+    }
+
+    let absolutePath = '';
+    if (path.isAbsolute(trimmedPath))
+    {
+        absolutePath = path.normalize(trimmedPath);
+    }
+    else
+    {
+        const workspaceResolution = await resolveWorkspaceRelativePathToAbsolute(trimmedPath);
+        if (isWorkspacePathResolutionFailure(workspaceResolution))
+        {
+            return {
+                ok: false,
+                message: workspaceResolution.message,
+                details: workspaceResolution.details
+            };
+        }
+        absolutePath = workspaceResolution.absolutePath;
+    }
+
     try
     {
-        return { filePath: absolutePath, uri: pathToFileURL(absolutePath).toString() };
+        return {
+            ok: true,
+            absolutePath,
+            uri: pathToFileURL(absolutePath).toString()
+        };
     }
     catch
     {
-        return null;
+        return {
+            ok: false,
+            message: "Invalid params. 'filePath' is not a valid file system path.",
+            details: {
+                filePath
+            }
+        };
     }
 }
 
@@ -82,20 +382,6 @@ function toLspPositionFromOneBased(line: number, character: number): { line: num
 function toOneBasedLine(value: number): number
 {
     return value + 1;
-}
-
-function getDisplayPath(filePath: string): string
-{
-    const absolutePath = path.normalize(filePath);
-    const relativePath = vscode.workspace.asRelativePath(absolutePath, false);
-    if (!relativePath)
-        return absolutePath.split(path.sep).join('/');
-
-    const normalizedRelativePath = path.normalize(relativePath);
-    if (path.isAbsolute(normalizedRelativePath) || normalizedRelativePath === absolutePath)
-        return absolutePath.split(path.sep).join('/');
-
-    return normalizedRelativePath.split(path.sep).join('/');
 }
 
 function getPreviewEndLine(range: FindReferencesLocation['range']): number
@@ -141,7 +427,7 @@ async function formatFindReferencesPreview(references: FindReferencesLocation[])
         const locationLabel = startLineOneBased === endLineOneBased
             ? `${startLineOneBased}`
             : `${startLineOneBased}-${endLineOneBased}`;
-        const header = `// ${getDisplayPath(reference.filePath)}:${locationLabel}`;
+        const header = `// ${formatOutputFilePath(reference.filePath)}:${locationLabel}`;
 
         const fileLines = await getFileLines(reference.filePath);
         if (!fileLines || startLine < 0 || startLine >= fileLines.length)
@@ -218,6 +504,49 @@ function makeError(code: string, message: string, details?: Record<string, unkno
     };
 }
 
+async function normalizeTypeHierarchySourcePaths(
+    result: GetTypeHierarchyResult
+): Promise<GetTypeHierarchyResult | ApiErrorPayload>
+{
+    if (!result || result.ok === false)
+        return result;
+
+    const sourceByClassEntries = Object.entries(result.sourceByClass ?? {});
+    for (const [className, sourceInfo] of sourceByClassEntries)
+    {
+        if (!sourceInfo || sourceInfo.source !== 'as')
+            continue;
+
+        const rawFilePath = typeof sourceInfo.filePath === 'string' ? sourceInfo.filePath.trim() : '';
+        if (!rawFilePath)
+            continue;
+
+        if (path.isAbsolute(rawFilePath))
+        {
+            sourceInfo.filePath = formatOutputFilePath(rawFilePath);
+            continue;
+        }
+
+        const resolvedPath = await resolveWorkspaceRelativePathToAbsolute(rawFilePath);
+        if (isWorkspacePathResolutionFailure(resolvedPath))
+        {
+            return makeError(
+                'InvalidParams',
+                `Invalid class hierarchy source path for "${className}". ${resolvedPath.message}`,
+                {
+                    className,
+                    filePath: rawFilePath,
+                    ...(resolvedPath.details ?? {})
+                }
+            );
+        }
+
+        sourceInfo.filePath = formatOutputFilePath(resolvedPath.absolutePath);
+    }
+
+    return result;
+}
+
 export async function runSearchApi(
     client: LanguageClient,
     startedClient: Promise<void>,
@@ -281,15 +610,6 @@ export async function runResolveSymbolAtPosition(
     {
         return makeError('InvalidParams', 'Invalid params. Provide filePath and position { line, character }.');
     }
-    const trimmedPath = filePath.trim();
-    if (trimmedPath.startsWith('file://'))
-    {
-        return makeError('InvalidParams', "Invalid params. 'filePath' must be an absolute path without the file:// scheme.");
-    }
-    if (!path.isAbsolute(trimmedPath))
-    {
-        return makeError('InvalidParams', "Invalid params. 'filePath' must be an absolute path.");
-    }
     if (!Number.isInteger(line) || line < 1 || !Number.isInteger(character) || character < 1)
     {
         return makeError('InvalidParams', "Invalid params. 'line' and 'character' must be positive integers (1-based).");
@@ -300,10 +620,10 @@ export async function runResolveSymbolAtPosition(
     try
     {
         await startedClient;
-        const resolved = resolveFilePathInput(trimmedPath);
-        if (!resolved)
+        const resolved = await resolveToolFilePathInput(filePath);
+        if (isToolPathResolutionFailure(resolved))
         {
-            return makeError('INTERNAL_ERROR', 'Failed to convert filePath to file URI.');
+            return makeError('InvalidParams', resolved.message, resolved.details);
         }
         const lspPosition = toLspPositionFromOneBased(line, character);
         return await client.sendRequest(
@@ -331,7 +651,7 @@ export async function runResolveSymbolAtPosition(
             }
             const mappedDefinition = (definition && absoluteDefinitionPath)
                 ? {
-                    filePath: absoluteDefinitionPath,
+                    filePath: formatOutputFilePath(absoluteDefinitionPath),
                     startLine: toOneBasedLine(definition.startLine),
                     endLine: toOneBasedLine(definition.endLine)
                 }
@@ -440,7 +760,7 @@ export async function runGetTypeHierarchy(
     try
     {
         await startedClient;
-        return await client.sendRequest<GetTypeHierarchyResult>(
+        const result = await client.sendRequest<GetTypeHierarchyResult>(
             GetTypeHierarchyRequest.method,
             {
                 name,
@@ -449,6 +769,7 @@ export async function runGetTypeHierarchy(
                 maxSubBreadth
             }
         ) as GetTypeHierarchyResult;
+        return await normalizeTypeHierarchySourcePaths(result);
     }
     catch (error)
     {
@@ -473,15 +794,6 @@ export async function runFindReferences(
     {
         return makeError('InvalidParams', 'Invalid params. Provide filePath and position { line, character }.');
     }
-    const trimmedPath = filePath.trim();
-    if (trimmedPath.startsWith('file://'))
-    {
-        return makeError('InvalidParams', "Invalid params. 'filePath' must be an absolute path without the file:// scheme.");
-    }
-    if (!path.isAbsolute(trimmedPath))
-    {
-        return makeError('InvalidParams', "Invalid params. 'filePath' must be an absolute path.");
-    }
     if (!Number.isInteger(line) || line < 1 || !Number.isInteger(character) || character < 1)
     {
         return makeError('InvalidParams', "Invalid params. 'line' and 'character' must be positive integers (1-based).");
@@ -490,10 +802,10 @@ export async function runFindReferences(
     try
     {
         await startedClient;
-        const resolved = resolveFilePathInput(trimmedPath);
-        if (!resolved)
+        const resolved = await resolveToolFilePathInput(filePath);
+        if (isToolPathResolutionFailure(resolved))
         {
-            return makeError('INTERNAL_ERROR', 'Failed to convert filePath to file URI.');
+            return makeError('InvalidParams', resolved.message, resolved.details);
         }
         const lspPosition = toLspPositionFromOneBased(line, character);
         const result = await client.sendRequest(

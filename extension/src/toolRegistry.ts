@@ -128,9 +128,9 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_resolveSymbolAtPosition',
-        description: 'Resolve a symbol at a given document position and return its kind, full signature, definition location, and optional documentation. Input line/character are 1-based. Input filePath must be an absolute path; output filePath is absolute. Returned definition startLine/endLine are 1-based.',
+        description: 'Resolve a symbol at a given document position and return its kind, full signature, definition location, and optional documentation. Input line/character are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Output definition.filePath prefers workspace-relative path with root prefix, and falls back to absolute path when outside workspace. Returned definition startLine/endLine are 1-based.',
         inputSchema: z.object({
-            filePath: z.string().describe('Absolute path to the file containing the symbol.'),
+            filePath: z.string().describe('Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/...").'),
             position: z.object({
                 line: z.number().int().min(1).describe('1-based line number.'),
                 character: z.number().int().min(1).describe('1-based character offset.'),
@@ -160,7 +160,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_getClassHierarchy',
-        description: 'Get class hierarchy in compact JSON for an exact class name (e.g., "APawn"). Result fields: root, supers, derivedByParent, sourceByClass, limits, truncated. supers is ordered nearest-parent-first up to root. derivedByParent is a map of parent -> direct children (stable name order). sourceByClass[className] is { source: "cpp" } or { source: "as", filePath, startLine, endLine }, where filePath is workspace-relative and line numbers are 1-based. Supports depth and breadth limits.',
+        description: 'Get class hierarchy in compact JSON for an exact class name (e.g., "APawn"). Result fields: root, supers, derivedByParent, sourceByClass, limits, truncated. supers is ordered nearest-parent-first up to root. derivedByParent is a map of parent -> direct children (stable name order). sourceByClass[className] is { source: "cpp" } or { source: "as", filePath, startLine, endLine }, where filePath prefers workspace-relative path with root prefix and falls back to absolute path when outside workspace; line numbers are 1-based. Supports depth and breadth limits.',
         inputSchema: z.object({
             name: z.string().describe('Exact class name to inspect (e.g., "APawn").'),
             maxSuperDepth: z.number().int().optional().describe('Maximum number of supertypes to return. Non-negative integer. Default is 3.'),
@@ -175,9 +175,9 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_findReferences',
-        description: 'Find references for the symbol at a given document position. Input line/character are 1-based. Input filePath must be an absolute path. On success, returns preview text only (not structured references JSON). On failure, returns JSON: { ok:false, error:{ code, message, retryable?, hint? } }.',
+        description: 'Find references for the symbol at a given document position. Input line/character are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). On success, returns preview text only (not structured references JSON), and each preview header path prefers workspace-relative path with root prefix, falling back to absolute path when outside workspace. On failure, returns JSON: { ok:false, error:{ code, message, retryable?, hint? } }.',
         inputSchema: z.object({
-            filePath: z.string().describe('Absolute path to the file containing the symbol.'),
+            filePath: z.string().describe('Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/...").'),
             position: z.object({
                 line: z.number().int().min(1).describe('1-based line number.'),
                 character: z.number().int().min(1).describe('1-based character offset.')

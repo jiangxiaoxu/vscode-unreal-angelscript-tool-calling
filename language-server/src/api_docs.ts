@@ -2,6 +2,7 @@ import * as scriptfiles from './as_parser';
 import * as typedb from './database';
 import * as documentation from './documentation';
 import * as fs from 'fs';
+import * as path from 'path';
 
 type ApiSearchSource = "native" | "script" | "both";
 
@@ -270,8 +271,13 @@ function getScriptClassSourceInfo(dbType: typedb.DBType) : {
         return { source: "cpp" };
 
     let moduleName = dbType.declaredModule;
-    let filePath = getModuleRelativePath(moduleName);
-    if (!moduleName || moduleName.length == 0 || filePath.length == 0)
+    let module = scriptfiles.GetModule(moduleName);
+    let fallbackPath = getModuleRelativePath(moduleName);
+    let filePath = fallbackPath;
+    if (module && module.filename && module.filename.length != 0)
+        filePath = path.normalize(module.filename);
+
+    if (!moduleName || moduleName.length == 0 || (filePath.length == 0 && fallbackPath.length == 0))
     {
         return {
             source: "as",
@@ -281,7 +287,6 @@ function getScriptClassSourceInfo(dbType: typedb.DBType) : {
         };
     }
 
-    let module = scriptfiles.GetModule(moduleName);
     let scopeStartOffset = dbType.moduleScopeStart >= 0 ? dbType.moduleScopeStart : dbType.moduleOffset;
     let nameOffset = dbType.moduleOffset >= 0 ? dbType.moduleOffset : scopeStartOffset;
     if (nameOffset < scopeStartOffset)

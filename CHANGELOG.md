@@ -6,6 +6,32 @@ Maintenance rule:
 - For each release, keep both `### English` and `### 中文` sections.
 - Keep section order aligned to reduce translation drift.
 
+## [Unreleased]
+
+### English
+
+#### Changed
+- `angelscript_resolveSymbolAtPosition` and `angelscript_findReferences` now accept `filePath` as either absolute path or workspace-relative path (prefer `<workspaceFolderName>/...`).
+- Path output now prefers workspace-relative format with root prefix (for example `CthulhuGame/Source/...`), and falls back to absolute path only when the file is outside all workspace folders.
+- Multi-root path resolution now detects ambiguity for relative `filePath` and returns `InvalidParams` with candidate paths instead of silently picking one root.
+- `angelscript_getClassHierarchy` `sourceByClass[*].filePath` now follows the same workspace-relative-first output rule.
+- Updated tool descriptions, schema docs, and README to match the new path contract.
+
+#### Breaking Changes
+- Callers that assumed output `filePath` is always absolute should migrate to parse both workspace-relative and absolute path formats.
+
+### 中文
+
+#### 变更
+- `angelscript_resolveSymbolAtPosition` 与 `angelscript_findReferences` 的 `filePath` 输入支持绝对路径和工作区路径(建议 `<workspaceFolderName>/...`).
+- 路径输出改为优先使用带 root 名的工作区路径(例如 `CthulhuGame/Source/...`),仅当文件不在任何工作区时才回退为绝对路径.
+- 多工作区下,相对 `filePath` 若存在歧义会返回带候选路径的 `InvalidParams`,不再静默选择某个 root.
+- `angelscript_getClassHierarchy` 的 `sourceByClass[*].filePath` 也统一为工作区路径优先规则.
+- 已同步更新工具描述、schema 文案与 README,确保契约一致.
+
+#### Breaking Changes
+- 如果调用方假设输出 `filePath` 永远是绝对路径,需要迁移为同时兼容工作区路径和绝对路径.
+
 ## [1.8.8035] - 2026-02-06
 
 ### English
