@@ -26,6 +26,42 @@ type ToolDefinition<TInput> = {
     run: (context: ToolContext, input: TInput | null | undefined) => Promise<unknown>;
 };
 
+function toPayloadObject(result: unknown): Record<string, unknown>
+{
+    if (result !== null && typeof result === 'object' && !Array.isArray(result))
+        return result as Record<string, unknown>;
+    return {
+        value: result
+    };
+}
+
+function toPayloadText(payload: Record<string, unknown>): string
+{
+    try
+    {
+        return JSON.stringify(payload, null, 2);
+    }
+    catch
+    {
+        return JSON.stringify(
+            {
+                ok: false,
+                error: {
+                    code: 'INTERNAL_ERROR',
+                    message: 'Failed to serialize tool payload.'
+                }
+            },
+            null,
+            2
+        );
+    }
+}
+
+function isErrorPayload(payload: Record<string, unknown>): boolean
+{
+    return payload.ok === false;
+}
+
 function prepareSearchInvocation(input: AngelscriptSearchParams | null | undefined): string
 {
     const labelQuery = typeof input?.labelQuery === "string" ? input.labelQuery.trim() : "";
@@ -223,10 +259,32 @@ class SharedLmTool<TInput> implements vscode.LanguageModelTool<TInput>
             },
             options?.input ?? undefined
         );
-        const outputText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-        return new vscode.LanguageModelToolResult([
-            new vscode.LanguageModelTextPart(outputText)
-        ]);
+        const payload = toPayloadObject(result);
+        const outputText = toPayloadText(payload);
+        try
+        {
+            return new vscode.LanguageModelToolResult([
+                vscode.LanguageModelDataPart.json(payload),
+                new vscode.LanguageModelTextPart(outputText)
+            ]);
+        }
+        catch (error)
+        {
+            const fallbackPayload: Record<string, unknown> = {
+                ok: false,
+                error: {
+                    code: 'INTERNAL_ERROR',
+                    message: 'Failed to create LanguageModelDataPart json payload.',
+                    details: {
+                        reason: error instanceof Error ? error.message : String(error)
+                    }
+                }
+            };
+            return new vscode.LanguageModelToolResult([
+                vscode.LanguageModelDataPart.json(fallbackPayload),
+                new vscode.LanguageModelTextPart(toPayloadText(fallbackPayload))
+            ]);
+        }
     }
 }
 
@@ -272,11 +330,15 @@ export function registerMcpTools(
                     },
                     args as never
                 );
+                const payload = toPayloadObject(result);
+                const text = toPayloadText(payload);
                 return {
+                    structuredContent: payload,
+                    isError: isErrorPayload(payload),
                     content: [
                         {
                             type: 'text',
-                            text: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
+                            text
                         }
                     ]
                 };

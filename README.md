@@ -49,6 +49,10 @@ Output rules:
 - All tools return JSON text.
 - Success response is unified as `{ ok: true, data: ... }`.
 - Failure response is unified as `{ ok: false, error: { code, message, ... } }`.
+- In VS Code LM tools, `LanguageModelToolResult.content` now includes both:
+  - `LanguageModelDataPart.json(payload)` for machine-readable JSON
+  - `LanguageModelTextPart(JSON.stringify(payload, null, 2))` for human-readable full JSON
+- In MCP `tools/call`, responses include both `structuredContent` (same payload object) and text `content`.
 - Input `filePath` supports absolute path or workspace-relative path (prefer `<workspaceFolderName>/...`).
 - Output `filePath` prefers workspace-relative path with root prefix; if not in workspace, output falls back to absolute path.
 - For line-based results, tools include `preview` source snippets (max 20 lines, truncated with `... (truncated)`, fallback `<source unavailable>`).
@@ -139,6 +143,10 @@ https://angelscript.hazelight.se
 - 所有工具都返回 JSON 文本.
 - 成功返回统一为 `{ ok: true, data: ... }`.
 - 失败返回统一为 `{ ok: false, error: { code, message, ... } }`.
+- 在 VS Code LM tool 中,`LanguageModelToolResult.content` 现在同时包含:
+  - `LanguageModelDataPart.json(payload)` 用于 machine-readable JSON
+  - `LanguageModelTextPart(JSON.stringify(payload, null, 2))` 用于 human-readable 完整 JSON
+- 在 MCP `tools/call` 中,返回同时包含 `structuredContent`(同一 payload 对象)和文本 `content`.
 - 输入 `filePath` 支持绝对路径和工作区路径(建议 `<workspaceFolderName>/...`).
 - 输出 `filePath` 优先返回带 root 名的工作区路径,不在工作区内时回退为绝对路径.
 - 涉及行号/范围的结果会包含 `preview` 源码片段(最多 20 行,超出追加 `... (truncated)`,不可读时为 `<source unavailable>`).

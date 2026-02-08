@@ -23,6 +23,8 @@ Maintenance rule:
   - `getClassHierarchy`: `data.sourceByClass[*].preview` when `source="as"`
 - `angelscript_resolveSymbolAtPosition` preview checks one line above definition start for Unreal reflection macros (`UCLASS/UPROPERTY/UFUNCTION/UENUM`) and uses that macro line as snippet start when matched.
 - Updated tool descriptions, schema docs, README, and face-ai report to match the unified JSON contract.
+- VS Code LM tool results now return dual content parts: `LanguageModelDataPart.json(payload)` for machine-readable JSON and `LanguageModelTextPart` with full `JSON.stringify(payload, null, 2)` text.
+- MCP `tools/call` responses now include both `structuredContent` (payload object) and text `content`, plus `isError` when `payload.ok === false`.
 
 #### Breaking Changes
 - Callers that assumed output `filePath` is always absolute should migrate to parse both workspace-relative and absolute path formats.
@@ -44,6 +46,8 @@ Maintenance rule:
   - `getClassHierarchy`: `data.sourceByClass[*].preview`(仅 `source="as"`)
 - `angelscript_resolveSymbolAtPosition` 的 `preview` 仍会检查定义起始行上一行是否为 Unreal 反射宏(`UCLASS/UPROPERTY/UFUNCTION/UENUM`),命中时使用该宏行作为片段起始行.
 - 已同步更新工具描述、schema 文案、README 与 face-ai report,确保契约一致.
+- VS Code LM tool 结果现在返回双通道: `LanguageModelDataPart.json(payload)` 提供 machine-readable JSON,`LanguageModelTextPart` 提供完整 `JSON.stringify(payload, null, 2)` 文本.
+- MCP `tools/call` 响应现在同时包含 `structuredContent`(payload 对象) 与文本 `content`,并在 `payload.ok === false` 时设置 `isError`.
 
 #### Breaking Changes
 - 如果调用方假设输出 `filePath` 永远是绝对路径,需要迁移为同时兼容工作区路径和绝对路径.
