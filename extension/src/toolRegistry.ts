@@ -11,6 +11,7 @@ import {
     runResolveSymbolAtPosition,
     runSearchApi
 } from './toolShared';
+import { formatToolText } from './toolTextFormatter';
 
 export type ToolContext = {
     client: LanguageClient;
@@ -35,25 +36,19 @@ function toPayloadObject(result: unknown): Record<string, unknown>
     };
 }
 
-function toPayloadText(payload: Record<string, unknown>): string
+function toPayloadText(toolName: string, payload: Record<string, unknown>): string
 {
     try
     {
-        return JSON.stringify(payload, null, 2);
+        return formatToolText(toolName, payload);
     }
     catch
     {
-        return JSON.stringify(
-            {
-                ok: false,
-                error: {
-                    code: 'INTERNAL_ERROR',
-                    message: 'Failed to serialize tool payload.'
-                }
-            },
-            null,
-            2
-        );
+        return [
+            `${toolName} - error`,
+            'code=INTERNAL_ERROR',
+            'message=Failed to format tool text payload.'
+        ].join('\n');
     }
 }
 
@@ -260,7 +255,7 @@ class SharedLmTool<TInput> implements vscode.LanguageModelTool<TInput>
             options?.input ?? undefined
         );
         const payload = toPayloadObject(result);
-        const outputText = toPayloadText(payload);
+        const outputText = toPayloadText(this.definition.name, payload);
         try
         {
             return new vscode.LanguageModelToolResult([
@@ -282,7 +277,7 @@ class SharedLmTool<TInput> implements vscode.LanguageModelTool<TInput>
             };
             return new vscode.LanguageModelToolResult([
                 vscode.LanguageModelDataPart.json(fallbackPayload),
-                new vscode.LanguageModelTextPart(toPayloadText(fallbackPayload))
+                new vscode.LanguageModelTextPart(toPayloadText(this.definition.name, fallbackPayload))
             ]);
         }
     }
@@ -331,7 +326,7 @@ export function registerMcpTools(
                     args as never
                 );
                 const payload = toPayloadObject(result);
-                const text = toPayloadText(payload);
+                const text = toPayloadText(definition.name, payload);
                 return {
                     structuredContent: payload,
                     isError: isErrorPayload(payload),
