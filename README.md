@@ -23,7 +23,7 @@ Notes:
 - Code completion, go to definition, rename, find references, semantic highlighting.
 - Compile errors from Unreal Editor on save.
 - Debugging support, breakpoints and exception pause.
-- Context commands: `Go to Symbol`, `Add Import To`, `Quick Open Import`.
+- Context commands: `Go to Symbol`, `Wrap with //#region`.
 
 Some features degrade when Unreal Editor is disconnected.
 
@@ -90,7 +90,7 @@ npm run compile
 ### Known Limits
 - When engine is disconnected, details depend on cached DebugDatabase and available `doc` fields.
 - Cache is not written before DebugDatabase processing completes.
-- This extension is incompatible with `Hazelight.unreal-angelscript`. On each startup, if that extension is installed, this extension shows an uninstall prompt and stops initialization.
+- This extension is incompatible with `Hazelight.unreal-angelscript`. On each startup, if that extension is installed, this extension shows an error message with an `Open Extensions` action, then stops initialization.
 
 ### Upstream
 Language Server and Debug Adapter for UnrealEngine-Angelscript:
@@ -117,7 +117,7 @@ https://angelscript.hazelight.se
 - 代码补全、定义跳转、重命名、引用查找、语义高亮.
 - 保存时展示 Unreal Editor 返回的编译错误.
 - 调试支持,含断点与异常暂停.
-- 右键命令: `Go to Symbol`、`Add Import To`、`Quick Open Import`.
+- 右键命令: `Go to Symbol`、`Wrap with //#region`.
 
 部分能力依赖 Unreal Editor 连接,断开时会降级.
 
@@ -184,7 +184,7 @@ npm run compile
 ### 已知限制
 - 引擎断开时,详情能力依赖缓存 DebugDatabase 与 `doc` 字段可用性.
 - DebugDatabase 完整结束前不会写入缓存.
-- 本扩展与 `Hazelight.unreal-angelscript` 不兼容. 每次启动如果检测到该扩展已安装,会弹窗提示卸载并停止初始化.
+- 本扩展与 `Hazelight.unreal-angelscript` 不兼容. 每次启动如果检测到该扩展已安装,会弹出错误提示并提供 `Open Extensions` 入口,随后停止初始化.
 
 ### 上游
 Language Server and Debug Adapter for UnrealEngine-Angelscript:
