@@ -16,7 +16,7 @@ Maintenance rule:
 - Multi-root path resolution now detects ambiguity for relative `filePath` and returns `InvalidParams` with candidate paths instead of silently picking one root.
 - All `angelscript_` tools now use a unified success envelope: `{ ok:true, data: ... }`; failures remain `{ ok:false, error:{ ... } }`.
 - `angelscript_resolveSymbolAtPosition` and `angelscript_findReferences` success responses are now structured JSON again (no longer plain preview text).
-- `angelscript_findReferences` now returns `range` together with `preview`; `range` preserves raw LSP offsets (0-based).
+- `angelscript_findReferences` now returns `range` together with `preview`; all `range.start/end.line/character` values are 1-based in tool output.
 - Line-based outputs now include `preview` fields to provide source snippets directly:
   - `resolve`: `data.symbol.definition.preview`
   - `findReferences`: `data.references[*].preview`
@@ -30,6 +30,7 @@ Maintenance rule:
 - Callers that assumed output `filePath` is always absolute should migrate to parse both workspace-relative and absolute path formats.
 - Callers of `angelscript_searchApi`, `angelscript_getTypeMembers`, and `angelscript_getClassHierarchy` must read success payload under `data` (instead of previous top-level success fields).
 - Any caller parsing plain-text success output from `angelscript_resolveSymbolAtPosition` or `angelscript_findReferences` must migrate to JSON parsing.
+- Any caller that previously interpreted `angelscript_findReferences.data.references[*].range` as raw LSP 0-based offsets must migrate to 1-based indices.
 
 ### 中文
 
@@ -39,7 +40,7 @@ Maintenance rule:
 - 多工作区下,相对 `filePath` 若存在歧义会返回带候选路径的 `InvalidParams`,不再静默选择某个 root.
 - 全部 `angelscript_` 工具的成功返回统一为 `{ ok:true, data: ... }`,失败保持 `{ ok:false, error:{ ... } }`.
 - `angelscript_resolveSymbolAtPosition` 与 `angelscript_findReferences` 成功返回改回结构化 JSON,不再返回纯文本预览.
-- `angelscript_findReferences` 现在会同时返回 `range` 和 `preview`; 其中 `range` 保持 LSP 原始偏移(0-based).
+- `angelscript_findReferences` 现在会同时返回 `range` 和 `preview`; 工具输出中的 `range.start/end.line/character` 全部为 1-based.
 - 所有行级定位结果统一补充 `preview` 字段用于直接返回源码片段:
   - `resolve`: `data.symbol.definition.preview`
   - `findReferences`: `data.references[*].preview`
@@ -53,6 +54,7 @@ Maintenance rule:
 - 如果调用方假设输出 `filePath` 永远是绝对路径,需要迁移为同时兼容工作区路径和绝对路径.
 - `angelscript_searchApi`、`angelscript_getTypeMembers`、`angelscript_getClassHierarchy` 的成功数据读取路径需要迁移到 `data` 字段下.
 - 如果调用方此前解析 `angelscript_resolveSymbolAtPosition` 或 `angelscript_findReferences` 的纯文本成功输出,需要迁移为解析 JSON.
+- 如果调用方此前把 `angelscript_findReferences.data.references[*].range` 当作 LSP 原始 0-based 偏移,需要迁移为 1-based 索引.
 
 ## [1.8.8035] - 2026-02-06
 

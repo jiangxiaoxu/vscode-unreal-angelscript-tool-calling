@@ -214,22 +214,22 @@ export type FindReferencesParams = {
     };
 };
 
+// Tool-facing range with 1-based line/character indices.
+export type FindReferencesRange = {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+};
+
 export type FindReferencesLocation = {
     filePath: string;
-    range: {
-        start: { line: number; character: number };
-        end: { line: number; character: number };
-    };
+    range: FindReferencesRange;
 };
 
 export type FindReferencesItem = {
     filePath: string;
     startLine: number;
     endLine: number;
-    range: {
-        start: { line: number; character: number };
-        end: { line: number; character: number };
-    };
+    range: FindReferencesRange;
     preview: string;
 };
 

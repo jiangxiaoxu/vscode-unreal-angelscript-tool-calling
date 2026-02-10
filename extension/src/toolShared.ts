@@ -28,7 +28,6 @@ import {
     FindReferencesParams,
     FindReferencesResult,
     FindReferencesItem,
-    FindReferencesLocation,
     ResolveSymbolAtPositionToolParams,
     ResolveSymbolAtPositionToolData,
     ResolveSymbolAtPositionToolResult,
@@ -47,6 +46,13 @@ type LspLocation = {
         start: { line: number; character: number };
         end: { line: number; character: number };
     };
+};
+
+type LspRange = LspLocation['range'];
+
+type ResolvedReferenceLocation = {
+    filePath: string;
+    lspRange: LspRange;
 };
 
 const MAX_REFERENCE_PREVIEW_LINES = 20;
@@ -395,7 +401,26 @@ function toOneBasedLine(value: number): number
     return value + 1;
 }
 
-function getPreviewEndLine(range: FindReferencesLocation['range']): number
+function toOneBasedCharacter(value: number): number
+{
+    return value + 1;
+}
+
+function toOneBasedRangeFromLsp(range: LspRange): FindReferencesItem['range']
+{
+    return {
+        start: {
+            line: toOneBasedLine(range.start.line),
+            character: toOneBasedCharacter(range.start.character)
+        },
+        end: {
+            line: toOneBasedLine(range.end.line),
+            character: toOneBasedCharacter(range.end.character)
+        }
+    };
+}
+
+function getPreviewEndLine(range: LspRange): number
 {
     const startLine = range.start.line;
     let endLine = range.end.line;
@@ -557,16 +582,16 @@ async function buildResolveSuccessData(
     return { symbol: resolvedSymbol };
 }
 
-async function buildFindReferencesItems(references: FindReferencesLocation[]): Promise<FindReferencesItem[]>
+async function buildFindReferencesItems(references: ResolvedReferenceLocation[]): Promise<FindReferencesItem[]>
 {
     const fileLinesCache = new Map<string, Promise<string[] | null>>();
     const items: FindReferencesItem[] = [];
     for (const reference of references)
     {
-        const previewEndLine = getPreviewEndLine(reference.range);
+        const previewEndLine = getPreviewEndLine(reference.lspRange);
         const previewSection = await buildSourcePreviewSection(
             reference.filePath,
-            toOneBasedLine(reference.range.start.line),
+            toOneBasedLine(reference.lspRange.start.line),
             toOneBasedLine(previewEndLine),
             {
                 maxLines: MAX_REFERENCE_PREVIEW_LINES,
@@ -578,7 +603,7 @@ async function buildFindReferencesItems(references: FindReferencesLocation[]): P
             filePath: formatOutputFilePath(reference.filePath),
             startLine: previewSection.startLine,
             endLine: previewSection.endLine,
-            range: reference.range,
+            range: toOneBasedRangeFromLsp(reference.lspRange),
             preview: previewSection.preview
         });
     }
@@ -1046,7 +1071,7 @@ export async function runFindReferences(
             return makeError('NotReady', 'References are not available yet. Please wait for script parsing to finish and try again.');
         }
 
-        const references: FindReferencesLocation[] = [];
+        const references: ResolvedReferenceLocation[] = [];
         for (const location of result)
         {
             if (!location.uri.startsWith('file://'))
@@ -1060,7 +1085,7 @@ export async function runFindReferences(
             }
             references.push({
                 filePath: absolutePath,
-                range: location.range
+                lspRange: location.range
             });
         }
 

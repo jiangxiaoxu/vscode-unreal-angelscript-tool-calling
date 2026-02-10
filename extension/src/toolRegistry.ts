@@ -159,12 +159,12 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_resolveSymbolAtPosition',
-        description: 'Resolve a symbol at a given document position. Input line/character are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Returns JSON envelope: success { ok:true, data:{ symbol:{ kind, name, signature, definition?, doc? } } }, failure { ok:false, error:{ code, message, retryable?, hint?, details? } }. When definition exists, definition contains { filePath, startLine, endLine, preview }; preview is source text for that line range and checks one line above start for Unreal macros UCLASS/UPROPERTY/UFUNCTION/UENUM.',
+        description: 'Resolve a symbol at a given document position. All line/character indices in tool input and output are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Returns JSON envelope: success { ok:true, data:{ symbol:{ kind, name, signature, definition?, doc? } } }, failure { ok:false, error:{ code, message, retryable?, hint?, details? } }. When definition exists, definition contains { filePath, startLine, endLine, preview }; preview is source text for that line range and checks one line above start for Unreal macros UCLASS/UPROPERTY/UFUNCTION/UENUM.',
         inputSchema: z.object({
             filePath: z.string().describe('Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/...").'),
             position: z.object({
-                line: z.number().int().min(1).describe('1-based line number.'),
-                character: z.number().int().min(1).describe('1-based character offset.'),
+                line: z.number().int().min(1).describe('1-based line number in tool contract.'),
+                character: z.number().int().min(1).describe('1-based character offset in tool contract.'),
             }),
             includeDocumentation: z.boolean().optional().describe('Include documentation when available. Default is true.')
         }),
@@ -206,12 +206,12 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_findReferences',
-        description: 'Find references for the symbol at a given document position. Input line/character are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Returns JSON envelope: success { ok:true, data:{ total, references[] } }, failure { ok:false, error:{ code, message, retryable?, hint?, details? } }. Each references[] item includes { filePath, startLine, endLine, range, preview }, where preview is source text for that location range (max 20 lines). range keeps raw LSP offsets (0-based).',
+        description: 'Find references for the symbol at a given document position. All line/character indices in tool input and output are 1-based. Input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Returns JSON envelope: success { ok:true, data:{ total, references[] } }, failure { ok:false, error:{ code, message, retryable?, hint?, details? } }. Each references[] item includes { filePath, startLine, endLine, range, preview }, where preview is source text for that location range (max 20 lines) and range is also 1-based.',
         inputSchema: z.object({
             filePath: z.string().describe('Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/...").'),
             position: z.object({
-                line: z.number().int().min(1).describe('1-based line number.'),
-                character: z.number().int().min(1).describe('1-based character offset.')
+                line: z.number().int().min(1).describe('1-based line number in tool contract.'),
+                character: z.number().int().min(1).describe('1-based character offset in tool contract.')
             })
         }),
         prepareInvocation: prepareFindReferencesInvocation,

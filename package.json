@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8042",
+    "version": "1.8.8043",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -170,7 +170,7 @@
                 ],
                 "toolReferenceName": "angelscript_resolveSymbolAtPosition",
                 "displayName": "Angelscript Resolve Symbol At Position",
-                "modelDescription": "Resolve the symbol at a given document position (1-based line/character). Input filePath supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\"). Returns JSON envelope: success { ok:true, data:{ symbol:{ kind, name, signature, definition?, doc? } } }, failure { ok:false, error:{ code, message, retryable?, hint?, details? } }. definition is { filePath, startLine, endLine, preview } with workspace-relative-first path output; preview is source snippet text (max 20 lines) and checks one line above start for Unreal macros UCLASS/UPROPERTY/UFUNCTION/UENUM.",
+                "modelDescription": "Resolve the symbol at a given document position. All line/character indices in tool input/output are 1-based. Input filePath supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\"). Returns JSON envelope: success { ok:true, data:{ symbol:{ kind, name, signature, definition?, doc? } } }, failure { ok:false, error:{ code, message, retryable?, hint?, details? } }. definition is { filePath, startLine, endLine, preview } with workspace-relative-first path output; preview is source snippet text (max 20 lines) and checks one line above start for Unreal macros UCLASS/UPROPERTY/UFUNCTION/UENUM.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-method)",
                 "inputSchema": {
@@ -186,12 +186,12 @@
                                 "line": {
                                     "type": "number",
                                     "minimum": 1,
-                                    "description": "1-based line number."
+                                    "description": "1-based line number in tool contract."
                                 },
                                 "character": {
                                     "type": "number",
                                     "minimum": 1,
-                                    "description": "1-based character offset."
+                                    "description": "1-based character offset in tool contract."
                                 }
                             },
                             "required": [
@@ -261,7 +261,7 @@
                 ],
                 "toolReferenceName": "angelscript_findReferences",
                 "displayName": "Angelscript Find References",
-                "modelDescription": "Find references for the symbol at a given document position. Line/character are 1-based. Input filePath supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\"). Returns JSON envelope: success { ok:true, data:{ total, references:[{ filePath, startLine, endLine, range, preview }] } }, failure { ok:false, error:{ code, message, retryable?, hint?, details? } }. Path output prefers workspace-relative with root prefix and falls back to absolute path when outside workspace. preview is source snippet text (max 20 lines). range keeps raw LSP offsets (0-based).",
+                "modelDescription": "Find references for the symbol at a given document position. All line/character indices in tool input/output are 1-based. Input filePath supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\"). Returns JSON envelope: success { ok:true, data:{ total, references:[{ filePath, startLine, endLine, range, preview }] } }, failure { ok:false, error:{ code, message, retryable?, hint?, details? } }. Path output prefers workspace-relative with root prefix and falls back to absolute path when outside workspace. preview is source snippet text (max 20 lines). range is 1-based.",
                 "userDescription": "Find references for the symbol at a given document position.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(references)",
@@ -278,12 +278,12 @@
                                 "line": {
                                     "type": "number",
                                     "minimum": 1,
-                                    "description": "1-based line number."
+                                    "description": "1-based line number in tool contract."
                                 },
                                 "character": {
                                     "type": "number",
                                     "minimum": 1,
-                                    "description": "1-based character offset."
+                                    "description": "1-based character offset in tool contract."
                                 }
                             },
                             "required": [
