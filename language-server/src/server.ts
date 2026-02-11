@@ -349,17 +349,17 @@ function ResetUnrealCacheState()
     DebugDatabaseComplete = false;
 }
 
-function ResolveCacheRoot(roots : Array<string>) : string
+function ResolveScriptRoot(workspaceRoot : string) : string
 {
-    if (!roots || roots.length == 0)
+    if (!workspaceRoot)
         return null;
-    let primaryRoot = roots[0];
-    if (!primaryRoot)
-        return null;
-    let rootName = path.basename(primaryRoot).toLowerCase();
+
+    let normalizedWorkspaceRoot = path.normalize(workspaceRoot);
+    let rootName = path.basename(normalizedWorkspaceRoot).toLowerCase();
     if (rootName == "script")
-        return primaryRoot;
-    let scriptRoot = path.join(primaryRoot, "Script");
+        return normalizedWorkspaceRoot;
+
+    let scriptRoot = path.join(normalizedWorkspaceRoot, "Script");
     try
     {
         let stat = fs.statSync(scriptRoot);
@@ -370,6 +370,62 @@ function ResolveCacheRoot(roots : Array<string>) : string
     {
     }
     return null;
+}
+
+function ResolveScriptRoots(workspaceRoots : Array<string>) : Array<string>
+{
+    if (!workspaceRoots || workspaceRoots.length == 0)
+        return [];
+
+    let resolvedRoots : Array<string> = [];
+    let seenRoots = new Set<string>();
+
+    for (let workspaceRoot of workspaceRoots)
+    {
+        let scriptRoot = ResolveScriptRoot(workspaceRoot);
+        if (!scriptRoot)
+            continue;
+
+        let normalizedScriptRoot = path.normalize(scriptRoot);
+        let dedupeKey = process.platform == "win32" ? normalizedScriptRoot.toLowerCase() : normalizedScriptRoot;
+        if (seenRoots.has(dedupeKey))
+            continue;
+
+        seenRoots.add(dedupeKey);
+        resolvedRoots.push(normalizedScriptRoot);
+    }
+
+    return resolvedRoots;
+}
+
+function ResolveCacheRoot(scriptRoots : Array<string>) : string
+{
+    if (!scriptRoots || scriptRoots.length == 0)
+        return null;
+    return scriptRoots[0];
+}
+
+function ResolveScriptRootUris(scriptRoots : Array<string>) : Array<string>
+{
+    if (!scriptRoots || scriptRoots.length == 0)
+        return [];
+    return scriptRoots.map((scriptRoot) => decodeURIComponent(getFileUri(scriptRoot)));
+}
+
+function ResolveInitialScriptIgnorePatterns(initializationOptions : any) : Array<string>
+{
+    let configuredPatterns = initializationOptions?.scriptIgnorePatterns;
+    if (Array.isArray(configuredPatterns))
+    {
+        let sanitizedPatterns = configuredPatterns
+            .filter((pattern : any) => typeof pattern == "string")
+            .map((pattern : string) => pattern.trim())
+            .filter((pattern : string) => pattern.length != 0);
+        if (sanitizedPatterns.length != 0)
+            return sanitizedPatterns;
+    }
+
+    return [];
 }
 
 function LoadCacheFromDisk()
@@ -437,43 +493,96 @@ function ScheduleUnrealCacheWrite()
 
 let shouldSendDiagnosticRelatedInformation: boolean = false;
 let RootUris : string[] = [];
+let ScriptRootPaths : string[] = [];
+
+function NormalizePathForMatch(pathname : string) : string
+{
+    let normalized = path.normalize(pathname);
+    if (process.platform == "win32")
+        return normalized.toLowerCase();
+    return normalized;
+}
+
+function IsPathWithinScriptRoots(pathname : string) : boolean
+{
+    if (!pathname || !ScriptRootPaths || ScriptRootPaths.length == 0)
+        return false;
+
+    let normalizedPath = NormalizePathForMatch(pathname);
+    for (let scriptRoot of ScriptRootPaths)
+    {
+        let normalizedRoot = NormalizePathForMatch(scriptRoot);
+        if (normalizedPath == normalizedRoot)
+            return true;
+        if (normalizedPath.startsWith(normalizedRoot + path.sep))
+            return true;
+    }
+    return false;
+}
+
+function IsScriptUri(uri : string) : boolean
+{
+    if (!uri || !uri.startsWith("file://"))
+        return false;
+    let pathname = getPathName(uri);
+    return IsPathWithinScriptRoots(pathname);
+}
 
 // After the server has started the client sends an initialize request. The server receives
 // in the passed params the rootPath of the workspace plus the client capabilities.
 connection.onInitialize((_params): InitializeResult => {
     shouldSendDiagnosticRelatedInformation = _params.capabilities && _params.capabilities.textDocument && _params.capabilities.textDocument.publishDiagnostics && _params.capabilities.textDocument.publishDiagnostics.relatedInformation;
 
-    let Roots = [];
+    let workspaceRoots = [];
 
     if (_params.workspaceFolders == null) {
-        Roots.push(_params.rootPath);
-        RootUris.push(decodeURIComponent(_params.rootUri));
+        if (_params.rootPath)
+            workspaceRoots.push(_params.rootPath);
+        else if (_params.rootUri)
+            workspaceRoots.push(URI.parse(_params.rootUri).fsPath);
     } else {
         for (let Workspace of _params.workspaceFolders) {
-            Roots.push(URI.parse(Workspace.uri).fsPath);
-            RootUris.push(decodeURIComponent(Workspace.uri));
+            workspaceRoots.push(URI.parse(Workspace.uri).fsPath);
         }
     }
 
+    let scriptRoots = ResolveScriptRoots(workspaceRoots);
+    ScriptRootPaths = scriptRoots;
+    RootUris = ResolveScriptRootUris(scriptRoots);
 
-    connection.console.log("Workspace roots: " + Roots);
+    connection.console.log("Workspace roots: " + workspaceRoots);
+    connection.console.log("Resolved script roots: " + scriptRoots);
 
-    CacheRootPath = ResolveCacheRoot(Roots);
+    let scriptIgnorePatterns = ResolveInitialScriptIgnorePatterns(_params.initializationOptions);
+    connection.console.log("Initial script ignore patterns: " + scriptIgnorePatterns);
+
+    CacheRootPath = ResolveCacheRoot(scriptRoots);
     LoadCacheFromDisk();
 
     //connection.console.log("RootPath: "+RootPath);
     //connection.console.log("RootUri: "+RootUri+" from "+_params.rootUri);
 
-    // Initially read and parse all angelscript files in the workspace
-    let GlobsRemaining = Roots.length;
-    for (let RootPath of Roots)
+    // Initially read and parse all angelscript files in resolved script roots.
+    if (scriptRoots.length == 0)
+    {
+        void connection.window.showErrorMessage(
+            "Unsupported workspace layout for Unreal Angelscript. Open the Script folder directly, or open its parent folder that contains Script."
+        );
+    }
+
+    let GlobsRemaining = scriptRoots.length;
+    for (let RootPath of scriptRoots)
     {
         let globOptions: glob.IOptions = {
-            ignore: settings?.scriptIgnorePatterns || []
+            ignore: scriptIgnorePatterns
         };
         glob(RootPath + "/**/*.as", globOptions, function (err: any, files: any)
         {
-            for (let file of files)
+            if (err)
+            {
+                connection.console.error("Failed to glob Angelscript files in " + RootPath + ": " + err);
+            }
+            for (let file of files || [])
             {
                 let uri = getFileUri(file);
                 let asmodule = scriptfiles.GetOrCreateModule(getModuleName(uri), file, uri);
@@ -778,6 +887,9 @@ scriptdiagnostics.OnDiagnosticsChanged( function (uri : string, diagnostics : Ar
 connection.onDidChangeWatchedFiles((_change) => {
     for(let change of _change.changes)
     {
+        if (!IsScriptUri(change.uri))
+            continue;
+
         let module = scriptfiles.GetOrCreateModule(getModuleName(change.uri), getPathName(change.uri), change.uri);
         if (module)
         {
@@ -1176,8 +1288,14 @@ function getModuleName(uri : string) : string
 
     // This assumes all relative paths are globally unique.
     for (let rootUri of RootUris) {
-        if (modulename.startsWith(rootUri)) {
-            modulename = modulename.replace(rootUri, "");
+        let isMatch = false;
+        if (process.platform == "win32")
+            isMatch = modulename.toLowerCase().startsWith(rootUri.toLowerCase());
+        else
+            isMatch = modulename.startsWith(rootUri);
+
+        if (isMatch) {
+            modulename = modulename.substring(rootUri.length);
             break;
         }
     }
@@ -1383,6 +1501,9 @@ connection.onDidChangeTextDocument((params) => {
         return;
 
     let uri = params.textDocument.uri;
+    if (!IsScriptUri(uri))
+        return;
+
     let modulename = getModuleName(uri);
 
     let asmodule = scriptfiles.GetOrCreateModule(modulename, getPathName(uri), uri);
@@ -1424,6 +1545,9 @@ connection.onDidChangeTextDocument((params) => {
 connection.onDidOpenTextDocument(function (params : DidOpenTextDocumentParams)
 {
     let uri = params.textDocument.uri;
+    if (!IsScriptUri(uri))
+        return;
+
     let modulename = getModuleName(uri);
 
     let asmodule = scriptfiles.GetOrCreateModule(modulename, getPathName(uri), uri);

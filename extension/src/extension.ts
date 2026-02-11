@@ -5,6 +5,7 @@
 'use strict';
 
 import * as path from 'path';
+import * as fs from 'fs';
 
 import { workspace, ExtensionContext, TextDocument, Range } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
@@ -25,6 +26,57 @@ import { startMcpHttpServerManager } from './mcpHttpServer';
 import { registerLmTools } from './toolRegistry';
 
 const CONFLICT_EXTENSION_ID = 'Hazelight.unreal-angelscript';
+
+function resolveScriptRoot(workspaceRootPath : string) : string | null
+{
+    if (!workspaceRootPath)
+        return null;
+
+    let normalizedWorkspaceRoot = path.normalize(workspaceRootPath);
+    let rootName = path.basename(normalizedWorkspaceRoot).toLowerCase();
+    if (rootName == 'script')
+        return normalizedWorkspaceRoot;
+
+    let candidatePath = path.join(normalizedWorkspaceRoot, 'Script');
+    try
+    {
+        let stat = fs.statSync(candidatePath);
+        if (stat.isDirectory())
+            return candidatePath;
+    }
+    catch
+    {
+    }
+
+    return null;
+}
+
+function getScriptFileEventWatchers() : vscode.FileSystemWatcher[]
+{
+    let workspaceFolders = workspace.workspaceFolders ?? [];
+    if (workspaceFolders.length == 0)
+        return [];
+
+    let watchers : vscode.FileSystemWatcher[] = [];
+    let seenRoots = new Set<string>();
+
+    for (let workspaceFolder of workspaceFolders)
+    {
+        let scriptRoot = resolveScriptRoot(workspaceFolder.uri.fsPath);
+        if (!scriptRoot)
+            continue;
+
+        let normalizedScriptRoot = path.normalize(scriptRoot);
+        let dedupeKey = process.platform == 'win32' ? normalizedScriptRoot.toLowerCase() : normalizedScriptRoot;
+        if (seenRoots.has(dedupeKey))
+            continue;
+
+        seenRoots.add(dedupeKey);
+        watchers.push(workspace.createFileSystemWatcher(new vscode.RelativePattern(normalizedScriptRoot, '**/*.as')));
+    }
+
+    return watchers;
+}
 
 export function activate(context: ExtensionContext)
 {
@@ -58,12 +110,21 @@ export function activate(context: ExtensionContext)
         debug: { module: serverModule, transport: TransportKind.ipc, options: debugOptions }
     }
 
+    let scriptIgnorePatterns = workspace.getConfiguration('UnrealAngelscript').get<Array<string>>('scriptIgnorePatterns');
+    if (!Array.isArray(scriptIgnorePatterns))
+        scriptIgnorePatterns = [];
+    let scriptFileEventWatchers = getScriptFileEventWatchers();
+    context.subscriptions.push(...scriptFileEventWatchers);
+
     // Options to control the language client
     let clientOptions: LanguageClientOptions = {
         // Register the server for plain text documents
         documentSelector: [{ scheme: 'file', language: 'angelscript' }],
+        initializationOptions: {
+            scriptIgnorePatterns: scriptIgnorePatterns
+        },
         synchronize: {
-            fileEvents: workspace.createFileSystemWatcher('**/*.as'),
+            fileEvents: scriptFileEventWatchers,
             configurationSection: "UnrealAngelscript",
         }
     }
@@ -78,6 +139,21 @@ export function activate(context: ExtensionContext)
     {
         setTimeout(() => vscode.workspace.saveAll(), 100);
     });
+
+    context.subscriptions.push(workspace.onDidChangeWorkspaceFolders((event) =>
+    {
+        if (event.added.length == 0 && event.removed.length == 0)
+            return;
+
+        void vscode.window.showWarningMessage(
+            'Workspace folders changed. Reload Window to refresh Unreal Angelscript Script-root watchers and indexing.',
+            'Reload Window'
+        ).then((selection) =>
+        {
+            if (selection === 'Reload Window')
+                void vscode.commands.executeCommand('workbench.action.reloadWindow');
+        });
+    }));
 
     // register a configuration provider for 'mock' debug type
     const provider = new ASConfigurationProvider();

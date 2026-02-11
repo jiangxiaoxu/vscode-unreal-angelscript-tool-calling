@@ -12,6 +12,10 @@ Maintenance rule:
 
 #### Changed
 - Activation strategy now includes `onLanguage:angelscript` and `workspaceContains:**/*.as`, keeps all `onLanguageModelTool:*`, and removes `onDebug` to avoid unrelated startup.
+- Startup indexing now resolves only supported Script roots (workspace root is `Script`, or contains `<workspace>/Script`) and scans `Script/**/*.as` only; unsupported layouts now fail fast with an explicit error and skip initial indexing.
+- Language client now passes `scriptIgnorePatterns` in `initializationOptions`, so initial glob scanning applies ignore rules immediately.
+- Runtime watched-file notifications and text-document incremental updates are now hard-limited to resolved Script roots as well.
+- Removed built-in default ignore patterns for script scanning; `UnrealAngelscript.scriptIgnorePatterns` now defaults to an empty list.
 - `Angelscript API` views now use `when: unrealAngelscript.apiPanelEnabled`; the activity entry stays hidden until the extension is actually activated.
 - `angelscript_resolveSymbolAtPosition` and `angelscript_findReferences` now accept `filePath` as either absolute path or workspace-relative path (prefer `<workspaceFolderName>/...`).
 - Path output now prefers workspace-relative format with root prefix (for example `CthulhuGame/Source/...`), and falls back to absolute path only when the file is outside all workspace folders.
@@ -40,6 +44,10 @@ Maintenance rule:
 
 #### 变更
 - 激活策略新增 `onLanguage:angelscript` 与 `workspaceContains:**/*.as`, 保留全部 `onLanguageModelTool:*`, 并移除 `onDebug` 以避免无关场景启动.
+- 启动索引改为仅解析受支持的 Script 根目录(工作区根为 `Script` 或包含 `<workspace>/Script`)并仅扫描 `Script/**/*.as`; 对不受支持的工作区形态会明确报错并跳过初始索引.
+- Language client 现在会在 `initializationOptions` 中下发 `scriptIgnorePatterns`,使首次 glob 扫描即可应用忽略规则.
+- 运行期 watched-file 通知与文本增量更新处理也已硬限制为仅处理解析后的 Script 根目录.
+- 已移除脚本扫描的内置默认忽略规则; `UnrealAngelscript.scriptIgnorePatterns` 默认值改为空数组.
 - `Angelscript API` 视图新增 `when: unrealAngelscript.apiPanelEnabled`, 扩展未激活时隐藏对应 activity 入口, 激活后再显示.
 - `angelscript_resolveSymbolAtPosition` 与 `angelscript_findReferences` 的 `filePath` 输入支持绝对路径和工作区路径(建议 `<workspaceFolderName>/...`).
 - 路径输出改为优先使用带 root 名的工作区路径(例如 `CthulhuGame/Source/...`),仅当文件不在任何工作区时才回退为绝对路径.

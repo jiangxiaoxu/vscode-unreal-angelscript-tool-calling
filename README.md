@@ -17,7 +17,10 @@ This extension provides language server and debugger support for UnrealEngine-An
 Notes:
 - Core language features still follow the primary workspace.
 - LM tool `filePath` resolution supports multi-root with explicit root prefix (`<workspaceFolderName>/...`).
-- The workspace must be `Script` itself, or contain `<workspace>/Script`.
+- Supported workspace layouts are strict: the root must be `Script` itself, or contain `<workspace>/Script`.
+- Startup indexing scans only resolved `Script` roots (`Script/**/*.as`), not the entire workspace tree.
+- Runtime file watching and incremental parse/update handling are also restricted to resolved `Script` roots only.
+- Unsupported workspace layouts fail fast with an error message and skip initial indexing.
 
 ### Core Features
 - Code completion, go to definition, rename, find references, semantic highlighting.
@@ -111,7 +114,10 @@ https://angelscript.hazelight.se
 说明:
 - 核心语言功能仍按主工作区运行.
 - LM tool 的 `filePath` 解析支持多工作区,可用 root 前缀(`<workspaceFolderName>/...`)精确定位.
-- 工作区必须是 `Script` 本身,或包含 `<workspace>/Script`.
+- 工作区兼容策略为严格模式: 根目录必须是 `Script` 本身,或包含 `<workspace>/Script`.
+- 启动索引只扫描解析后的 `Script` 根目录(`Script/**/*.as`),不会全盘递归扫描工作区.
+- 运行期文件监听与增量解析/更新同样严格限制在解析后的 `Script` 根目录内.
+- 对不受支持的工作区形态会快速报错并跳过初始索引.
 
 ### 核心功能
 - 代码补全、定义跳转、重命名、引用查找、语义高亮.
