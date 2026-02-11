@@ -44,6 +44,8 @@ export function activate(context: ExtensionContext)
         return;
     }
 
+    void vscode.commands.executeCommand('setContext', 'unrealAngelscript.apiPanelEnabled', true);
+
     // The server is implemented in node
     let serverModule = context.asAbsolutePath(path.join('language-server', 'out', 'server.js'));
     // The debug options for the server

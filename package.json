@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8045",
+    "version": "1.8.8046",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -13,7 +13,7 @@
         "Debuggers"
     ],
     "activationEvents": [
-        "onDebug",
+        "workspaceContains:**/*.as",
         "onLanguageModelTool:angelscript_searchApi",
         "onLanguageModelTool:angelscript_resolveSymbolAtPosition",
         "onLanguageModelTool:angelscript_getTypeMembers",
@@ -306,21 +306,24 @@
                     "name": "Search",
                     "icon": "resources/angelscript_unreal.png",
                     "type": "webview",
-                    "initialSize": 1
+                    "initialSize": 1,
+                    "when": "unrealAngelscript.apiPanelEnabled"
                 },
                 {
                     "id": "angelscript-api-list",
                     "name": "List",
                     "icon": "resources/angelscript_unreal.png",
                     "type": "tree",
-                    "initialSize": 20
+                    "initialSize": 20,
+                    "when": "unrealAngelscript.apiPanelEnabled"
                 },
                 {
                     "id": "angelscript-api-details",
                     "name": "Details",
                     "icon": "resources/angelscript_unreal.png",
                     "type": "webview",
-                    "initialSize": 5
+                    "initialSize": 5,
+                    "when": "unrealAngelscript.apiPanelEnabled"
                 }
             ]
         },

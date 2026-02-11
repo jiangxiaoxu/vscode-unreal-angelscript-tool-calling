@@ -11,6 +11,8 @@ Maintenance rule:
 ### English
 
 #### Changed
+- Activation strategy now includes `onLanguage:angelscript` and `workspaceContains:**/*.as`, keeps all `onLanguageModelTool:*`, and removes `onDebug` to avoid unrelated startup.
+- `Angelscript API` views now use `when: unrealAngelscript.apiPanelEnabled`; the activity entry stays hidden until the extension is actually activated.
 - `angelscript_resolveSymbolAtPosition` and `angelscript_findReferences` now accept `filePath` as either absolute path or workspace-relative path (prefer `<workspaceFolderName>/...`).
 - Path output now prefers workspace-relative format with root prefix (for example `CthulhuGame/Source/...`), and falls back to absolute path only when the file is outside all workspace folders.
 - Multi-root path resolution now detects ambiguity for relative `filePath` and returns `InvalidParams` with candidate paths instead of silently picking one root.
@@ -37,6 +39,8 @@ Maintenance rule:
 ### 中文
 
 #### 变更
+- 激活策略新增 `onLanguage:angelscript` 与 `workspaceContains:**/*.as`, 保留全部 `onLanguageModelTool:*`, 并移除 `onDebug` 以避免无关场景启动.
+- `Angelscript API` 视图新增 `when: unrealAngelscript.apiPanelEnabled`, 扩展未激活时隐藏对应 activity 入口, 激活后再显示.
 - `angelscript_resolveSymbolAtPosition` 与 `angelscript_findReferences` 的 `filePath` 输入支持绝对路径和工作区路径(建议 `<workspaceFolderName>/...`).
 - 路径输出改为优先使用带 root 名的工作区路径(例如 `CthulhuGame/Source/...`),仅当文件不在任何工作区时才回退为绝对路径.
 - 多工作区下,相对 `filePath` 若存在歧义会返回带候选路径的 `InvalidParams`,不再静默选择某个 root.
