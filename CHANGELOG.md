@@ -25,6 +25,7 @@ Maintenance rule:
 - Updated tool descriptions, schema docs, README, and face-ai report to match the unified JSON contract.
 - VS Code LM tool results now return dual content parts: `LanguageModelDataPart.json(payload)` for machine-readable JSON and `LanguageModelTextPart` with human-readable multi-line text.
 - MCP `tools/call` responses now include both `structuredContent` (payload object) and human-readable text `content`, plus `isError` when `payload.ok === false`.
+- CI release workflow migrated from `beta/release` to `pre-release/release`: now publishes to VS Code Marketplace only (no GitHub release assets), keeps `runs-on: ubuntu-latest`, packages VSIX without platform target, and force-updates branch tags `pre-release`/`release` on successful runs.
 
 #### Breaking Changes
 - Callers that assumed output `filePath` is always absolute should migrate to parse both workspace-relative and absolute path formats.
@@ -50,6 +51,7 @@ Maintenance rule:
 - 已同步更新工具描述、schema 文案、README 与 face-ai report,确保契约一致.
 - VS Code LM tool 结果现在返回双通道: `LanguageModelDataPart.json(payload)` 提供 machine-readable JSON,`LanguageModelTextPart` 提供 human-readable 多行文本.
 - MCP `tools/call` 响应现在同时包含 `structuredContent`(payload 对象) 与 human-readable 文本 `content`,并在 `payload.ok === false` 时设置 `isError`.
+- CI 发布流程从 `beta/release` 迁移到 `pre-release/release`: 仅发布到 VS Code Marketplace(不再发布 GitHub 资产),保持 `runs-on: ubuntu-latest`,VSIX 打包不限定平台,并在成功后强制更新分支同名 tag(`pre-release`/`release`).
 
 #### Breaking Changes
 - 如果调用方假设输出 `filePath` 永远是绝对路径,需要迁移为同时兼容工作区路径和绝对路径.

@@ -1,0 +1,72 @@
+name: Release on pre-release and release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - pre-release
+      - release
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard branch
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "pre-release" ] && [ "${GITHUB_REF_NAME}" != "release" ]; then
+            echo "Ref ${GITHUB_REF_NAME} is not supported for release."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --fund=false
+
+      - name: Read extension version
+        id: meta
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Package VSIX
+        run: |
+          mkdir -p dist
+          npx -y @vscode/vsce package --out "./dist/unreal-angelscript-tool-calling-fork-${{ steps.meta.outputs.version }}.vsix"
+
+      - name: Publish to VS Code Marketplace (pre-release)
+        if: ${{ github.ref_name == 'pre-release' }}
+        run: npx -y @vscode/vsce publish --packagePath "./dist/unreal-angelscript-tool-calling-fork-${{ steps.meta.outputs.version }}.vsix" --pre-release -p "${VSCE_PAT}"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to VS Code Marketplace (release)
+        if: ${{ github.ref_name == 'release' }}
+        run: npx -y @vscode/vsce publish --packagePath "./dist/unreal-angelscript-tool-calling-fork-${{ steps.meta.outputs.version }}.vsix" -p "${VSCE_PAT}"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Move branch tag to successful commit
+        run: |
+          set -euo pipefail
+          TAG_NAME="${GITHUB_REF_NAME}"
+          if [ "$TAG_NAME" != "release" ] && [ "$TAG_NAME" != "pre-release" ]; then
+            echo "Tag update skipped for unsupported ref: ${TAG_NAME}"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "$TAG_NAME" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG_NAME" --force
