@@ -22,7 +22,6 @@ import {
     GetModuleForSymbolRequest,
     ProvideInlineValuesRequest,
 } from './apiRequests';
-import { startMcpHttpServerManager } from './mcpHttpServer';
 import { registerLmTools } from './toolRegistry';
 
 const CONFLICT_EXTENSION_ID = 'Hazelight.unreal-angelscript';
@@ -328,7 +327,6 @@ export function activate(context: ExtensionContext)
 
     registerLmTools(context, client, startedClient);
 
-    startMcpHttpServerManager(context, client, startedClient);
 }
 
 class ASApiSearchProvider implements vscode.WebviewViewProvider

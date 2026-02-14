@@ -41,10 +41,9 @@
 - VS Code LM tool 返回双通道:
   - `LanguageModelDataPart.json(payload对象本体)` 用于 machine-readable JSON.
   - `LanguageModelTextPart(JSON.stringify(payload, null, 2))` 用于 human-readable 完整 JSON.
-- MCP `tools/call` 返回双通道:
-  - `structuredContent` 直接放 payload 对象本体.
-  - `content[0].text` 放完整 JSON 文本.
-- LM 与 MCP 的 payload 语义保持一致,避免双维护.
+- 工具调用返回双通道:
+  - `LanguageModelDataPart.json(payload对象本体)`.
+  - `LanguageModelTextPart(JSON.stringify(payload, null, 2))`.
 
 ## 路径策略设计准则
 输入路径准则:
@@ -110,9 +109,8 @@
 
 `extension/src/toolRegistry.ts`:
 - 注册工具定义, 维护每个 tool 的 description/inputSchema 文案.
-- `toPayloadObject/toPayloadText/isErrorPayload`: 统一 LM/MCP 的 payload 归一化与文本输出.
+- `toPayloadObject/toPayloadText/isErrorPayload`: 统一 payload 归一化与文本输出.
 - LM `invoke`: 返回 `LanguageModelDataPart.json(payload)` + `LanguageModelTextPart(full JSON)`.
-- MCP `registerTool` 回调: 返回 `structuredContent + content(text)` 并设置 `isError`.
 
 `extension/src/apiRequests.ts`:
 - 定义 tool 入参类型与结果类型.

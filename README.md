@@ -7,7 +7,7 @@
 ## English
 
 ### Overview
-This extension provides language server and debugger support for UnrealEngine-Angelscript, with additional LM tools and built-in MCP(HTTP) support in this fork.
+This extension provides language server and debugger support for UnrealEngine-Angelscript, with additional LM tools in this fork.
 
 ### Quick Start
 1. Use an Unreal Editor build with Angelscript enabled.
@@ -48,6 +48,9 @@ Exposed tools:
 - `angelscript_getClassHierarchy`
 - `angelscript_findReferences`
 
+If you need an HTTP MCP endpoint, install this extension to bridge VS Code `languageModelTools`: https://marketplace.visualstudio.com/items?itemName=jiangxiaoxu.lm-tools-bridge
+
+
 Output rules:
 - All tools expose machine-readable JSON payload plus a human-readable multi-line text channel.
 - Success response is unified as `{ ok: true, data: ... }`.
@@ -55,35 +58,18 @@ Output rules:
 - In VS Code LM tools, `LanguageModelToolResult.content` now includes both:
   - `LanguageModelDataPart.json(payload)` for machine-readable JSON
   - `LanguageModelTextPart` for human-readable multi-line text summary
-- In MCP `tools/call`, responses include both `structuredContent` (same payload object) and human-readable text `content`.
+- Clients should treat structured JSON (`LanguageModelDataPart.json`) as the only machine contract.
 - Input `filePath` supports absolute path or workspace-relative path (prefer `<workspaceFolderName>/...`).
-- Output `filePath` prefers workspace-relative path with root prefix; if not in workspace, output falls back to absolute path.
+- In structured JSON output, `filePath` is always absolute path.
+- In human-readable text output (`LanguageModelTextPart`), `filePath` prefers workspace-relative path with root prefix; if not in workspace, output falls back to absolute path.
 - For line-based results, tools include `preview` source snippets (max 20 lines, truncated with `... (truncated)`, fallback `<source unavailable>`).
 
 Tool notes:
 - `angelscript_searchApi`: Search Angelscript APIs and docs with fuzzy tokens, OR(`|`), separator constraints(`.`/`::`), optional filters, pagination, and regex.
 - `angelscript_resolveSymbolAtPosition`: All line/character indices in tool input/output are 1-based. Success `data.symbol` includes `kind/name/signature`, optional `doc`, and optional `definition{ filePath, startLine, endLine, preview }`. It checks the line before definition start for `UCLASS/UPROPERTY/UFUNCTION/UENUM`; when matched, that macro line is used as preview start.
 - `angelscript_getTypeMembers`: List members for an exact type name, with optional inherited members/docs.
-- `angelscript_getClassHierarchy`: Return compact class hierarchy JSON for an exact class name: `root`, `supers`(nearest parent first), `derivedByParent`(parent -> direct children), `sourceByClass`, `limits`, `truncated`. In `sourceByClass`, cpp classes are `{ source: "cpp" }`, script classes are `{ source: "as", filePath, startLine, endLine, preview }` (`filePath` follows workspace-relative-first rule, line numbers are 1-based). Defaults: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
+- `angelscript_getClassHierarchy`: Return compact class hierarchy JSON for an exact class name: `root`, `supers`(nearest parent first), `derivedByParent`(parent -> direct children), `sourceByClass`, `limits`, `truncated`. In `sourceByClass`, cpp classes are `{ source: "cpp" }`, script classes are `{ source: "as", filePath, startLine, endLine, preview }` (`filePath` is absolute in structured JSON; text output shows workspace-relative-first, line numbers are 1-based). Defaults: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
 - `angelscript_findReferences`: All line/character indices in tool input/output are 1-based. Success `data` is `{ total, references[] }`; each reference includes `{ filePath, startLine, endLine, range, preview }`; `range` is also 1-based.
-
-### MCP(HTTP) Support
-Built-in Streamable HTTP MCP server reusing Angelscript language server logic.
-
-Example settings:
-```json
-{
-  "UnrealAngelscript.mcp.enabled": true,
-  "UnrealAngelscript.mcp.port": 27199,
-  "UnrealAngelscript.mcp.maxStartupFailures": 5
-}
-```
-
-Codex example:
-```toml
-[mcp_servers.angelscript]
-url = "http://127.0.0.1:27199/mcp"
-```
 
 ### Build
 ```bash
@@ -104,7 +90,7 @@ https://angelscript.hazelight.se
 ## 中文
 
 ### 概览
-这是 UnrealEngine-Angelscript 的 VS Code 扩展分支版本,提供语言服务与调试能力,并新增 LM tools 和内置 MCP(HTTP) 支持.
+这是 UnrealEngine-Angelscript 的 VS Code 扩展分支版本,提供语言服务与调试能力,并新增 LM tools 支持.
 
 ### 快速开始
 1. 使用启用 Angelscript 的 Unreal Editor 版本.
@@ -145,6 +131,9 @@ https://angelscript.hazelight.se
 - `angelscript_getClassHierarchy`
 - `angelscript_findReferences`
 
+如果需要 HTTP MCP 服务,可以安装这个插件,把 VS Code `languageModelTools` 桥接出来: https://marketplace.visualstudio.com/items?itemName=jiangxiaoxu.lm-tools-bridge
+
+
 输出规则:
 - 所有工具都同时提供 machine-readable JSON payload 与 human-readable 多行文本通道.
 - 成功返回统一为 `{ ok: true, data: ... }`.
@@ -152,35 +141,18 @@ https://angelscript.hazelight.se
 - 在 VS Code LM tool 中,`LanguageModelToolResult.content` 现在同时包含:
   - `LanguageModelDataPart.json(payload)` 用于 machine-readable JSON
   - `LanguageModelTextPart` 用于 human-readable 多行文本摘要
-- 在 MCP `tools/call` 中,返回同时包含 `structuredContent`(同一 payload 对象)和 human-readable 文本 `content`.
+- 客户端应仅将 structured JSON(`LanguageModelDataPart.json`)视为 machine contract.
 - 输入 `filePath` 支持绝对路径和工作区路径(建议 `<workspaceFolderName>/...`).
-- 输出 `filePath` 优先返回带 root 名的工作区路径,不在工作区内时回退为绝对路径.
+- structured JSON 输出中的 `filePath` 始终为绝对路径.
+- human-readable 文本输出(`LanguageModelTextPart`)中的 `filePath` 优先返回带 root 名的工作区路径,不在工作区内时回退为绝对路径.
 - 涉及行号/范围的结果会包含 `preview` 源码片段(最多 20 行,超出追加 `... (truncated)`,不可读时为 `<source unavailable>`).
 
 工具说明:
 - `angelscript_searchApi`: 支持模糊 token、OR(`|`)、分隔符约束(`.`/`::`)、过滤、分页与正则搜索.
 - `angelscript_resolveSymbolAtPosition`: 工具输入/输出中的行列索引全部为 1-based. 成功 `data.symbol` 包含 `kind/name/signature`,可选 `doc`,可选 `definition{ filePath, startLine, endLine, preview }`. 会检查定义起始行上一行是否为 `UCLASS/UPROPERTY/UFUNCTION/UENUM`,命中则把宏行作为预览起始行.
 - `angelscript_getTypeMembers`: 按精确类型名列出成员,可选包含继承成员和文档.
-- `angelscript_getClassHierarchy`: 按精确类名返回紧凑层级 JSON: `root`, `supers`(近父到根), `derivedByParent`(父类 -> 直接子类), `sourceByClass`, `limits`, `truncated`. `sourceByClass` 中, cpp 类为 `{ source: "cpp" }`, 脚本类为 `{ source: "as", filePath, startLine, endLine, preview }` (`filePath` 遵循工作区路径优先规则,行号是 1-based). 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
+- `angelscript_getClassHierarchy`: 按精确类名返回紧凑层级 JSON: `root`, `supers`(近父到根), `derivedByParent`(父类 -> 直接子类), `sourceByClass`, `limits`, `truncated`. `sourceByClass` 中, cpp 类为 `{ source: "cpp" }`, 脚本类为 `{ source: "as", filePath, startLine, endLine, preview }` (`filePath` 在 structured JSON 中为绝对路径; 文本输出遵循工作区路径优先规则,行号是 1-based). 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
 - `angelscript_findReferences`: 工具输入/输出中的行列索引全部为 1-based,成功 `data` 为 `{ total, references[] }`,每条引用包含 `{ filePath, startLine, endLine, range, preview }`,其中 `range` 也是 1-based.
-
-### MCP(HTTP) 支持
-内置 Streamable HTTP MCP server,复用 Angelscript language server 能力.
-
-配置示例:
-```json
-{
-  "UnrealAngelscript.mcp.enabled": true,
-  "UnrealAngelscript.mcp.port": 27199,
-  "UnrealAngelscript.mcp.maxStartupFailures": 5
-}
-```
-
-Codex 配置示例:
-```toml
-[mcp_servers.angelscript]
-url = "http://127.0.0.1:27199/mcp"
-```
 
 ### 构建
 ```bash

@@ -10,7 +10,7 @@ npm version patch --no-git-tag-version
 
 ## Tool Output Contract
 
-For implemented `Language Model Tool` and `MCP` tools, responses must include both:
+For implemented `Language Model Tool` tools, responses must include both:
 - human-readable `text`
 - structured `json`
 

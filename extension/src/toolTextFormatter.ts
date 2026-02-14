@@ -1,3 +1,6 @@
+import * as path from 'path';
+import * as vscode from 'vscode';
+
 type UnknownRecord = Record<string, unknown>;
 
 const MAX_LIST_ITEMS = 50;
@@ -32,6 +35,63 @@ function asBoolean(value: unknown): boolean | null
 function asArray(value: unknown): unknown[] | null
 {
     return Array.isArray(value) ? value : null;
+}
+
+function toDisplayPath(filePath: string): string
+{
+    return path.normalize(filePath).replace(/\\/g, '/');
+}
+
+function samePath(a: string, b: string): boolean
+{
+    if (process.platform === 'win32')
+        return a.toLowerCase() === b.toLowerCase();
+    return a === b;
+}
+
+function isPathInsideRoot(filePath: string, rootPath: string): boolean
+{
+    const normalizedFilePath = path.normalize(filePath);
+    const normalizedRootPath = path.normalize(rootPath);
+    if (samePath(normalizedFilePath, normalizedRootPath))
+        return true;
+
+    const relativePath = path.relative(normalizedRootPath, normalizedFilePath);
+    if (!relativePath)
+        return true;
+    return !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
+}
+
+function formatPathForTextOutput(filePath: string): string
+{
+    const normalizedPath = path.normalize(filePath);
+    if (!path.isAbsolute(normalizedPath))
+        return toDisplayPath(normalizedPath);
+
+    const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+    let bestFolder: vscode.WorkspaceFolder | null = null;
+    let bestRootPath = '';
+
+    for (const workspaceFolder of workspaceFolders)
+    {
+        const rootPath = path.normalize(workspaceFolder.uri.fsPath);
+        if (!isPathInsideRoot(normalizedPath, rootPath))
+            continue;
+        if (!bestFolder || rootPath.length > bestRootPath.length)
+        {
+            bestFolder = workspaceFolder;
+            bestRootPath = rootPath;
+        }
+    }
+
+    if (!bestFolder)
+        return toDisplayPath(normalizedPath);
+
+    const relativePath = path.relative(bestRootPath, normalizedPath);
+    if (!relativePath)
+        return bestFolder.name;
+
+    return `${bestFolder.name}/${toDisplayPath(relativePath)}`;
 }
 
 function toDisplayValue(value: unknown): string
@@ -214,10 +274,11 @@ function formatResolveSymbolSuccess(toolName: string, data: UnknownRecord): stri
     if (definition)
     {
         const filePath = asString(definition.filePath) ?? '<unknown>';
+        const displayPath = formatPathForTextOutput(filePath);
         const startLine = asNumber(definition.startLine);
         const endLine = asNumber(definition.endLine);
         const locationLabel = startLine !== null && endLine !== null ? `${startLine}-${endLine}` : '?';
-        lines.push(`definition: ${filePath}:${locationLabel}`);
+        lines.push(`definition: ${displayPath}:${locationLabel}`);
         const preview = asString(definition.preview);
         if (preview && preview.length > 0)
         {
@@ -359,9 +420,10 @@ function formatClassHierarchySuccess(toolName: string, data: UnknownRecord): str
             }
 
             const filePath = asString(source.filePath) ?? '<unknown>';
+            const displayPath = formatPathForTextOutput(filePath);
             const startLine = asNumber(source.startLine);
             const endLine = asNumber(source.endLine);
-            lines.push(`- ${className}: as ${filePath}:${startLine ?? '?'}-${endLine ?? '?'}`);
+            lines.push(`- ${className}: as ${displayPath}:${startLine ?? '?'}-${endLine ?? '?'}`);
             const preview = asString(source.preview);
             if (preview && preview.trim().length > 0)
             {
@@ -416,10 +478,11 @@ function formatFindReferencesSuccess(toolName: string, data: UnknownRecord): str
     {
         const reference = asRecord(limited.items[index]);
         const filePath = asString(reference?.filePath) ?? '<unknown>';
+        const displayPath = formatPathForTextOutput(filePath);
         const startLine = asNumber(reference?.startLine);
         const endLine = asNumber(reference?.endLine);
         const rangeLabel = toRangeLabel(asRecord(reference?.range));
-        lines.push(`// ${filePath}:${startLine ?? '?'}-${endLine ?? '?'} (range ${rangeLabel})`);
+        lines.push(`// ${displayPath}:${startLine ?? '?'}-${endLine ?? '?'} (range ${rangeLabel})`);
         const preview = asString(reference?.preview);
         if (preview && preview.length > 0)
             lines.push(truncateLines(preview));

@@ -103,6 +103,11 @@ function toOutputPath(filePath: string): string
     return path.normalize(filePath).replace(/\\/g, '/');
 }
 
+function formatAbsoluteOutputFilePath(filePath: string): string
+{
+    return toOutputPath(filePath);
+}
+
 function samePath(a: string, b: string): boolean
 {
     if (process.platform === 'win32')
@@ -571,7 +576,7 @@ async function buildResolveSuccessData(
                 }
             );
             resolvedSymbol.definition = {
-                filePath: formatOutputFilePath(absoluteDefinitionPath),
+                filePath: formatAbsoluteOutputFilePath(absoluteDefinitionPath),
                 startLine: definitionPreview.startLine,
                 endLine: definitionPreview.endLine,
                 preview: definitionPreview.preview
@@ -600,7 +605,7 @@ async function buildFindReferencesItems(references: ResolvedReferenceLocation[])
         );
 
         items.push({
-            filePath: formatOutputFilePath(reference.filePath),
+            filePath: formatAbsoluteOutputFilePath(reference.filePath),
             startLine: previewSection.startLine,
             endLine: previewSection.endLine,
             range: toOneBasedRangeFromLsp(reference.lspRange),
@@ -756,7 +761,7 @@ async function buildTypeHierarchyToolData(
 
         sourceByClass[className] = {
             source: 'as',
-            filePath: formatOutputFilePath(absolutePath),
+            filePath: formatAbsoluteOutputFilePath(absolutePath),
             startLine: preview.startLine,
             endLine: preview.endLine,
             preview: preview.preview
