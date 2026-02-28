@@ -1445,6 +1445,12 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
     let scopeType = context.scope ? context.scope.getParentType() : null;
     let props = new Set<string>();
 
+    // If we're completing from the 'this' scope, prioritize our members over our parents' members
+    // If we're completing a member access, prefer members from the childmost type over the parents
+    let preferInType = scopeType;
+    if (context.priorType && context.priorType instanceof typedb.DBType)
+        preferInType = context.priorType;
+
     let expectedSubclassOf : string = null;
     if (context.expectedType && context.expectedType.templateBaseType && context.expectedType.templateBaseType == "TSubclassOf")
     {
@@ -1494,7 +1500,7 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                     else
                         compl.sortText = Sort.EnumValue+sortNumber;
                 }
-                else if (prop.containingType == scopeType)
+                else if (prop.containingType == preferInType)
                     compl.sortText = Sort.MemberProp_Direct;
                 else
                     compl.sortText = Sort.MemberProp_Parent;
@@ -1521,7 +1527,7 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                     else
                         compl.sortText = Sort.EnumValue_Expected+sortNumber;
                 }
-                else if (prop.containingType && prop.containingType == scopeType)
+                else if (prop.containingType && prop.containingType == preferInType)
                     compl.sortText = Sort.MemberProp_Direct_Expected;
                 else if (prop.containingType)
                     compl.sortText = Sort.MemberProp_Parent_Expected;
@@ -1568,12 +1574,12 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                                     description: func.returnType,
                                 },
                                 commitCharacters: [".", ";", ","],
-                                filterText: GetSymbolFilterText(context, func),
+                                filterText: GetPropertyAccessorFilterText(context, func),
                         };
 
                         if (func.containingType)
                         {
-                            if (func.containingType == scopeType)
+                            if (func.containingType == preferInType)
                                 compl.sortText = Sort.MemberProp_Direct;
                             else
                                 compl.sortText = Sort.MemberProp_Parent;
@@ -1590,7 +1596,7 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                             if (func.containingType || !func.namespace.isRootNamespace())
                                 context.completionsMatchingExpected.push(compl);
 
-                            if (func.containingType && func.containingType == scopeType)
+                            if (func.containingType && func.containingType == preferInType)
                                 compl.sortText = Sort.MemberProp_Direct_Expected;
                             else if (func.containingType)
                                 compl.sortText = Sort.MemberProp_Parent_Expected;
@@ -1618,13 +1624,13 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                                     description: func.args[0].typename,
                                 },
                                 commitCharacters: [".", ";", ","],
-                                filterText: GetSymbolFilterText(context, func),
-                                sortText: (func.containingType == scopeType) ? "a" : "b",
+                                filterText: GetPropertyAccessorFilterText(context, func),
+                                sortText: (func.containingType == preferInType) ? "a" : "b",
                         };
 
                         if (func.containingType)
                         {
-                            if (func.containingType == scopeType)
+                            if (func.containingType == preferInType)
                                 compl.sortText = Sort.MemberProp_Direct;
                             else
                                 compl.sortText = Sort.MemberProp_Parent;
@@ -1641,7 +1647,7 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                             if (func.containingType || !func.namespace.isRootNamespace())
                                 context.completionsMatchingExpected.push(compl);
 
-                            if (func.containingType && func.containingType == scopeType)
+                            if (func.containingType && func.containingType == preferInType)
                                 compl.sortText = Sort.MemberProp_Direct_Expected;
                             else if (func.containingType)
                                 compl.sortText = Sort.MemberProp_Parent_Expected;
@@ -1657,7 +1663,9 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                 }
             }
 
-            if(!func.name.startsWith("op") && (!func.isBlueprintEvent || showEvents))
+            if(!func.name.startsWith("op")
+                && (!func.isBlueprintEvent || showEvents)
+                && (!func.isProperty || !func.declaredModule))
             {
                 let commitChars = ["("];
                 if (func.isConstructor)
@@ -1668,12 +1676,12 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                         kind: func.isBlueprintEvent ? CompletionItemKind.Event : CompletionItemKind.Method,
                         commitCharacters: commitChars,
                         filterText: GetSymbolFilterText(context, func),
-                        sortText: (func.containingType == scopeType) ? "a" : "b",
+                        sortText: (func.containingType == preferInType) ? "a" : "b",
                 };
 
                 if (func.containingType)
                 {
-                    if (func.containingType == scopeType)
+                    if (func.containingType == preferInType)
                         compl.sortText = Sort.Method_Direct;
                     else
                         compl.sortText = Sort.Method_Parent;
@@ -1690,7 +1698,7 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                     if (func.containingType || !func.namespace.isRootNamespace() || func.isConstructor)
                         context.completionsMatchingExpected.push(compl);
 
-                    if (func.containingType && func.containingType == scopeType)
+                    if (func.containingType && func.containingType == preferInType)
                         compl.sortText = Sort.Method_Direct_Expected;
                     else if (func.containingType)
                         compl.sortText = Sort.Method_Parent_Expected;
@@ -2115,6 +2123,16 @@ function GetSymbolFilterText(context : CompletionContext, symbol : typedb.DBSymb
     if (!symbol.keywords)
         return undefined;
     return [symbol.name, ...symbol.keywords].join(" ");
+}
+
+function GetPropertyAccessorFilterText(context : CompletionContext, symbol : typedb.DBMethod) : string | undefined
+{
+    if (!symbol.declaredModule)
+        return GetSymbolFilterText(context, symbol);
+    let propertyFilter = `${symbol.name} Get${symbol.name} Set${symbol.name}`;
+    if (!symbol.keywords)
+        return propertyFilter;
+    return [propertyFilter, ...symbol.keywords].join(" ");
 }
 
 function GetTypenamePriority(context : CompletionContext, type : typedb.DBType) : string

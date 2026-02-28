@@ -7,11 +7,9 @@ language-server/src/**
 language-server/pegjs/*.pegjs
 extension/out/**
 language-server/out/**
-!extension/out/
-!extension/out/extension.js
-!extension/out/debugAdapter.js
-!language-server/out/
-!language-server/out/server.js
+extension/node_modules/**
+language-server/node_modules/**
+node_modules/**
 **/*.ts
 **/*.d.ts
 **/*.map

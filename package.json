@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.8.8048",
+    "version": "1.9.2049",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -25,7 +25,7 @@
         "type": "git",
         "url": "https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling"
     },
-    "main": "./extension/out/extension",
+    "main": "./extension/dist/extension.js",
     "contributes": {
         "viewsContainers": {
             "activitybar": [
@@ -783,7 +783,7 @@
             {
                 "type": "angelscript",
                 "label": "Angelscript Debug",
-                "program": "./extension/out/debugAdapter.js",
+                "program": "./extension/dist/debugAdapter.js",
                 "runtime": "node",
                 "languages": [
                     "angelscript"
@@ -853,6 +853,12 @@
                 "command": "angelscript.saveAndEditAsset",
                 "title": "Angelscript Save and Edit Asset",
                 "enablement": "false"
+            },
+            {
+                "command": "angelscript.debugStopPIE",
+                "title": "Unreal: Resume Execution and Stop Any Active PIE Sessions",
+                "shortTitle": "Resume and Stop PIE",
+                "icon": "resources/stop_pie.png"
             }
         ],
         "menus": {
@@ -872,6 +878,12 @@
                 {
                     "command": "angelscript.wrapRegion",
                     "when": "false"
+                }
+            ],
+            "debug/toolBar": [
+                {
+                    "command": "angelscript.debugStopPIE",
+                    "when": "debugType == angelscript && debugState == stopped"
                 }
             ]
         },
@@ -969,10 +981,13 @@
         "zod": "^4.3.5"
     },
     "scripts": {
-        "vscode:prepublish": "npm run compile && npm run bundle",
-        "compile": "tsc -b",
-        "bundle": "node ./scripts/bundle.mjs",
-        "watch": "tsc -b -w",
+        "vscode:prepublish": "npm run compile",
+        "compile": "npm run compile:extension && npm run compile:language-server",
+        "compile:extension": "cd extension && node esbuild.js",
+        "compile:language-server": "cd language-server && node esbuild.js",
+        "watch": "npm-run-all -p watch:*",
+        "watch:extension": "cd extension && node esbuild.js --watch",
+        "watch:language-server": "cd language-server && node esbuild.js --watch",
         "postinstall": "cd extension && npm install && cd ../language-server && npm install && cd ..",
         "pegjs:compile": "cd language-server/pegjs && peggy angelscript.pegjs --allowed-start-rules start,start_global,start_class,start_enum",
         "pegjs:test": "cd language-server/pegjs && peggy angelscript.pegjs --allowed-start-rules start,start_global,start_class,start_enum --trace --test-file test.as -S start"
@@ -982,9 +997,10 @@
         "@types/node": "^25.0.9",
         "@typescript-eslint/eslint-plugin": "^8.53.1",
         "@typescript-eslint/parser": "^8.53.1",
-        "esbuild": "^0.27.2",
+        "esbuild": "^0.27.3",
         "eslint": "^9.39.2",
         "mocha": "^11.7.5",
+        "npm-run-all": "^4.1.5",
         "peggy": "^5.0.6",
         "typescript": "^5.9.3",
         "vsce": "^2.15.0"

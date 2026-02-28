@@ -602,7 +602,7 @@ export function GetAPIList(root: string): any
         {
             for (let [_, childNamespace] of type.childNamespaces)
             {
-                if (childNamespace.isShadowingType())
+                if (isNamespaceApiEmpty(childNamespace))
                     continue;
 
                 list.push({
@@ -1421,9 +1421,6 @@ export function GetAPISearch(filter: string, source?: string): any
         {
             for (let [_, childNamespace] of type.childNamespaces)
             {
-                if (childNamespace.isShadowingType())
-                    continue;
-
                 searchType(childNamespace);
             }
 
@@ -1528,6 +1525,8 @@ export function GetAPISearch(filter: string, source?: string): any
                         return;
                 }
                 if (symbol.name.startsWith("op"))
+                    return;
+                if (shouldSkipApiFunction(symbol))
                     return;
                 // Also check the full qualified name (prefix + symbol name)
                 let fullName = typePrefix + symbol.name;
@@ -1709,4 +1708,18 @@ export function GetAPISearch(filter: string, source?: string): any
     });
 
     return list;
+}
+
+function isNamespaceApiEmpty(nsType : typedb.DBNamespace) : boolean
+{
+    if (nsType.childNamespaces.size != 0)
+        return false;
+    if (nsType.symbols.size != 0)
+        return false;
+    return true;
+}
+
+function shouldSkipApiFunction(func : typedb.DBMethod) : boolean
+{
+    return false;
 }

@@ -98,7 +98,7 @@ export function activate(context: ExtensionContext)
     void vscode.commands.executeCommand('setContext', 'unrealAngelscript.apiPanelEnabled', true);
 
     // The server is implemented in node
-    let serverModule = context.asAbsolutePath(path.join('language-server', 'out', 'server.js'));
+    let serverModule = context.asAbsolutePath(path.join('language-server', 'dist', 'server.js'));
     // The debug options for the server
     let debugOptions = { execArgv: ["--nolazy", "--inspect=6009"] };
 
@@ -308,6 +308,14 @@ export function activate(context: ExtensionContext)
         }
     });
     context.subscriptions.push(wrapRegion);
+
+    let stopPIE = vscode.commands.registerCommand('angelscript.debugStopPIE',
+        function()
+        {
+            if (vscode.debug.activeDebugSession)
+                vscode.debug.activeDebugSession.customRequest("angelscript/stopPIE");
+        });
+    context.subscriptions.push(stopPIE);
 
     console.log("Done activating angelscript extension");
 
