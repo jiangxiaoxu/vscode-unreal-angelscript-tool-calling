@@ -12,7 +12,7 @@ npm version patch --no-git-tag-version
 
 For implemented `Language Model Tool` tools, responses must include both:
 - human-readable `text`
-- structured `json`
+- structured `json` (optional)
 
 Do not return only one of them.
 

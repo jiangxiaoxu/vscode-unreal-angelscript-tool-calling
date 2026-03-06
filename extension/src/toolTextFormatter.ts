@@ -6,6 +6,16 @@ type UnknownRecord = Record<string, unknown>;
 const MAX_LIST_ITEMS = 50;
 const MAX_BLOCK_LINES = 40;
 const MAX_TEXT_LENGTH = 30000;
+const SOURCE_UNAVAILABLE_TEXT = '<source unavailable>';
+const TRUNCATED_LINE_TEXT = '... (truncated)';
+
+type PreviewRenderOptions = {
+    startLine?: number | null;
+    endLine?: number | null;
+    preview?: string | null;
+    matchStartLine?: number | null;
+    matchEndLine?: number | null;
+};
 
 function isRecord(value: unknown): value is UnknownRecord
 {
@@ -105,15 +115,11 @@ function toDisplayValue(value: unknown): string
     if (typeof value === 'number' || typeof value === 'boolean')
         return String(value);
     if (Array.isArray(value))
-        return `[${value.length} items]`;
+        return value.map((item) => toDisplayValue(item)).join('|');
     if (isRecord(value))
     {
-        const keys = Object.keys(value);
-        if (keys.length === 0)
-            return '{}';
-        const shown = keys.slice(0, 5).join(', ');
-        const suffix = keys.length > 5 ? ', ...' : '';
-        return `{${shown}${suffix}}`;
+        const entries = Object.keys(value).sort().map((key) => `${key}=${toDisplayValue(value[key])}`);
+        return entries.join(', ');
     }
     return String(value);
 }
@@ -123,15 +129,7 @@ function truncateLines(text: string, maxLines: number = MAX_BLOCK_LINES): string
     const lines = text.split(/\r?\n/);
     if (lines.length <= maxLines)
         return text;
-    return `${lines.slice(0, maxLines).join('\n')}\n... (truncated)`;
-}
-
-function indentBlock(text: string, prefix: string = '  '): string
-{
-    return text
-        .split(/\r?\n/)
-        .map((line) => `${prefix}${line}`)
-        .join('\n');
+    return `${lines.slice(0, maxLines).join('\n')}\n${TRUNCATED_LINE_TEXT}`;
 }
 
 function limitArray<T>(items: T[], maxItems: number = MAX_LIST_ITEMS): { items: T[]; omitted: number }
@@ -163,207 +161,291 @@ function finalize(lines: string[]): string
     return `${text.slice(0, maxPrefixLength).trimEnd()}${suffix}`;
 }
 
+function getToolTitle(toolName: string): string
+{
+    if (toolName === 'angelscript_searchApi')
+        return 'Angelscript API search';
+    if (toolName === 'angelscript_resolveSymbolAtPosition')
+        return 'Angelscript resolve symbol';
+    if (toolName === 'angelscript_getTypeMembers')
+        return 'Angelscript type members';
+    if (toolName === 'angelscript_getClassHierarchy')
+        return 'Angelscript class hierarchy';
+    if (toolName === 'angelscript_findReferences')
+        return 'Angelscript references';
+    return toolName;
+}
+
+function formatSearchSourceLabel(source: string): string
+{
+    if (source === 'both')
+        return 'native|script';
+    return source;
+}
+
+function pushValue(lines: string[], key: string, value: unknown): void
+{
+    if (value === undefined || value === null)
+        return;
+    lines.push(`${key}: ${toDisplayValue(value)}`);
+}
+
+function pushTextBlock(lines: string[], heading: string, text: string): void
+{
+    if (!text.trim())
+        return;
+    lines.push(`${heading}:`);
+    for (const line of truncateLines(text).split(/\r?\n/))
+        lines.push(line);
+}
+
+export function formatPreviewLine(lineNumber: number, isMatch: boolean, text: string): string
+{
+    return `${String(lineNumber)}${isMatch ? ':' : '-'}    ${text}`;
+}
+
+export function renderPreviewBlockLines(options: PreviewRenderOptions): string[]
+{
+    const preview = typeof options.preview === 'string' ? options.preview : '';
+    if (!preview || preview === SOURCE_UNAVAILABLE_TEXT)
+        return [SOURCE_UNAVAILABLE_TEXT];
+
+    const rawLines = truncateLines(preview).split(/\r?\n/);
+    const startLine = asValidLineNumber(options.startLine) ?? 1;
+    const endLine = Math.max(
+        startLine,
+        asValidLineNumber(options.endLine) ?? (startLine + rawLines.length - 1)
+    );
+    const explicitMatchStart = asValidLineNumber(options.matchStartLine);
+    const explicitMatchEnd = asValidLineNumber(options.matchEndLine);
+    const matchStartLine = explicitMatchStart ?? startLine;
+    const matchEndLine = Math.max(matchStartLine, explicitMatchEnd ?? endLine);
+
+    const lines: string[] = [];
+    let lineNumber = startLine;
+    for (let index = 0; index < rawLines.length; index += 1)
+    {
+        const text = rawLines[index];
+        if (text === TRUNCATED_LINE_TEXT && lineNumber > endLine)
+        {
+            lines.push(text);
+            continue;
+        }
+
+        const isMatch = lineNumber >= matchStartLine && lineNumber <= matchEndLine;
+        lines.push(formatPreviewLine(lineNumber, isMatch, text));
+        lineNumber += 1;
+    }
+    return lines;
+}
+
+function asValidLineNumber(value: unknown): number | null
+{
+    const lineNumber = asNumber(value);
+    if (lineNumber === null || !Number.isInteger(lineNumber) || lineNumber < 1)
+        return null;
+    return lineNumber;
+}
+
 function formatError(toolName: string, payload: UnknownRecord): string
 {
-    const lines: string[] = [];
-    lines.push(`${toolName} - error`);
-
+    const lines: string[] = [getToolTitle(toolName)];
     const error = asRecord(payload.error);
     if (!error)
     {
-        lines.push('message=Unknown error payload.');
+        lines.push('error: Unknown error payload.');
+        lines.push('code: INTERNAL_ERROR');
         return finalize(lines);
     }
 
-    const code = asString(error.code);
-    const message = asString(error.message);
-    const retryable = asBoolean(error.retryable);
-    const hint = asString(error.hint);
+    pushValue(lines, 'error', asString(error.message) ?? 'Unknown error.');
+    pushValue(lines, 'code', asString(error.code) ?? 'INTERNAL_ERROR');
+    pushValue(lines, 'retryable', asBoolean(error.retryable));
+    pushValue(lines, 'hint', asString(error.hint));
+
     const details = asRecord(error.details);
-
-    if (code)
-        lines.push(`code=${code}`);
-    if (message)
-        lines.push(`message=${message}`);
-    if (retryable !== null)
-        lines.push(`retryable=${retryable}`);
-    if (hint)
-        lines.push(`hint=${hint}`);
-
     if (details)
     {
         lines.push('details:');
         const keys = Object.keys(details).sort();
         for (const key of keys)
-        {
-            lines.push(`  ${key}: ${toDisplayValue(details[key])}`);
-        }
+            lines.push(`${key}: ${toDisplayValue(details[key])}`);
     }
 
     return finalize(lines);
 }
 
-function formatSearchApiSuccess(toolName: string, data: UnknownRecord): string
+function formatSearchApiSuccess(data: UnknownRecord): string
 {
-    const lines: string[] = [];
-    lines.push(`${toolName} - success`);
-
-    const labelQuery = asString(data.labelQuery) ?? '<empty>';
+    const lines: string[] = ['Angelscript API search'];
+    const request = asRecord(data.request);
+    const query = asString(data.labelQuery) ?? asString(request?.labelQuery) ?? '<empty>';
+    const source = asString(request?.source) ?? 'both';
+    const kinds = asArray(request?.kinds)?.map((item) => asString(item) ?? toDisplayValue(item)).filter(Boolean) as string[] | undefined;
     const total = asNumber(data.total);
     const returned = asNumber(data.returned);
     const remaining = asNumber(data.remainingCount);
+    const searchIndex = asNumber(data.searchIndex);
     const nextSearchIndex = data.nextSearchIndex;
     const truncated = asBoolean(data.truncated);
 
-    lines.push(`query="${labelQuery}"`);
-    lines.push(`paging: total=${total ?? '?'} returned=${returned ?? '?'} remaining=${remaining ?? '?'} nextSearchIndex=${nextSearchIndex === null ? 'null' : toDisplayValue(nextSearchIndex)}`);
-    if (truncated !== null)
-        lines.push(`truncated=${truncated}`);
+    pushValue(lines, 'query', query);
+    pushValue(lines, 'source', formatSearchSourceLabel(source));
+    if (kinds && kinds.length > 0)
+        pushValue(lines, 'kinds', kinds.join('|'));
+    if (returned !== null || total !== null)
+        pushValue(lines, 'count', `${returned ?? 0}/${total ?? returned ?? 0}`);
+    pushValue(lines, 'searchIndex', searchIndex);
+    pushValue(lines, 'nextSearchIndex', nextSearchIndex === null ? 'null' : nextSearchIndex);
+    pushValue(lines, 'remaining', remaining);
+    pushValue(lines, 'truncated', truncated);
 
-    const text = asString(data.text);
-    if (text)
-        lines.push(`message=${text}`);
+    const message = asString(data.text);
+    if (message)
+        pushValue(lines, 'message', message);
 
     const items = asArray(data.items) ?? [];
     if (items.length === 0)
     {
-        lines.push('items: none');
+        lines.push('No matches found.');
         return finalize(lines);
     }
 
     const limited = limitArray(items);
-    lines.push(`items (${limited.items.length}/${items.length} shown):`);
-    limited.items.forEach((item, index) =>
+    lines.push('====');
+    lines.push('results');
+    for (const item of limited.items)
     {
         const record = asRecord(item);
-        const signature = asString(record?.signature) ?? '<unknown signature>';
-        const type = asString(record?.type);
-        lines.push(`- [${index + 1}] ${signature}${type ? ` [${type}]` : ''}`);
+        lines.push('---');
+        pushValue(lines, 'signature', asString(record?.signature) ?? '<unknown signature>');
+        pushValue(lines, 'type', asString(record?.type));
         const docs = asString(record?.docs);
-        if (docs && docs.trim().length > 0)
-        {
-            lines.push('  docs:');
-            lines.push(indentBlock(truncateLines(docs), '    '));
-        }
-    });
-
+        if (docs && docs.trim())
+            pushTextBlock(lines, 'docs', docs);
+    }
     if (limited.omitted > 0)
-        lines.push(`... and ${limited.omitted} more`);
-
+    {
+        lines.push('---');
+        lines.push(`... and ${limited.omitted} more results`);
+    }
     return finalize(lines);
 }
 
-function formatResolveSymbolSuccess(toolName: string, data: UnknownRecord): string
+function formatResolveSymbolSuccess(data: UnknownRecord): string
 {
-    const lines: string[] = [];
-    lines.push(`${toolName} - success`);
-
+    const lines: string[] = ['Angelscript resolve symbol'];
+    const request = asRecord(data.request);
     const symbol = asRecord(data.symbol);
+
+    pushValue(lines, 'file', asString(request?.filePath));
+    const position = asRecord(request?.position);
+    if (position)
+    {
+        const line = asNumber(position.line);
+        const character = asNumber(position.character);
+        if (line !== null && character !== null)
+            pushValue(lines, 'position', `${line}:${character}`);
+    }
+
     if (!symbol)
     {
-        lines.push('symbol: <missing>');
+        lines.push('error: Missing symbol payload.');
+        lines.push('code: INTERNAL_ERROR');
         return finalize(lines);
     }
 
-    const kind = asString(symbol.kind) ?? 'unknown';
-    const name = asString(symbol.name) ?? '';
-    const signature = asString(symbol.signature) ?? name;
-    lines.push(`symbol: kind=${kind} name=${name} signature=${signature}`);
+    pushValue(lines, 'symbol', asString(symbol.name) ?? '<unknown>');
+    pushValue(lines, 'kind', asString(symbol.kind) ?? 'unknown');
+    pushValue(lines, 'signature', asString(symbol.signature) ?? asString(symbol.name) ?? '<unknown>');
 
     const definition = asRecord(symbol.definition);
-    if (definition)
+    if (!definition)
     {
-        const filePath = asString(definition.filePath) ?? '<unknown>';
-        const displayPath = formatPathForTextOutput(filePath);
-        const startLine = asNumber(definition.startLine);
-        const endLine = asNumber(definition.endLine);
-        const locationLabel = startLine !== null && endLine !== null ? `${startLine}-${endLine}` : '?';
-        lines.push(`definition: ${displayPath}:${locationLabel}`);
-        const preview = asString(definition.preview);
-        if (preview && preview.length > 0)
-        {
-            lines.push('preview:');
-            lines.push(truncateLines(preview));
-        }
+        pushValue(lines, 'definition', '<none>');
     }
     else
     {
-        lines.push('definition: <none>');
+        const filePath = asString(definition.filePath) ?? '<unknown>';
+        const startLine = asValidLineNumber(definition.startLine) ?? 1;
+        const endLine = asValidLineNumber(definition.endLine) ?? startLine;
+        pushValue(lines, 'definition', `${filePath}:${startLine}-${endLine}`);
+        lines.push('====');
+        lines.push(filePath);
+        const previewLines = renderPreviewBlockLines({
+            startLine,
+            endLine,
+            preview: asString(definition.preview),
+            matchStartLine: asValidLineNumber(definition.matchStartLine),
+            matchEndLine: asValidLineNumber(definition.matchEndLine)
+        });
+        lines.push(...previewLines);
     }
 
     const doc = asRecord(symbol.doc);
-    if (doc)
+    const docText = asString(doc?.text);
+    if (docText && docText.trim())
     {
-        const format = asString(doc.format) ?? 'plaintext';
-        const text = asString(doc.text);
-        if (text && text.trim().length > 0)
-        {
-            lines.push(`doc (${format}):`);
-            lines.push(truncateLines(text));
-        }
+        lines.push('---');
+        lines.push('doc');
+        lines.push(...truncateLines(docText).split(/\r?\n/));
     }
 
     return finalize(lines);
 }
 
-function formatTypeMembersSuccess(toolName: string, data: UnknownRecord): string
+function formatTypeMembersSuccess(data: UnknownRecord): string
 {
-    const lines: string[] = [];
-    lines.push(`${toolName} - success`);
-
+    const lines: string[] = ['Angelscript type members'];
+    const request = asRecord(data.request);
     const type = asRecord(data.type);
-    const qualifiedName = asString(type?.qualifiedName) ?? asString(type?.name) ?? '<unknown>';
-    const namespaceName = asString(type?.namespace);
-    lines.push(`type=${qualifiedName}${namespaceName ? ` namespace=${namespaceName}` : ''}`);
+    const typeName = asString(type?.qualifiedName) ?? asString(type?.name) ?? '<unknown>';
 
+    pushValue(lines, 'type', typeName);
+    pushValue(lines, 'namespace', asString(type?.namespace) ?? asString(request?.namespace));
     const members = asArray(data.members) ?? [];
-    lines.push(`membersTotal=${members.length}`);
+    pushValue(lines, 'count', members.length);
+    pushValue(lines, 'includeInherited', asBoolean(request?.includeInherited) ?? false);
+    pushValue(lines, 'includeDocs', asBoolean(request?.includeDocs) ?? false);
+
     if (members.length === 0)
+    {
+        lines.push('No members found.');
         return finalize(lines);
+    }
 
     const limited = limitArray(members);
-    lines.push(`members (${limited.items.length}/${members.length} shown):`);
-    limited.items.forEach((member, index) =>
+    lines.push('====');
+    lines.push('members');
+    for (const member of limited.items)
     {
         const record = asRecord(member);
-        const kind = asString(record?.kind) ?? 'unknown';
-        const visibility = asString(record?.visibility) ?? 'unknown';
-        const declaredIn = asString(record?.declaredIn) ?? '<unknown>';
-        const signature = asString(record?.signature) ?? '<unknown signature>';
-        const inherited = asBoolean(record?.isInherited);
-        const inheritedLabel = inherited === true ? ' inherited' : '';
-        lines.push(`- [${index + 1}] ${kind}/${visibility}${inheritedLabel} declaredIn=${declaredIn} :: ${signature}`);
-
+        lines.push('---');
+        pushValue(lines, 'kind', asString(record?.kind) ?? 'unknown');
+        pushValue(lines, 'visibility', asString(record?.visibility) ?? 'unknown');
+        pushValue(lines, 'declaredIn', asString(record?.declaredIn) ?? '<unknown>');
+        pushValue(lines, 'inherited', asBoolean(record?.isInherited) ?? false);
+        pushValue(lines, 'signature', asString(record?.signature) ?? '<unknown signature>');
         const description = asString(record?.description);
-        if (description && description.trim().length > 0)
-        {
-            lines.push('  description:');
-            lines.push(indentBlock(truncateLines(description), '    '));
-        }
-    });
+        if (description && description.trim())
+            pushTextBlock(lines, 'description', description);
+    }
     if (limited.omitted > 0)
-        lines.push(`... and ${limited.omitted} more`);
+    {
+        lines.push('---');
+        lines.push(`... and ${limited.omitted} more members`);
+    }
 
     return finalize(lines);
 }
 
-function formatClassHierarchySuccess(toolName: string, data: UnknownRecord): string
+function formatClassHierarchySuccess(data: UnknownRecord): string
 {
-    const lines: string[] = [];
-    lines.push(`${toolName} - success`);
+    const lines: string[] = ['Angelscript class hierarchy'];
+    pushValue(lines, 'root', asString(data.root) ?? '<unknown>');
 
-    const root = asString(data.root) ?? '<unknown>';
-    lines.push(`root=${root}`);
-
-    const supers = asArray(data.supers) ?? [];
-    if (supers.length > 0)
-    {
-        lines.push(`supers=${supers.map((item) => asString(item) ?? toDisplayValue(item)).join(' -> ')}`);
-    }
-    else
-    {
-        lines.push('supers=<none>');
-    }
+    const supers = asArray(data.supers)?.map((item) => asString(item) ?? toDisplayValue(item)) ?? [];
+    pushValue(lines, 'supers', supers.length > 0 ? supers.join(' -> ') : '<none>');
 
     const limits = asRecord(data.limits);
     if (limits)
@@ -371,68 +453,84 @@ function formatClassHierarchySuccess(toolName: string, data: UnknownRecord): str
         const maxSuperDepth = asNumber(limits.maxSuperDepth);
         const maxSubDepth = asNumber(limits.maxSubDepth);
         const maxSubBreadth = asNumber(limits.maxSubBreadth);
-        lines.push(`limits: maxSuperDepth=${maxSuperDepth ?? '?'} maxSubDepth=${maxSubDepth ?? '?'} maxSubBreadth=${maxSubBreadth ?? '?'}`);
+        pushValue(
+            lines,
+            'limits',
+            `super=${maxSuperDepth ?? '?'}, subDepth=${maxSubDepth ?? '?'}, subBreadth=${maxSubBreadth ?? '?'}`
+        );
     }
 
     const truncated = asRecord(data.truncated);
     if (truncated)
     {
-        const supersTruncated = asBoolean(truncated.supers);
-        const derivedDepthTruncated = asBoolean(truncated.derivedDepth);
-        lines.push(`truncated: supers=${supersTruncated ?? false} derivedDepth=${derivedDepthTruncated ?? false}`);
+        const truncatedParts = [
+            `supers=${asBoolean(truncated.supers) ?? false}`,
+            `derivedDepth=${asBoolean(truncated.derivedDepth) ?? false}`
+        ];
+        const breadthByClass = asRecord(truncated.derivedBreadthByClass);
+        if (breadthByClass && Object.keys(breadthByClass).length > 0)
+        {
+            const breadthParts = Object.keys(breadthByClass)
+                .sort()
+                .map((className) => `${className}=${toDisplayValue(breadthByClass[className])}`);
+            truncatedParts.push(`derivedBreadthByClass=${breadthParts.join('|')}`);
+        }
+        pushValue(lines, 'truncated', truncatedParts.join(', '));
     }
 
     const derivedByParent = asRecord(data.derivedByParent);
-    if (derivedByParent)
+    if (derivedByParent && Object.keys(derivedByParent).length > 0)
     {
-        const parentNames = Object.keys(derivedByParent).sort();
-        const limitedParents = limitArray(parentNames);
-        lines.push(`derivedByParent (${limitedParents.items.length}/${parentNames.length} shown):`);
-        for (const parent of limitedParents.items)
+        lines.push('====');
+        lines.push('derivedByParent');
+        const parentNames = limitArray(Object.keys(derivedByParent).sort());
+        for (const parentName of parentNames.items)
         {
-            const children = asArray(derivedByParent[parent]) ?? [];
+            const children = asArray(derivedByParent[parentName]) ?? [];
             const childNames = children.map((item) => asString(item) ?? toDisplayValue(item));
-            lines.push(`- ${parent}: ${childNames.length > 0 ? childNames.join(', ') : '<none>'}`);
+            lines.push('---');
+            lines.push(`${parentName}: ${childNames.length > 0 ? childNames.join(', ') : '<none>'}`);
         }
-        if (limitedParents.omitted > 0)
-            lines.push(`... and ${limitedParents.omitted} more parent entries`);
+        if (parentNames.omitted > 0)
+        {
+            lines.push('---');
+            lines.push(`... and ${parentNames.omitted} more parent entries`);
+        }
     }
 
     const sourceByClass = asRecord(data.sourceByClass);
     if (sourceByClass)
     {
-        const classNames = Object.keys(sourceByClass).sort();
-        const limitedClasses = limitArray(classNames);
-        lines.push(`sourceByClass (${limitedClasses.items.length}/${classNames.length} shown):`);
-        for (const className of limitedClasses.items)
+        const classNames = limitArray(Object.keys(sourceByClass).sort());
+        for (const className of classNames.items)
         {
             const source = asRecord(sourceByClass[className]);
             if (!source)
-            {
-                lines.push(`- ${className}: <invalid source>`);
                 continue;
-            }
-            const sourceKind = asString(source.source) ?? 'unknown';
-            if (sourceKind === 'cpp')
-            {
-                lines.push(`- ${className}: cpp`);
-                continue;
-            }
 
-            const filePath = asString(source.filePath) ?? '<unknown>';
-            const displayPath = formatPathForTextOutput(filePath);
-            const startLine = asNumber(source.startLine);
-            const endLine = asNumber(source.endLine);
-            lines.push(`- ${className}: as ${displayPath}:${startLine ?? '?'}-${endLine ?? '?'}`);
-            const preview = asString(source.preview);
-            if (preview && preview.trim().length > 0)
-            {
-                const firstLine = preview.split(/\r?\n/)[0] ?? '';
-                lines.push(`  preview: ${firstLine}`);
-            }
+            const sourceKind = asString(source.source) ?? 'unknown';
+            const filePath = asString(source.filePath) ?? className;
+            lines.push('====');
+            lines.push(sourceKind === 'as' ? filePath : className);
+            pushValue(lines, 'class', className);
+            pushValue(lines, 'source', sourceKind);
+            if (sourceKind !== 'as')
+                continue;
+
+            const startLine = asValidLineNumber(source.startLine) ?? 1;
+            const endLine = asValidLineNumber(source.endLine) ?? startLine;
+            const previewLines = renderPreviewBlockLines({
+                startLine,
+                endLine,
+                preview: asString(source.preview)
+            });
+            lines.push(...previewLines);
         }
-        if (limitedClasses.omitted > 0)
-            lines.push(`... and ${limitedClasses.omitted} more class entries`);
+        if (classNames.omitted > 0)
+        {
+            lines.push('====');
+            lines.push(`... and ${classNames.omitted} more class entries`);
+        }
     }
 
     return finalize(lines);
@@ -458,15 +556,22 @@ function toRangeLabel(range: UnknownRecord | null): string
     return `${startLine}:${startCharacter}-${endLine}:${endCharacter}`;
 }
 
-function formatFindReferencesSuccess(toolName: string, data: UnknownRecord): string
+function formatFindReferencesSuccess(data: UnknownRecord): string
 {
-    const lines: string[] = [];
-    lines.push(`${toolName} - success`);
+    const lines: string[] = ['Angelscript references'];
+    const request = asRecord(data.request);
+    pushValue(lines, 'file', asString(request?.filePath));
+    const position = asRecord(request?.position);
+    if (position)
+    {
+        const line = asNumber(position.line);
+        const character = asNumber(position.character);
+        if (line !== null && character !== null)
+            pushValue(lines, 'position', `${line}:${character}`);
+    }
 
-    const total = asNumber(data.total);
     const references = asArray(data.references) ?? [];
-    lines.push(`total=${total ?? references.length}`);
-
+    pushValue(lines, 'count', asNumber(data.total) ?? references.length);
     if (references.length === 0)
     {
         lines.push('No references found.');
@@ -474,54 +579,70 @@ function formatFindReferencesSuccess(toolName: string, data: UnknownRecord): str
     }
 
     const limited = limitArray(references);
-    for (let index = 0; index < limited.items.length; index += 1)
+    const grouped = new Map<string, UnknownRecord[]>();
+    const orderedPaths: string[] = [];
+    for (const item of limited.items)
     {
-        const reference = asRecord(limited.items[index]);
-        const filePath = asString(reference?.filePath) ?? '<unknown>';
-        const displayPath = formatPathForTextOutput(filePath);
-        const startLine = asNumber(reference?.startLine);
-        const endLine = asNumber(reference?.endLine);
-        const rangeLabel = toRangeLabel(asRecord(reference?.range));
-        lines.push(`// ${displayPath}:${startLine ?? '?'}-${endLine ?? '?'} (range ${rangeLabel})`);
-        const preview = asString(reference?.preview);
-        if (preview && preview.length > 0)
-            lines.push(truncateLines(preview));
-        else
-            lines.push('<source unavailable>');
-
-        if (index < limited.items.length - 1)
-            lines.push('---');
+        const record = asRecord(item);
+        if (!record)
+            continue;
+        const filePath = asString(record.filePath) ?? '<unknown>';
+        const existing = grouped.get(filePath);
+        if (existing)
+        {
+            existing.push(record);
+            continue;
+        }
+        grouped.set(filePath, [record]);
+        orderedPaths.push(filePath);
     }
 
+    for (const filePath of orderedPaths)
+    {
+        lines.push('====');
+        lines.push(filePath);
+        const entries = grouped.get(filePath) ?? [];
+        for (const entry of entries)
+        {
+            lines.push('---');
+            pushValue(lines, 'range', toRangeLabel(asRecord(entry.range)));
+            const startLine = asValidLineNumber(entry.startLine) ?? 1;
+            const endLine = asValidLineNumber(entry.endLine) ?? startLine;
+            const previewLines = renderPreviewBlockLines({
+                startLine,
+                endLine,
+                preview: asString(entry.preview),
+                matchStartLine: startLine,
+                matchEndLine: endLine
+            });
+            lines.push(...previewLines);
+        }
+    }
     if (limited.omitted > 0)
     {
-        lines.push('---');
+        lines.push('====');
         lines.push(`... and ${limited.omitted} more references`);
     }
-
     return finalize(lines);
 }
 
 function formatFallbackSuccess(toolName: string, payload: UnknownRecord): string
 {
-    const lines: string[] = [];
-    lines.push(`${toolName} - success`);
+    const lines: string[] = [getToolTitle(toolName)];
     const data = asRecord(payload.data);
     if (!data)
     {
-        lines.push('No structured data.');
+        lines.push('No readable output.');
         return finalize(lines);
     }
+
+    lines.push('====');
+    lines.push('data');
     const keys = Object.keys(data).sort();
-    if (keys.length === 0)
-    {
-        lines.push('data: <empty object>');
-        return finalize(lines);
-    }
-    lines.push('data keys:');
     for (const key of keys)
     {
-        lines.push(`- ${key}: ${toDisplayValue(data[key])}`);
+        lines.push('---');
+        pushValue(lines, key, data[key]);
     }
     return finalize(lines);
 }
@@ -530,18 +651,18 @@ function formatSuccess(toolName: string, payload: UnknownRecord): string
 {
     const data = asRecord(payload.data);
     if (!data)
-        return finalize([`${toolName} - success`, 'No structured data.']);
+        return finalize([getToolTitle(toolName), 'No readable output.']);
 
     if (toolName === 'angelscript_searchApi')
-        return formatSearchApiSuccess(toolName, data);
+        return formatSearchApiSuccess(data);
     if (toolName === 'angelscript_resolveSymbolAtPosition')
-        return formatResolveSymbolSuccess(toolName, data);
+        return formatResolveSymbolSuccess(data);
     if (toolName === 'angelscript_getTypeMembers')
-        return formatTypeMembersSuccess(toolName, data);
+        return formatTypeMembersSuccess(data);
     if (toolName === 'angelscript_getClassHierarchy')
-        return formatClassHierarchySuccess(toolName, data);
+        return formatClassHierarchySuccess(data);
     if (toolName === 'angelscript_findReferences')
-        return formatFindReferencesSuccess(toolName, data);
+        return formatFindReferencesSuccess(data);
 
     return formatFallbackSuccess(toolName, payload);
 }
@@ -555,16 +676,17 @@ export function formatToolText(toolName: string, payload: UnknownRecord): string
         if (payload.ok === true)
             return formatSuccess(toolName, payload);
         return finalize([
-            `${toolName} - result`,
-            'Payload status is unknown.'
+            getToolTitle(toolName),
+            'error: Payload status is unknown.',
+            'code: INTERNAL_ERROR'
         ]);
     }
     catch
     {
         return finalize([
-            `${toolName} - error`,
-            'code=INTERNAL_ERROR',
-            'message=Failed to format readable text output.'
+            getToolTitle(toolName),
+            'error: Failed to format readable text output.',
+            'code: INTERNAL_ERROR'
         ]);
     }
 }

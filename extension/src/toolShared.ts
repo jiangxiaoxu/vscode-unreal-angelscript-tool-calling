@@ -579,7 +579,9 @@ async function buildResolveSuccessData(
                 filePath: formatAbsoluteOutputFilePath(absoluteDefinitionPath),
                 startLine: definitionPreview.startLine,
                 endLine: definitionPreview.endLine,
-                preview: definitionPreview.preview
+                preview: definitionPreview.preview,
+                matchStartLine: toOneBasedLine(definition.startLine),
+                matchEndLine: toOneBasedLine(definition.endLine)
             };
         }
     }
@@ -620,9 +622,6 @@ export function formatSearchPayloadForOutput(
     input: Partial<AngelscriptSearchParams> | null | undefined
 ): SearchOutputPayload
 {
-    if (!payload.items || payload.items.length > 0)
-        return payload;
-
     const labelQuery = typeof input?.labelQuery === 'string' ? input.labelQuery.trim() : payload.labelQuery;
     const searchIndex = Number.isFinite(Number(input?.searchIndex)) ? Number(input?.searchIndex) : payload.searchIndex;
     const maxBatchResults = typeof input?.maxBatchResults === 'number' ? input?.maxBatchResults : 200;
@@ -639,11 +638,13 @@ export function formatSearchPayloadForOutput(
     {
         request.signatureRegex = signatureRegex;
     }
-    return {
+    const output: SearchOutputPayload = {
         ...payload,
-        text: `No Angelscript API results for "${labelQuery}".`,
         request
     };
+    if (!payload.items || payload.items.length === 0)
+        output.text = `No Angelscript API results for "${labelQuery}".`;
+    return output;
 }
 
 function makeError(code: string, message: string, details?: Record<string, unknown>): ToolFailure
@@ -887,6 +888,14 @@ export async function runResolveSymbolAtPosition(
             }
             return buildResolveSuccessData(lspResult.symbol).then((data) =>
             {
+                data.request = {
+                    filePath,
+                    position: {
+                        line,
+                        character
+                    },
+                    includeDocumentation
+                };
                 return {
                     ok: true,
                     data
@@ -941,7 +950,14 @@ export async function runGetTypeMembers(
 
         const data: GetTypeMembersToolData = {
             type: result.type,
-            members: result.members
+            members: result.members,
+            request: {
+                name,
+                ...(namespace !== undefined ? { namespace } : {}),
+                includeInherited,
+                includeDocs,
+                kinds: kinds === 'method' || kinds === 'property' ? kinds : 'both'
+            }
         };
         return {
             ok: true,
@@ -1099,7 +1115,14 @@ export async function runFindReferences(
             ok: true,
             data: {
                 total: items.length,
-                references: items
+                references: items,
+                request: {
+                    filePath,
+                    position: {
+                        line,
+                        character
+                    }
+                }
             }
         };
     }

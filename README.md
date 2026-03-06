@@ -2,6 +2,28 @@
 
 [English](#english) | [中文](#中文)
 
+## Table of Contents
+[English](#english)
+[Overview](#overview)
+[Quick Start](#quick-start)
+[Core Features](#core-features)
+[Offline Cache](#offline-cache)
+[Language Model Tools](#language-model-tools)
+[MCPhttp Support](#mcphttp-support)
+[Build](#build)
+[Known Limits](#known-limits)
+[Upstream](#upstream)
+[中文](#中文)
+[概览](#概览)
+[快速开始](#快速开始)
+[核心功能](#核心功能)
+[离线缓存](#离线缓存)
+[Language Model Tools](#language-model-tools-1)
+[MCPhttp 支持](#mcphttp-支持)
+[构建](#构建)
+[已知限制](#已知限制)
+[上游](#上游)
+
 ---
 
 ## English
@@ -52,24 +74,25 @@ If you need an HTTP MCP endpoint, install this extension to bridge VS Code `lang
 
 
 Output rules:
-- All tools expose machine-readable JSON payload plus a human-readable multi-line text channel.
-- Success response is unified as `{ ok: true, data: ... }`.
-- Failure response is unified as `{ ok: false, error: { code, message, ... } }`.
-- In VS Code LM tools, `LanguageModelToolResult.content` now includes both:
-  - `LanguageModelDataPart.json(payload)` for machine-readable JSON
-  - `LanguageModelTextPart` for human-readable multi-line text summary
-- Clients should treat structured JSON (`LanguageModelDataPart.json`) as the only machine contract.
+- All tools now return plain text only.
+- VS Code LM tools return only `LanguageModelTextPart`.
+- MCP `tools/call` returns only text `content`; failures still set `isError`.
+- Output style follows qgrep closely:
+  - stable title line
+  - `key: value` summary fields
+  - `====` section headers
+  - `---` item separators
+  - source previews rendered as `lineNumber + ':'/'-' + 4 spaces + source text`
 - Input `filePath` supports absolute path or workspace-relative path (prefer `<workspaceFolderName>/...`).
-- In structured JSON output, `filePath` is always absolute path.
-- In human-readable text output (`LanguageModelTextPart`), `filePath` prefers workspace-relative path with root prefix; if not in workspace, output falls back to absolute path.
-- For line-based results, tools include `preview` source snippets (max 20 lines, truncated with `... (truncated)`, fallback `<source unavailable>`).
+- Output `filePath` prefers workspace-relative path with root prefix; if not in workspace, output falls back to absolute path.
+- For line-based results, text output includes source previews (max 20 lines, truncated with `... (truncated)`, fallback `<source unavailable>`).
 
 Tool notes:
 - `angelscript_searchApi`: Search Angelscript APIs and docs with fuzzy tokens, OR(`|`), separator constraints(`.`/`::`), optional filters, pagination, and regex.
-- `angelscript_resolveSymbolAtPosition`: All line/character indices in tool input/output are 1-based. Success `data.symbol` includes `kind/name/signature`, optional `doc`, and optional `definition{ filePath, startLine, endLine, preview }`. It checks the line before definition start for `UCLASS/UPROPERTY/UFUNCTION/UENUM`; when matched, that macro line is used as preview start.
+- `angelscript_resolveSymbolAtPosition`: All line/character indices in tool input are 1-based. Output includes symbol summary, optional definition preview, and optional doc block. It checks the line before definition start for `UCLASS/UPROPERTY/UFUNCTION/UENUM`; when matched, that macro line is rendered as preview context.
 - `angelscript_getTypeMembers`: List members for an exact type name, with optional inherited members/docs.
-- `angelscript_getClassHierarchy`: Return compact class hierarchy JSON for an exact class name: `root`, `supers`(nearest parent first), `derivedByParent`(parent -> direct children), `sourceByClass`, `limits`, `truncated`. In `sourceByClass`, cpp classes are `{ source: "cpp" }`, script classes are `{ source: "as", filePath, startLine, endLine, preview }` (`filePath` is absolute in structured JSON; text output shows workspace-relative-first, line numbers are 1-based). Defaults: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
-- `angelscript_findReferences`: All line/character indices in tool input/output are 1-based. Success `data` is `{ total, references[] }`; each reference includes `{ filePath, startLine, endLine, range, preview }`; `range` is also 1-based.
+- `angelscript_getClassHierarchy`: Returns compact hierarchy text with `root`, `supers`, `derivedByParent`, limits/truncation summary, and per-class source blocks. Script classes include preview lines; defaults are `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
+- `angelscript_findReferences`: All line/character indices in tool input are 1-based. Output groups references by file and prints 1-based `range` labels with preview lines.
 
 ### Build
 ```bash
@@ -135,24 +158,25 @@ https://angelscript.hazelight.se
 
 
 输出规则:
-- 所有工具都同时提供 machine-readable JSON payload 与 human-readable 多行文本通道.
-- 成功返回统一为 `{ ok: true, data: ... }`.
-- 失败返回统一为 `{ ok: false, error: { code, message, ... } }`.
-- 在 VS Code LM tool 中,`LanguageModelToolResult.content` 现在同时包含:
-  - `LanguageModelDataPart.json(payload)` 用于 machine-readable JSON
-  - `LanguageModelTextPart` 用于 human-readable 多行文本摘要
-- 客户端应仅将 structured JSON(`LanguageModelDataPart.json`)视为 machine contract.
+- 所有工具现在都只返回纯文本.
+- VS Code LM tool 仅返回 `LanguageModelTextPart`.
+- MCP `tools/call` 仅返回文本 `content`; 失败时仍保留 `isError`.
+- 输出风格尽量贴近 qgrep:
+  - 稳定标题行
+  - `key: value` 摘要字段
+  - `====` 分段
+  - `---` 条目分隔
+  - 源码预览使用 `行号 + ':'/'-' + 4 个空格 + 源码`
 - 输入 `filePath` 支持绝对路径和工作区路径(建议 `<workspaceFolderName>/...`).
-- structured JSON 输出中的 `filePath` 始终为绝对路径.
-- human-readable 文本输出(`LanguageModelTextPart`)中的 `filePath` 优先返回带 root 名的工作区路径,不在工作区内时回退为绝对路径.
-- 涉及行号/范围的结果会包含 `preview` 源码片段(最多 20 行,超出追加 `... (truncated)`,不可读时为 `<source unavailable>`).
+- 输出 `filePath` 优先返回带 root 名的工作区路径,不在工作区内时回退为绝对路径.
+- 涉及行号/范围的结果会直接在文本中渲染源码片段(最多 20 行,超出追加 `... (truncated)`,不可读时为 `<source unavailable>`).
 
 工具说明:
 - `angelscript_searchApi`: 支持模糊 token、OR(`|`)、分隔符约束(`.`/`::`)、过滤、分页与正则搜索.
-- `angelscript_resolveSymbolAtPosition`: 工具输入/输出中的行列索引全部为 1-based. 成功 `data.symbol` 包含 `kind/name/signature`,可选 `doc`,可选 `definition{ filePath, startLine, endLine, preview }`. 会检查定义起始行上一行是否为 `UCLASS/UPROPERTY/UFUNCTION/UENUM`,命中则把宏行作为预览起始行.
+- `angelscript_resolveSymbolAtPosition`: 工具输入中的行列索引全部为 1-based. 输出会展示 symbol 摘要、可选定义预览与可选 doc 块. 会检查定义起始行上一行是否为 `UCLASS/UPROPERTY/UFUNCTION/UENUM`,命中时把宏行作为预览上下文输出.
 - `angelscript_getTypeMembers`: 按精确类型名列出成员,可选包含继承成员和文档.
-- `angelscript_getClassHierarchy`: 按精确类名返回紧凑层级 JSON: `root`, `supers`(近父到根), `derivedByParent`(父类 -> 直接子类), `sourceByClass`, `limits`, `truncated`. `sourceByClass` 中, cpp 类为 `{ source: "cpp" }`, 脚本类为 `{ source: "as", filePath, startLine, endLine, preview }` (`filePath` 在 structured JSON 中为绝对路径; 文本输出遵循工作区路径优先规则,行号是 1-based). 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
-- `angelscript_findReferences`: 工具输入/输出中的行列索引全部为 1-based,成功 `data` 为 `{ total, references[] }`,每条引用包含 `{ filePath, startLine, endLine, range, preview }`,其中 `range` 也是 1-based.
+- `angelscript_getClassHierarchy`: 按精确类名返回紧凑层级文本,包含 `root`、`supers`、`derivedByParent`、limits/truncated 摘要与按类输出的源码块. 脚本类会附带预览; 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
+- `angelscript_findReferences`: 工具输入中的行列索引全部为 1-based. 输出会按文件分组展示引用,并附带 1-based 的 `range` 标签与源码预览.
 
 ### 构建
 ```bash

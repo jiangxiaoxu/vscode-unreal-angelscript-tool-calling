@@ -1,167 +1,139 @@
 # 面相AI报告
 
 ## 目的
-让 AI 在不扫描全仓的情况下快速理解系统做什么, 关键流程如何实现, 以及如何定位代码.
-本版同时作为 `angelscript_` 工具契约与设计准则的长期追溯基线.
+帮助 AI agent 在不扫描全仓的前提下,快速理解当前 `angelscript_*` 工具的公共契约,关键实现入口,以及这次纯文本改造后的维护边界.
 
-## 适用范围
-- 面向 AI agent.
-- 聚焦工具契约, 实现路径, 配置影响, 常见失败路径, 关键检索入口.
+## 当前工具契约基线
+适用工具:
+- `angelscript_searchApi`
+- `angelscript_resolveSymbolAtPosition`
+- `angelscript_getTypeMembers`
+- `angelscript_getClassHierarchy`
+- `angelscript_findReferences`
 
-## 系统定位与阅读顺序
-推荐阅读顺序:
-1. `工具契约矩阵(长期基线)`
-2. `路径策略设计准则`
-3. `位置类工具JSON输出与preview准则`
-4. `实现映射与关键函数`
-5. `验收与回归清单`
+统一公共契约:
+- 对外只返回纯文本.
+- VS Code LM tool 仅返回 `LanguageModelTextPart`.
+- MCP `tools/call` 仅返回文本 `content`; 失败时仍设置 `isError`.
+- 不再对外返回 `LanguageModelDataPart`.
+- 不再对外返回 MCP `structuredContent`.
 
-入口文件索引:
-- `extension/src/toolRegistry.ts`
-- `extension/src/toolShared.ts`
-- `extension/src/apiRequests.ts`
-- `language-server/src/symbols.ts`
-- `language-server/src/api_docs.ts`
+统一文本风格:
+- 首行使用稳定标题,例如 `Angelscript API search`.
+- 摘要字段统一为 `key: value`.
+- 主分段使用 `====`.
+- 条目分隔使用 `---`.
+- 源码预览使用 `lineNumber + ':'/'-' + 4 spaces + source text`.
+- 无结果时输出自然语言结论,例如 `No matches found.`.
+- 错误统一输出:
+  - 标题
+  - `error: ...`
+  - `code: ...`
+  - 可选 `hint: ...`
+  - 可选 `details: ...`
 
-## 工具契约矩阵(长期基线)
-| Tool | 输入关键字段 | 成功输出 | 失败输出 | 路径字段规则 | 兼容性提示 |
-| --- | --- | --- | --- | --- | --- |
-| `angelscript_searchApi` | `labelQuery`, `searchIndex` | JSON envelope: `{ ok:true, data:{...} }` | JSON error: `{ ok:false, error:{...} }` | 无 `filePath` | 保持结构化, 不提供 `preview` |
-| `angelscript_getTypeMembers` | `name`, 可选 `namespace/includeInherited/includeDocs/kinds` | JSON envelope: `{ ok:true, data:{ type, members } }` | JSON error | 无 `filePath` | 保持结构化, 不提供 `preview` |
-| `angelscript_getClassHierarchy` | `name`, 可选深度/广度限制 | JSON envelope: `{ ok:true, data:{ root,supers,derivedByParent,sourceByClass,limits,truncated } }` | JSON error | `sourceByClass[*].filePath` 输出遵循工作区路径优先 | `source="as"` 条目包含 `preview` |
-| `angelscript_findReferences` | `filePath`, `position(line,character)` | JSON envelope: `{ ok:true, data:{ total,references[] } }` | JSON error | 输入支持 absolute/workspace-relative, 输出路径工作区优先 | `references[*]` 包含 `preview` |
-| `angelscript_resolveSymbolAtPosition` | `filePath`, `position(line,character)`, 可选 `includeDocumentation` | JSON envelope: `{ ok:true, data:{ symbol:{ kind,name,signature,definition?,doc? } } }` | JSON error | 输入支持 absolute/workspace-relative, 输出路径工作区优先 | `definition` 存在时包含 `preview` |
+## 各工具文本形态
+| Tool | 头部字段 | 主体分段 | 预览规则 |
+| --- | --- | --- | --- |
+| `angelscript_searchApi` | `query`,`source`,`kinds?`,`count`,`searchIndex`,`nextSearchIndex`,`remaining`,`truncated`,`message?` | `==== results` + `---` 每条结果 | 无源码预览 |
+| `angelscript_resolveSymbolAtPosition` | `file`,`position`,`symbol`,`kind`,`signature`,`definition?` | 定义存在时 `==== <filePath>`; 文档存在时 `---` + `doc` | 宏回溯行用 `-`, 定义行用 `:` |
+| `angelscript_getTypeMembers` | `type`,`namespace?`,`count`,`includeInherited`,`includeDocs` | `==== members` + `---` 每个成员 | 无源码预览 |
+| `angelscript_getClassHierarchy` | `root`,`supers`,`limits`,`truncated` | `==== derivedByParent`; 之后每个 source block 用 `====` | 脚本类预览默认按真实行号输出,当前实现把预览行整体标为 `:` |
+| `angelscript_findReferences` | `file`,`position`,`count` | 每个文件 `==== <filePath>`; 每条引用 `---` | `range` 文本标签 + 预览行,命中引用行用 `:` |
 
-统一契约:
-- 成功统一为 `{ ok:true, data:... }`.
-- 失败统一为 `{ ok:false, error:{ code,message,retryable?,hint?,details? } }`.
-- 仅行级定位结果提供 `preview` 字段.
-
-传输层契约:
-- VS Code LM tool 返回双通道:
-  - `LanguageModelDataPart.json(payload对象本体)` 用于 machine-readable JSON.
-  - `LanguageModelTextPart(JSON.stringify(payload, null, 2))` 用于 human-readable 完整 JSON.
-- 工具调用返回双通道:
-  - `LanguageModelDataPart.json(payload对象本体)`.
-  - `LanguageModelTextPart(JSON.stringify(payload, null, 2))`.
-
-## 路径策略设计准则
-输入路径准则:
+## 路径与行号规则
+输入路径:
 - 支持 absolute path.
-- 支持 workspace-relative path, 推荐 `rootName/...`.
+- 支持 workspace-relative path,推荐 `rootName/...`.
 
-输出路径准则:
-- 优先输出工作区路径, 格式为 `rootName/relative/path`.
-- 文件不在任一 workspace root 时, 输出 absolute path.
+输出路径:
+- 优先输出 `rootName/relative/path`.
+- 文件不在任一 workspace root 时回退 absolute path.
 - 路径分隔符统一 `/`.
 
-多 root 处理准则:
-- 不允许静默选择 root.
-- 无法唯一定位时返回 `InvalidParams` + `candidates`.
-- 必要时给出 `hint`, 提示用户加 root 前缀.
+行号规则:
+- `resolve/findReferences` 工具输入使用 1-based `line/character`.
+- 文本中的 `position` 与 `range` 标签也是 1-based.
+- 预览行号使用真实源码行号.
 
-## 位置类工具JSON输出与preview准则
-适用范围:
-- `angelscript_resolveSymbolAtPosition`.
-- `angelscript_findReferences`.
-- `angelscript_getClassHierarchy` 中 `source="as"` 条目.
+## 预览规则
+统一预览入口:
+- `extension/src/toolShared.ts`
+  - `buildSourcePreviewSection`
+  - `buildResolveSuccessData`
+  - `buildFindReferencesItems`
+  - `buildTypeHierarchyToolData`
 
-统一规则:
-- 成功返回 JSON envelope, 失败返回 JSON error.
-- 行级字段旁提供 `preview: string`, 直接返回源码片段.
-- `preview` 最多 20 行, 超出追加 `... (truncated)`.
-- 源文件不可读取时 `preview` 固定为 `<source unavailable>`.
+文本渲染入口:
+- `extension/src/toolTextFormatter.ts`
+  - `formatToolText`
+  - `renderPreviewBlockLines`
+  - `formatPreviewLine`
 
-字段基线:
-- `resolve`: `data.symbol.definition.preview`.
-- `findReferences`: `data.references[*].preview`,且 `range` 保持 LSP 原始偏移(0-based).
-- `getClassHierarchy`: `data.sourceByClass[*].preview`(仅 `source="as"`).
-- `searchApi/getTypeMembers` 不包含 `preview`.
+宏回溯规则:
+- 仅 `resolve` 使用.
+- 仅检查定义起始行上一行.
+- 匹配集合:
+  - `UCLASS`
+  - `UPROPERTY`
+  - `UFUNCTION`
+  - `UENUM`
+- 命中时,宏行作为预览上下文输出,因此文本中该行使用 `-`.
 
-## Unreal 宏回溯准则
-宏集合:
-- `UCLASS`
-- `UPROPERTY`
-- `UFUNCTION`
-- `UENUM`
+截断规则:
+- 预览最多 20 行.
+- 超出时追加 `... (truncated)`.
+- 文件不可读时输出 `<source unavailable>`.
 
-回溯策略:
-- 仅检查定义起始行的上一行.
-- 若上一行命中 `U*` 宏, 将宏行视为展示起始行.
-- 原定义结束行保持不变.
+## 实现映射
+`extension/src/toolRegistry.ts`
+- 注册 LM tools 与 MCP tools.
+- 当前职责是把内部 `{ ok, data/error }` 中间结果转换为纯文本传输层结果.
+- LM 路径只构造 `LanguageModelTextPart`.
+- MCP 路径只构造文本 `content`,并在失败时设置 `isError`.
 
-明确非目标:
-- 不跨多行向上扫描.
-- 不跳过注释或空行继续查找宏.
+`extension/src/toolResultTransport.ts`
+- 纯函数层.
+- 用于约束 LM/MCP 最终只走 text 通道.
+- 测试会直接检查这里不再暴露 `structuredContent`.
 
-## 实现映射与关键函数
-`extension/src/toolShared.ts`:
-- `resolveWorkspaceRelativePathToAbsolute`: 解析 workspace-relative 输入路径.
-- `resolveToolFilePathInput`: 统一处理输入路径并产出 file URI.
-- `formatOutputFilePath`: 统一输出路径格式.
-- `buildSourcePreviewSection`: 统一读取源码片段并生成 `preview`.
-- `buildResolveSuccessData`: 组装 `resolve` 的 `data.symbol` JSON 结构.
-- `buildFindReferencesItems`: 组装 `findReferences` 的 `references[]` 与 `preview`.
-- `buildTypeHierarchyToolData`: 组装 `classHierarchy` 的 `data` 并给 `source="as"` 填充 `preview`.
-- `runResolveSymbolAtPosition`: `resolve` tool 主执行入口.
-- `runFindReferences`: `findReferences` tool 主执行入口.
-- `runSearchApi/runGetTypeMembers/runGetTypeHierarchy`: 统一输出 `ok/data` envelope.
+`extension/src/toolTextFormatter.ts`
+- 纯文本契约核心.
+- 所有 qgrep-style 标题/字段/分段/预览渲染都在这里统一完成.
 
-`extension/src/toolRegistry.ts`:
-- 注册工具定义, 维护每个 tool 的 description/inputSchema 文案.
-- `toPayloadObject/toPayloadText/isErrorPayload`: 统一 payload 归一化与文本输出.
-- LM `invoke`: 返回 `LanguageModelDataPart.json(payload)` + `LanguageModelTextPart(full JSON)`.
+`extension/src/toolShared.ts`
+- 仍保留内部 `{ ok, data/error }` 中间结构,仅作为实现细节.
+- 会补充 formatter 所需的内部 request 信息与定义命中行信息.
 
-`extension/src/apiRequests.ts`:
-- 定义 tool 入参类型与结果类型.
-- `ToolSuccess<T>/ToolFailure/ToolResult<T>` 是统一 envelope 类型基线.
-- `GetTypeMembersLspResult` 与 `GetTypeMembersResult` 分离了 LSP 返回和 tool 对外契约.
-- `GetTypeHierarchyLspResult` 与 `GetTypeHierarchyResult` 同上.
+`extension/src/apiRequests.ts`
+- 保留内部 `ToolSuccess<T>/ToolFailure/ToolResult<T>` 类型基线.
+- 这些类型不再代表对外公共输出契约,仅代表内部数据流.
 
-`language-server/src/symbols.ts`:
-- `ResolveSymbolAtPosition`: language server 计算 symbol/definition/doc 的核心入口.
-- `BuildDefinitionFromOffsets`: 定义行区间计算来源.
+## 测试与验收
+测试入口:
+- `npm run test`
 
-`language-server/src/api_docs.ts`:
-- `getScriptClassSourceInfo`: class hierarchy 中 script class 的 `filePath/startLine/endLine` 来源.
+当前新增测试覆盖:
+- 5 个工具各 1 个成功文本样例.
+- 5 个工具各 1 个失败文本样例.
+- 预览行格式/标记规则.
+- LM text-only transport.
+- MCP text-only transport.
 
-## 验收与回归清单
-功能验收:
-- `bDrawDebugLadder` 场景中, `resolve.data.symbol.definition.preview` 应包含 `UPROPERTY` 与属性定义行.
-- `findReferences.data.references[*]` 每项都包含 `filePath/startLine/endLine/range/preview`.
-- `getClassHierarchy.data.sourceByClass[*]` 在 `source="as"` 时应包含 `preview`.
-- 多 root + 歧义相对路径场景必须返回 `InvalidParams` 和候选路径.
-- 工作区外文件路径输出应回退为 absolute path.
+提交前最低验收:
+- `npm run compile`
+- `npm run test`
 
-回归验收:
-- `npm run compile` 通过.
-- 5 个 `angelscript_` 工具成功都返回 `{ ok:true, data:... }`.
-- 5 个 `angelscript_` 工具失败都返回 `{ ok:false, error:{...} }`.
-
-## 兼容性与回滚策略
-breaking 风险:
-- `searchApi/getTypeMembers/getClassHierarchy` 成功字段从顶层迁移到 `data`.
-- `resolve/findReferences` 成功输出从纯文本迁移为结构化 JSON.
-
-回滚策略:
-- 如调用方受影响过大, 可先回滚 envelope 改动,恢复原顶层成功字段.
-- 如仅 `resolve/findReferences` 兼容性受阻, 可先恢复其文本输出,其余工具保持 JSON.
-- 保留路径输入兼容(absolute + workspace-relative), 降低回滚损失.
-- 同步更新 `README.md`, `package.json`, `CHANGELOG.md` 以反映回滚状态.
-
-## 维护流程(强制)
-每次涉及 tool 契约变更时, 必须同步更新:
-- `face-ai-report.md`
+## 维护要求
+凡是再次修改 `angelscript_*` 工具公共契约,必须同步更新:
 - `README.md`
-- `package.json` 中对应 tool 的 `modelDescription`/`inputSchema` 文案
 - `CHANGELOG.md`
+- `face-ai-report.md`
+- `package.json` 中对应 tool 的 `modelDescription`
+- `extension/src/toolRegistry.ts` 中对应 tool 的 `description`
 
-提交前检查清单:
-- 契约描述是否在代码与文档中一致.
-- 示例输入输出是否可复现.
-- 验收命令是否通过(至少 `npm run compile`).
-- breaking 影响是否写入 changelog.
-
-## 待落地项
-- 暂无.
-
+高风险回归点:
+- 不要重新引入 `LanguageModelDataPart`.
+- 不要重新引入 MCP `structuredContent`.
+- 不要让 text 格式偏离 `Title + key: value + ==== + ---`.
+- 不要破坏 `resolve` 的宏回溯上下文行渲染.

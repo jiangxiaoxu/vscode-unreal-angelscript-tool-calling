@@ -12,6 +12,7 @@ import {
     runSearchApi
 } from './toolShared';
 import { formatToolText } from './toolTextFormatter';
+import { buildLmTextResultPartSpecs, buildMcpTextToolResponse } from './toolResultTransport';
 
 export type ToolContext = {
     client: LanguageClient;
@@ -45,9 +46,9 @@ function toPayloadText(toolName: string, payload: Record<string, unknown>): stri
     catch
     {
         return [
-            `${toolName} - error`,
-            'code=INTERNAL_ERROR',
-            'message=Failed to format tool text payload.'
+            'Angelscript tool',
+            'error: Failed to format tool text payload.',
+            'code: INTERNAL_ERROR'
         ].join('\n');
     }
 }
@@ -130,7 +131,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     {
         name: 'angelscript_searchApi',
         description:
-            'Use when you need to discover Angelscript API symbols or docs by keyword and filters before you know the exact symbol. Do not use when you already have a concrete file position and need symbol resolution. Requires labelQuery and searchIndex. Query supports fuzzy syntax: space for ordered tokens ("a b" => a...b), "|" for OR, and separator constraints with "." or "::" (exact when adjacent, still fuzzy when separated by space, e.g. "UObject .", "Math ::"). Optional filters: kinds (class|struct|enum|method|function|property|globalVariable, case-insensitive, multi-value), source (native|script|both, default both), includeDocs, maxBatchResults (default 200). Regex support: labelQueryUseRegex applies regex to labels after kind filtering (supports /pattern/flags; omit i for case-sensitive; non-literal defaults to ignore case), and signatureRegex filters parsed signatures with the same regex syntax. Returns paged matches with fields such as labelQuery, searchIndex, nextSearchIndex, remainingCount, total, returned, truncated, and items (signature, optional docs, optional type), plus optional text/request for no-result context.',
+            'Use when you need to discover Angelscript API symbols or docs by keyword and filters before you know the exact symbol. Do not use when you already have a concrete file position and need symbol resolution. Requires labelQuery and searchIndex. Query supports fuzzy syntax: space for ordered tokens ("a b" => a...b), "|" for OR, and separator constraints with "." or "::" (exact when adjacent, still fuzzy when separated by space, e.g. "UObject .", "Math ::"). Optional filters: kinds (class|struct|enum|method|function|property|globalVariable, case-insensitive, multi-value), source (native|script|both, default both), includeDocs, maxBatchResults (default 200). Regex support: labelQueryUseRegex applies regex to labels after kind filtering (supports /pattern/flags; omit i for case-sensitive; non-literal defaults to ignore case), and signatureRegex filters parsed signatures with the same regex syntax. Returns a qgrep-style plain-text summary only.',
         inputSchema: z.object({
             labelQuery: z.string().describe('Search query text for Angelscript API symbols.'),
             searchIndex: z.number().int().describe('0-based start index for paged results.'),
@@ -154,7 +155,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_resolveSymbolAtPosition',
-        description: 'Use when you have a file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Optional includeDocumentation controls doc payload (default true). Returns symbol details (kind, name, signature, optional doc) and optional definition with filePath, startLine, endLine, preview; preview checks one line above definition start for Unreal reflection macros (UCLASS|UPROPERTY|UFUNCTION|UENUM) and uses that line when matched.',
+        description: 'Use when you have a file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Optional includeDocumentation controls doc payload (default true). Returns a qgrep-style plain-text summary only. When definition exists, output includes filePath, line range, preview text, and checks one line above definition start for Unreal macros UCLASS/UPROPERTY/UFUNCTION/UENUM.',
         inputSchema: z.object({
             filePath: z.string().describe('Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/...").'),
             position: z.object({
@@ -170,7 +171,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_getTypeMembers',
-        description: 'Use when you need the member list of a specific Angelscript type, including inherited members when requested. Do not use when you need parent/child hierarchy traversal between classes. Requires exact name (optional namespace for disambiguation). Optional switches: includeInherited (default false), includeDocs (default false), and kinds (both|method|property, default both). Returns type identity (name, namespace, qualifiedName) and member entries including method/property/accessor/mixin-related metadata, visibility-qualified signatures, declaration origin fields, inheritance flags, and optional description text when includeDocs=true.',
+        description: 'Use when you need the member list of a specific Angelscript type, including inherited members when requested. Do not use when you need parent/child hierarchy traversal between classes. Requires exact name (optional namespace for disambiguation). Optional switches: includeInherited (default false), includeDocs (default false), and kinds (both|method|property, default both). Returns a qgrep-style plain-text summary only with type identity and member entries.',
         inputSchema: z.object({
             name: z.string().describe('Type name to inspect.'),
             namespace: z.string().optional().describe('Optional namespace to disambiguate type name. Use empty string for root namespace.'),
@@ -186,7 +187,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_getClassHierarchy',
-        description: 'Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., "APawn"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns compact hierarchy data including root, supers (nearest parent first), derivedByParent (parent -> direct children), sourceByClass, limits, and truncated info (supers, derivedDepth, derivedBreadthByClass).',
+        description: 'Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., "APawn"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns a qgrep-style plain-text summary only, including root, supers, derivedByParent, limits, truncated info, and script-class preview text when available.',
         inputSchema: z.object({
             name: z.string().describe('Exact class name to inspect (e.g., "APawn").'),
             maxSuperDepth: z.number().int().optional().describe('Maximum number of supertypes to return. Non-negative integer. Default is 3.'),
@@ -201,7 +202,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_findReferences',
-        description: 'Use when you have a symbol location and need all project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Returns total and references[]; each reference includes filePath, startLine, endLine, range, and preview (range is 1-based).',
+        description: 'Use when you have a symbol location and need all project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Returns a qgrep-style plain-text summary only with per-file grouping, 1-based range labels, and preview text.',
         inputSchema: z.object({
             filePath: z.string().describe('Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/...").'),
             position: z.object({
@@ -258,26 +259,20 @@ class SharedLmTool<TInput> implements vscode.LanguageModelTool<TInput>
         const outputText = toPayloadText(this.definition.name, payload);
         try
         {
-            return new vscode.LanguageModelToolResult([
-                vscode.LanguageModelDataPart.json(payload),
-                new vscode.LanguageModelTextPart(outputText)
-            ]);
+            const parts = buildLmTextResultPartSpecs(outputText);
+            return new vscode.LanguageModelToolResult(
+                parts.map((part) => new vscode.LanguageModelTextPart(part.text))
+            );
         }
         catch (error)
         {
-            const fallbackPayload: Record<string, unknown> = {
-                ok: false,
-                error: {
-                    code: 'INTERNAL_ERROR',
-                    message: 'Failed to create LanguageModelDataPart json payload.',
-                    details: {
-                        reason: error instanceof Error ? error.message : String(error)
-                    }
-                }
-            };
+            const fallbackText = [
+                'Angelscript tool',
+                `error: Failed to build LM text result. ${error instanceof Error ? error.message : String(error)}`,
+                'code: INTERNAL_ERROR'
+            ].join('\n');
             return new vscode.LanguageModelToolResult([
-                vscode.LanguageModelDataPart.json(fallbackPayload),
-                new vscode.LanguageModelTextPart(toPayloadText(this.definition.name, fallbackPayload))
+                new vscode.LanguageModelTextPart(fallbackText)
             ]);
         }
     }
@@ -298,5 +293,36 @@ export function registerLmTools(
         const tool = new SharedLmTool(definition, client, startedClient);
         const disposable = vscode.lm.registerTool(definition.name, tool);
         context.subscriptions.push(disposable);
+    }
+}
+export function registerMcpTools(
+    server: { registerTool: (...args: any[]) => void },
+    client: LanguageClient,
+    startedClient: Promise<void>
+): void
+{
+    for (const definition of toolDefinitions)
+    {
+        server.registerTool(
+            definition.name,
+            {
+                description: definition.description,
+                inputSchema: definition.inputSchema
+            },
+            async (args: unknown, extra: { signal?: AbortSignal }) =>
+            {
+                const result = await definition.run(
+                    {
+                        client,
+                        startedClient,
+                        shouldCancel: () => extra?.signal?.aborted ?? false
+                    },
+                    args as never
+                );
+                const payload = toPayloadObject(result);
+                const text = toPayloadText(definition.name, payload);
+                return buildMcpTextToolResponse(text, isErrorPayload(payload));
+            }
+        );
     }
 }

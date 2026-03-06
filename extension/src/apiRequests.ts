@@ -71,6 +71,13 @@ export type GetTypeMembersToolData = {
         qualifiedName: string;
     };
     members: TypeMemberInfo[];
+    request?: {
+        name: string;
+        namespace?: string;
+        includeInherited: boolean;
+        includeDocs: boolean;
+        kinds: 'both' | 'method' | 'property';
+    };
 };
 
 export type GetTypeMembersResult = ToolResult<GetTypeMembersToolData>;
@@ -168,11 +175,21 @@ export type ResolveSymbolAtPositionToolData = {
             startLine: number;
             endLine: number;
             preview: string;
+            matchStartLine?: number;
+            matchEndLine?: number;
         };
         doc?: {
             format: 'markdown' | 'plaintext';
             text: string;
         };
+    };
+    request?: {
+        filePath: string;
+        position: {
+            line: number;
+            character: number;
+        };
+        includeDocumentation: boolean;
     };
 };
 
@@ -236,6 +253,13 @@ export type FindReferencesItem = {
 export type FindReferencesData = {
     total: number;
     references: FindReferencesItem[];
+    request?: {
+        filePath: string;
+        position: {
+            line: number;
+            character: number;
+        };
+    };
 };
 
 export type FindReferencesResult = ToolResult<FindReferencesData>;
