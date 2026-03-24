@@ -20,7 +20,7 @@ Maintenance rule:
 - `angelscript_resolveSymbolAtPosition` and `angelscript_findReferences` now accept `filePath` as either absolute path or workspace-relative path (prefer `<workspaceFolderName>/...`).
 - Path output now prefers workspace-relative format with root prefix (for example `CthulhuGame/Source/...`), and falls back to absolute path only when the file is outside all workspace folders.
 - Multi-root path resolution now detects ambiguity for relative `filePath` and returns `InvalidParams` with candidate paths instead of silently picking one root.
-- `angelscript_searchApi` now uses the new request contract: `query`, `mode`, `limit`, `kinds`, `source`, `scopePrefix`, `includeInheritedFromScope`, and `includeInternal`.
+- `angelscript_searchApi` now uses the new request contract: `query`, `mode`, `limit`, `kinds`, `source`, `scopePrefix`, and `includeInheritedFromScope`.
 - `angelscript_searchApi` now returns `matches`, optional `notices`, optional `scopeLookup`, and tool-layer `request`.
 - Search execution moved into a dedicated language-server index with smart/exact/regex matching, compact-query expansion, token-order fallback, namespace/type scoping, inherited member expansion, and nearest-override dedupe.
 - The API panel search path now consumes the new `angelscript/getAPISearch` result directly instead of applying client-side pagination, regex, and secondary sorting.
@@ -51,7 +51,7 @@ Maintenance rule:
 - `angelscript_resolveSymbolAtPosition` 与 `angelscript_findReferences` 的 `filePath` 输入支持绝对路径和工作区路径(建议 `<workspaceFolderName>/...`).
 - 路径输出改为优先使用带 root 名的工作区路径(例如 `CthulhuGame/Source/...`),仅当文件不在任何工作区时才回退为绝对路径.
 - 多工作区下,相对 `filePath` 若存在歧义会返回带候选路径的 `InvalidParams`,不再静默选择某个 root.
-- `angelscript_searchApi` 现在使用新请求契约:`query`、`mode`、`limit`、`kinds`、`source`、`scopePrefix`、`includeInheritedFromScope`、`includeInternal`.
+- `angelscript_searchApi` 现在使用新请求契约:`query`、`mode`、`limit`、`kinds`、`source`、`scopePrefix`、`includeInheritedFromScope`.
 - `angelscript_searchApi` 现在返回 `matches`、可选 `notices`、可选 `scopeLookup`,并在 tool 层附加 `request`.
 - 搜索执行已下沉到独立的 language-server 索引,支持 smart/exact/regex、compact query expansion、token 顺序回退、namespace/type scope、继承成员扩展与最近 override 去重.
 - API 面板搜索路径现在直接消费新的 `angelscript/getAPISearch` 结果,不再在 extension 侧做分页、正则和二次排序.

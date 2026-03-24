@@ -145,7 +145,6 @@ export async function buildSearchPayload(
     const kinds = normalizeKinds(params?.kinds);
     const scopePrefix = typeof params?.scopePrefix === 'string' ? params.scopePrefix.trim() : '';
     const includeInheritedFromScope = params?.includeInheritedFromScope === true;
-    const includeInternal = params?.includeInternal === true;
 
     const result = await client.sendRequest(GetAPISearchRequest, {
         query,
@@ -154,8 +153,7 @@ export async function buildSearchPayload(
         ...(kinds ? { kinds } : {}),
         source,
         ...(scopePrefix ? { scopePrefix } : {}),
-        includeInheritedFromScope,
-        includeInternal
+        includeInheritedFromScope
     }) as GetAPISearchLspResult;
 
     if (!result || !Array.isArray(result.matches))
@@ -173,8 +171,7 @@ export async function buildSearchPayload(
             ...(kinds ? { kinds } : {}),
             source,
             ...(scopePrefix ? { scopePrefix } : {}),
-            includeInheritedFromScope,
-            includeInternal
+            includeInheritedFromScope
         }
     };
 }

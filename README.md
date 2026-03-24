@@ -86,7 +86,7 @@ Output rules:
 - For line-based results, text output includes source previews (max 20 lines, truncated with `... (truncated)`, fallback `<source unavailable>`).
 
 Tool notes:
-- `angelscript_searchApi`: Uses `query` plus optional `mode=smart|exact|regex`, `limit`, `kinds`, `source`, `scopePrefix`, `includeInheritedFromScope`, and `includeInternal`. Results now return `matches`, optional `notices`, optional `scopeLookup`, optional `inheritedScopeOutcome`, and tool-layer `request`.
+- `angelscript_searchApi`: Uses `query` plus optional `mode=smart|exact|regex`, `limit`, `kinds`, `source`, `scopePrefix`, and `includeInheritedFromScope`. Results now return `matches`, optional `notices`, optional `scopeLookup`, optional `inheritedScopeOutcome`, and tool-layer `request`.
 - `angelscript_resolveSymbolAtPosition`: All line/character indices in tool input are 1-based. Output includes symbol summary, optional definition preview, and optional doc block. It checks the line before definition start for `UCLASS/UPROPERTY/UFUNCTION/UENUM`; when matched, that macro line is rendered as preview context.
 - `angelscript_getTypeMembers`: List members for an exact type name, with optional inherited members/docs.
 - `angelscript_getClassHierarchy`: Returns compact hierarchy text with `root`, `supers`, `derivedByParent`, limits/truncation summary, and per-class source blocks. Script classes include preview lines; defaults are `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
@@ -170,7 +170,7 @@ https://angelscript.hazelight.se
 - 涉及行号/范围的结果会直接在文本中渲染源码片段(最多 20 行,超出追加 `... (truncated)`,不可读时为 `<source unavailable>`).
 
 工具说明:
-- `angelscript_searchApi`: 使用 `query` 和可选 `mode=smart|exact|regex`、`limit`、`kinds`、`source`、`scopePrefix`、`includeInheritedFromScope`、`includeInternal`. 结果返回 `matches`、可选 `notices`、可选 `scopeLookup`、可选 `inheritedScopeOutcome`,并在 tool 层补充 `request`.
+- `angelscript_searchApi`: 使用 `query` 和可选 `mode=smart|exact|regex`、`limit`、`kinds`、`source`、`scopePrefix`、`includeInheritedFromScope`. 结果返回 `matches`、可选 `notices`、可选 `scopeLookup`、可选 `inheritedScopeOutcome`,并在 tool 层补充 `request`.
 - `angelscript_resolveSymbolAtPosition`: 工具输入中的行列索引全部为 1-based. 输出会展示 symbol 摘要、可选定义预览与可选 doc 块. 会检查定义起始行上一行是否为 `UCLASS/UPROPERTY/UFUNCTION/UENUM`,命中时把宏行作为预览上下文输出.
 - `angelscript_getTypeMembers`: 按精确类型名列出成员,可选包含继承成员和文档.
 - `angelscript_getClassHierarchy`: 按精确类名返回紧凑层级文本,包含 `root`、`supers`、`derivedByParent`、limits/truncated 摘要与按类输出的源码块. 脚本类会附带预览; 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.

@@ -15,7 +15,6 @@ export type GetAPISearchParams = {
     source?: ApiSearchSource;
     scopePrefix?: string;
     includeInheritedFromScope?: boolean;
-    includeInternal?: boolean;
 };
 
 export type GetAPISearchNotice = {
@@ -74,7 +73,6 @@ type NormalizedSearchParams = {
     source: ApiSearchSource;
     scopePrefix?: string;
     includeInheritedFromScope: boolean;
-    includeInternal: boolean;
 };
 
 type ScopeCandidate = {
@@ -114,7 +112,6 @@ type SearchIndexEntry = {
     qualifiedInitials: string;
     namespaceQualifiedName: string;
     declaringTypeQualifiedName?: string;
-    internal: boolean;
     isMixin: boolean;
     mixinTargetQualifiedName?: string;
     qualifiedAliasTexts: SearchTextVariant[];
@@ -249,7 +246,7 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
 function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
 {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload))
-        throw new ApiSearchValidationError("Invalid params. Provide { query: string, mode?: 'smart' | 'exact' | 'regex', limit?: number, kinds?: ApiSearchKind[], source?: 'native' | 'script' | 'both', scopePrefix?: string, includeInheritedFromScope?: boolean, includeInternal?: boolean }.");
+        throw new ApiSearchValidationError("Invalid params. Provide { query: string, mode?: 'smart' | 'exact' | 'regex', limit?: number, kinds?: ApiSearchKind[], source?: 'native' | 'script' | 'both', scopePrefix?: string, includeInheritedFromScope?: boolean }.");
 
     let record = payload as Record<string, unknown>;
     let query = typeof record.query === 'string' ? record.query.trim() : '';
@@ -262,7 +259,6 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
     let source = normalizeSource(record.source);
     let scopePrefix = typeof record.scopePrefix === 'string' ? record.scopePrefix.trim() : '';
     let includeInheritedFromScope = record.includeInheritedFromScope === true;
-    let includeInternal = record.includeInternal === true;
 
     return {
         query,
@@ -271,8 +267,7 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
         kinds,
         source,
         ...(scopePrefix.length > 0 ? { scopePrefix } : {}),
-        includeInheritedFromScope,
-        includeInternal
+        includeInheritedFromScope
     };
 }
 
@@ -624,7 +619,6 @@ function createSearchEntry(input: {
         isMixin: input.isMixin === true,
         mixinTargetQualifiedName: input.mixinTargetQualifiedName,
         qualifiedAliasTexts,
-        internal: isInternalQualifiedName(input.qualifiedName),
         overrideKey: input.overrideKey
     };
 }
@@ -885,8 +879,6 @@ function filterCandidate(entry: SearchIndexEntry, params: NormalizedSearchParams
     if (!params.kinds.has(entry.kind))
         return false;
     if (params.source != 'both' && entry.filterSource != 'both' && entry.filterSource != params.source)
-        return false;
-    if (!params.includeInternal && entry.internal)
         return false;
     return true;
 }
@@ -1513,17 +1505,6 @@ function tokensToInitials(tokens: string[]) : string
     return tokens
         .map((token) => token.length > 0 ? token[0] : '')
         .join('');
-}
-
-function isInternalQualifiedName(qualifiedName: string) : boolean
-{
-    let parts = qualifiedName.split(/::|\./g);
-    for (let part of parts)
-    {
-        if (part.startsWith('_'))
-            return true;
-    }
-    return false;
 }
 
 type ParsedRegex = {

@@ -40,7 +40,6 @@ export type GetAPISearchParams = {
     source?: SearchSource;
     scopePrefix?: string;
     includeInheritedFromScope?: boolean;
-    includeInternal?: boolean;
 };
 
 export type GetAPISearchNotice = {
@@ -97,7 +96,6 @@ export type GetAPISearchToolData = {
         source: SearchSource;
         scopePrefix?: string;
         includeInheritedFromScope: boolean;
-        includeInternal: boolean;
     };
 };
 

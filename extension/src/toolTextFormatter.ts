@@ -304,7 +304,6 @@ function formatSearchApiSuccess(data: UnknownRecord): string
     const kinds = asArray(request?.kinds)?.map((item) => asString(item) ?? toDisplayValue(item)).filter(Boolean) as string[] | undefined;
     const scopePrefix = asString(request?.scopePrefix);
     const includeInheritedFromScope = asBoolean(request?.includeInheritedFromScope);
-    const includeInternal = asBoolean(request?.includeInternal);
     const matches = asArray(data.matches) ?? [];
     const notices = asArray(data.notices) ?? [];
     const scopeLookup = asRecord(data.scopeLookup);
@@ -318,7 +317,6 @@ function formatSearchApiSuccess(data: UnknownRecord): string
         pushValue(lines, 'kinds', kinds.join('|'));
     pushValue(lines, 'scopePrefix', scopePrefix);
     pushValue(lines, 'includeInheritedFromScope', includeInheritedFromScope);
-    pushValue(lines, 'includeInternal', includeInternal);
     pushValue(lines, 'inheritedScopeOutcome', inheritedScopeOutcome);
     pushValue(lines, 'count', matches.length);
 

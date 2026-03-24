@@ -46,8 +46,7 @@ test('searchApi success is rendered in qgrep-style text', () =>
                 source: 'both',
                 kinds: ['class', 'method'],
                 scopePrefix: 'Gameplay::Movement',
-                includeInheritedFromScope: true,
-                includeInternal: false
+                includeInheritedFromScope: true
             },
             scopeLookup: {
                 requestedPrefix: 'Gameplay::Movement',
@@ -91,7 +90,6 @@ test('searchApi success is rendered in qgrep-style text', () =>
         'kinds: class|method',
         'scopePrefix: Gameplay::Movement',
         'includeInheritedFromScope: true',
-        'includeInternal: false',
         'inheritedScopeOutcome: applied',
         'count: 2',
         'scopeLookup: class Gameplay::Movement::UMovementComponent',
@@ -163,8 +161,7 @@ test('searchApi renders mixin metadata in text output', () =>
                 source: 'both',
                 kinds: ['function'],
                 scopePrefix: 'Gameplay::Movement::UMovementDerived',
-                includeInheritedFromScope: true,
-                includeInternal: false
+                includeInheritedFromScope: true
             },
             matches: [
                 {
@@ -191,7 +188,6 @@ test('searchApi renders mixin metadata in text output', () =>
         'kinds: function',
         'scopePrefix: Gameplay::Movement::UMovementDerived',
         'includeInheritedFromScope: true',
-        'includeInternal: false',
         'count: 1',
         '====',
         'matches',

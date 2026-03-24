@@ -465,18 +465,14 @@ test('nearest override wins when inherited members share the same override key',
     assert.equal(scoped.matches[0].scopeDistance, 1);
 });
 
-test('internal symbols stay hidden unless includeInternal is true', () =>
+test('internal symbols are returned without a dedicated visibility flag', () =>
 {
-    const hiddenDefault = GetAPISearch({ query: 'HiddenMovement', mode: 'smart', limit: 10 });
-    assert.equal(hiddenDefault.matches.length, 0);
-
-    const hiddenIncluded = GetAPISearch({
+    const hiddenMatches = GetAPISearch({
         query: 'HiddenMovement',
         mode: 'smart',
-        includeInternal: true,
         limit: 10
     });
-    assert.deepEqual(hiddenIncluded.matches.map((match) => match.qualifiedName), ['Gameplay::_Hidden::_HiddenMovementHelper']);
+    assert.deepEqual(hiddenMatches.matches.map((match) => match.qualifiedName), ['Gameplay::_Hidden::_HiddenMovementHelper']);
 });
 
 test('namespace is no longer an accepted public kind filter', () =>

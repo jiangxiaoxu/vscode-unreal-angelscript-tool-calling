@@ -761,8 +761,7 @@ export async function runSearchApi(
                 kinds: Array.isArray(raw?.kinds) ? raw.kinds : undefined,
                 source: raw?.source,
                 scopePrefix: raw?.scopePrefix,
-                includeInheritedFromScope: raw?.includeInheritedFromScope,
-                includeInternal: raw?.includeInternal
+                includeInheritedFromScope: raw?.includeInheritedFromScope
             })
         };
     }

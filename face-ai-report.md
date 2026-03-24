@@ -34,7 +34,7 @@
 ## 各工具文本形态
 | Tool | 头部字段 | 主体分段 | 预览规则 |
 | --- | --- | --- | --- |
-| `angelscript_searchApi` | `query`,`mode`,`limit`,`source`,`kinds?`,`scopePrefix?`,`includeInheritedFromScope`,`includeInternal`,`count`,`scopeLookup?` | `==== notices` + `==== matches` | 无源码预览 |
+| `angelscript_searchApi` | `query`,`mode`,`limit`,`source`,`kinds?`,`scopePrefix?`,`includeInheritedFromScope`,`count`,`scopeLookup?` | `==== notices` + `==== matches` | 无源码预览 |
 | `angelscript_resolveSymbolAtPosition` | `file`,`position`,`symbol`,`kind`,`signature`,`definition?` | 定义存在时 `==== <filePath>`; 文档存在时 `---` + `doc` | 宏回溯行用 `-`, 定义行用 `:` |
 | `angelscript_getTypeMembers` | `type`,`namespace?`,`count`,`includeInherited`,`includeDocs` | `==== members` + `---` 每个成员 | 无源码预览 |
 | `angelscript_getClassHierarchy` | `root`,`supers`,`limits`,`truncated` | `==== derivedByParent`; 之后每个 source block 用 `====` | 脚本类预览默认按真实行号输出,当前实现把预览行整体标为 `:` |

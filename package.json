@@ -2,7 +2,7 @@
     "name": "unreal-angelscript-tool-calling-fork",
     "displayName": "Unreal Angelscript Tool-calling (Fork)",
     "description": "Language Server and Debug Adapter for the UnrealEngine-Angelscript plugin. Based on https://github.com/jiangxiaoxu/vscode-unreal-angelscript-tool-calling (forked from https://github.com/Hazelight/UnrealEngine-Angelscript).",
-    "version": "1.9.2051",
+    "version": "1.9.2052",
     "publisher": "jiangxiaoxu",
     "icon": "resources/angelscript_unreal.png",
     "engines": {
@@ -46,7 +46,7 @@
                 ],
                 "toolReferenceName": "angelscript_searchApi",
                 "displayName": "Angelscript API Search",
-                "modelDescription": "Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires query. Optional controls: mode (smart|exact|regex, default smart), limit (default 20, max 200), kinds (class|struct|enum|method|function|property|globalVariable), source (native|script|both, default both), scopePrefix, includeInheritedFromScope, includeInternal. Function results include namespace/global functions and mixin functions. Regex mode matches short names, canonical qualified names, and mixin member-view aliases only. When includeInheritedFromScope is requested, the top-level result may include inheritedScopeOutcome. Returns readable text and, by default, structured JSON payload.",
+                "modelDescription": "Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires query. Optional controls: mode (smart|exact|regex, default smart), limit (default 20, max 200), kinds (class|struct|enum|method|function|property|globalVariable), source (native|script|both, default both), scopePrefix, includeInheritedFromScope. Function results include namespace/global functions and mixin functions. Regex mode matches short names, canonical qualified names, and mixin member-view aliases only. When includeInheritedFromScope is requested, the top-level result may include inheritedScopeOutcome. Returns readable text and, by default, structured JSON payload.",
                 "userDescription": "Search Angelscript API symbols and docs.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(search)",
@@ -106,11 +106,6 @@
                         "includeInheritedFromScope": {
                             "type": "boolean",
                             "description": "Optional. Only applies to class/type scopes. Expand inherited methods and properties.",
-                            "default": false
-                        },
-                        "includeInternal": {
-                            "type": "boolean",
-                            "description": "Optional. Include symbols whose namespace, type, or member name starts with \"_\".",
                             "default": false
                         }
                     },

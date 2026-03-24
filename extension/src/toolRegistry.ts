@@ -78,7 +78,6 @@ function prepareSearchInvocation(input: AngelscriptSearchParams | null | undefin
     const kinds = Array.isArray(input?.kinds) ? input?.kinds.filter((item) => typeof item === "string") : [];
     const scopePrefix = typeof input?.scopePrefix === "string" ? input.scopePrefix.trim() : "";
     const includeInheritedFromScope = input?.includeInheritedFromScope === true ? "true" : "false";
-    const includeInternal = input?.includeInternal === true ? "true" : "false";
 
     const details: string[] = [];
     details.push(`mode=${mode}`);
@@ -90,7 +89,6 @@ function prepareSearchInvocation(input: AngelscriptSearchParams | null | undefin
     if (scopePrefix)
         details.push(`scope=${scopePrefix}`);
     details.push(`inheritScope=${includeInheritedFromScope}`);
-    details.push(`includeInternal=${includeInternal}`);
 
     const queryLabel = query ? `"${query}"` : "<empty>";
     return `Search Angelscript API ${queryLabel} (${details.join(", ")})`;
@@ -146,7 +144,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     {
         name: 'angelscript_searchApi',
         description:
-            'Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires query. Optional controls: mode (smart|exact|regex, default smart), limit (default 20, max 200), kinds (class|struct|enum|method|function|property|globalVariable), source (native|script|both, default both), scopePrefix, includeInheritedFromScope, includeInternal. Function results include namespace/global functions and mixin functions. Regex mode matches short names, canonical qualified names, and mixin member-view aliases only. When includeInheritedFromScope is requested, the top-level result may include inheritedScopeOutcome. Returns readable text and, by default, structured JSON payload.',
+            'Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires query. Optional controls: mode (smart|exact|regex, default smart), limit (default 20, max 200), kinds (class|struct|enum|method|function|property|globalVariable), source (native|script|both, default both), scopePrefix, includeInheritedFromScope. Function results include namespace/global functions and mixin functions. Regex mode matches short names, canonical qualified names, and mixin member-view aliases only. When includeInheritedFromScope is requested, the top-level result may include inheritedScopeOutcome. Returns readable text and, by default, structured JSON payload.',
         inputSchema: z.object({
             query: z.string().describe('Search query for Angelscript API symbols.'),
             mode: z.enum(['smart', 'exact', 'regex']).optional().describe('Search mode. Default is smart.'),
@@ -154,8 +152,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
             source: z.enum(['native', 'script', 'both']).optional().describe('Filter results by source. Supported values: native, script, both. Default is both.'),
             kinds: z.array(z.enum(searchKindOptions)).optional().describe('Filter results by kinds.'),
             scopePrefix: z.string().optional().describe('Optional namespace or type scope. Namespace scopes filter declared descendants. Type scopes filter declared members, can expand inherited methods and properties, and also surface applicable mixin functions.'),
-            includeInheritedFromScope: z.boolean().optional().describe('Only applies to class/type scopes. When true, expands inherited methods and properties. Default is false.'),
-            includeInternal: z.boolean().optional().describe('Include symbols whose namespace, type, or member name starts with "_". Default is false.')
+            includeInheritedFromScope: z.boolean().optional().describe('Only applies to class/type scopes. When true, expands inherited methods and properties. Default is false.')
         }).strict(),
         prepareInvocation: prepareSearchInvocation,
         run: async (context, input: AngelscriptSearchParams | null | undefined) =>
