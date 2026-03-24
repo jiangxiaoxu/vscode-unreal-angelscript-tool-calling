@@ -17,9 +17,9 @@ Maintenance rule:
 - Runtime watched-file notifications and text-document incremental updates are now hard-limited to resolved Script roots as well.
 - Removed built-in default ignore patterns for script scanning; `UnrealAngelscript.scriptIgnorePatterns` now defaults to an empty list.
 - `Angelscript API` views now use `when: unrealAngelscript.apiPanelEnabled`; the activity entry stays hidden until the extension is actually activated.
-- `angelscript_resolveSymbolAtPosition` and `angelscript_findReferences` now accept `filePath` as either absolute path or workspace-relative path (prefer `<workspaceFolderName>/...`).
-- Path output now prefers workspace-relative format with root prefix (for example `CthulhuGame/Source/...`), and falls back to absolute path only when the file is outside all workspace folders.
-- Multi-root path resolution now detects ambiguity for relative `filePath` and returns `InvalidParams` with candidate paths instead of silently picking one root.
+- `angelscript_resolveSymbolAtPosition` and `angelscript_findReferences` now require absolute `filePath` input, and LM tool outputs now normalize `filePath` to absolute-path form only.
+- `angelscript_findReferences` now accepts optional `limit` (default `30`, max `200`) and returns `total`, `returned`, `limit`, and `truncated` in structured output while surfacing truncation notices in text output.
+- `angelscript_getClassHierarchy` now degrades unresolved script preview paths to `<source unavailable>` instead of failing the entire tool with `InvalidParams`.
 - `angelscript_searchApi` now uses the new request contract: `query`, `mode`, `limit`, `kinds`, `source`, `scopePrefix`, and `includeInheritedFromScope`.
 - `angelscript_searchApi` now returns `matches`, optional `notices`, optional `scopeLookup`, and tool-layer `request`.
 - Search execution moved into a dedicated language-server index with smart/exact/regex matching, compact-query expansion, token-order fallback, namespace/type scoping, inherited member expansion, and nearest-override dedupe.
@@ -34,7 +34,7 @@ Maintenance rule:
 - CI release workflow migrated from `beta/release` to `pre-release/release`: now publishes to VS Code Marketplace only (no GitHub release assets), keeps `runs-on: ubuntu-latest`, packages VSIX without platform target, and force-updates branch tags `pre-release`/`release` on successful runs.
 
 #### Breaking Changes
-- Callers that assumed output `filePath` is always absolute should migrate to parse both workspace-relative and absolute path formats.
+- Any caller sending workspace-relative `filePath` to `angelscript_resolveSymbolAtPosition` or `angelscript_findReferences` must migrate to absolute paths.
 - Any caller using the old `angelscript_searchApi` parameters (`labelQuery`, `searchIndex`, `maxBatchResults`, `includeDocs`, `labelQueryUseRegex`, `signatureRegex`) must migrate to the new search contract.
 - Any caller depending on in-repo MCP server/runtime helpers must remove that dependency because this repository now exposes only VS Code LM tools.
 - Any caller consuming LM tool output should be prepared for the default `text+structured` dual-channel response, or explicitly set `UnrealAngelscript.languageModelTools.outputMode=text-only`.
@@ -48,9 +48,9 @@ Maintenance rule:
 - 运行期 watched-file 通知与文本增量更新处理也已硬限制为仅处理解析后的 Script 根目录.
 - 已移除脚本扫描的内置默认忽略规则; `UnrealAngelscript.scriptIgnorePatterns` 默认值改为空数组.
 - `Angelscript API` 视图新增 `when: unrealAngelscript.apiPanelEnabled`, 扩展未激活时隐藏对应 activity 入口, 激活后再显示.
-- `angelscript_resolveSymbolAtPosition` 与 `angelscript_findReferences` 的 `filePath` 输入支持绝对路径和工作区路径(建议 `<workspaceFolderName>/...`).
-- 路径输出改为优先使用带 root 名的工作区路径(例如 `CthulhuGame/Source/...`),仅当文件不在任何工作区时才回退为绝对路径.
-- 多工作区下,相对 `filePath` 若存在歧义会返回带候选路径的 `InvalidParams`,不再静默选择某个 root.
+- `angelscript_resolveSymbolAtPosition` 与 `angelscript_findReferences` 现在要求传入绝对路径 `filePath`,LM tool 输出中的 `filePath` 也统一规范为绝对路径格式.
+- `angelscript_findReferences` 现在支持可选 `limit` 参数(默认 `30`,最大 `200`),结构化输出新增 `total`、`returned`、`limit`、`truncated`,文本输出会明确提示结果是否被截断.
+- `angelscript_getClassHierarchy` 现在在脚本类预览路径无法解析时会降级为 `<source unavailable>`,而不是让整个工具以 `InvalidParams` 失败.
 - `angelscript_searchApi` 现在使用新请求契约:`query`、`mode`、`limit`、`kinds`、`source`、`scopePrefix`、`includeInheritedFromScope`.
 - `angelscript_searchApi` 现在返回 `matches`、可选 `notices`、可选 `scopeLookup`,并在 tool 层附加 `request`.
 - 搜索执行已下沉到独立的 language-server 索引,支持 smart/exact/regex、compact query expansion、token 顺序回退、namespace/type scope、继承成员扩展与最近 override 去重.
@@ -65,7 +65,7 @@ Maintenance rule:
 - CI 发布流程从 `beta/release` 迁移到 `pre-release/release`: 仅发布到 VS Code Marketplace(不再发布 GitHub 资产),保持 `runs-on: ubuntu-latest`,VSIX 打包不限定平台,并在成功后强制更新分支同名 tag(`pre-release`/`release`).
 
 #### Breaking Changes
-- 如果调用方假设输出 `filePath` 永远是绝对路径,需要迁移为同时兼容工作区路径和绝对路径.
+- 任何向 `angelscript_resolveSymbolAtPosition` 或 `angelscript_findReferences` 传入工作区相对 `filePath` 的调用方,都需要迁移为传入绝对路径.
 - 任何仍在使用旧 `angelscript_searchApi` 参数(`labelQuery`、`searchIndex`、`maxBatchResults`、`includeDocs`、`labelQueryUseRegex`、`signatureRegex`)的调用方,都需要迁移到新搜索契约.
 - 任何依赖仓库内 MCP server/runtime helper 的调用方,都需要移除这层依赖,因为当前仓库只暴露 VS Code LM tools.
 - 任何消费 LM tool 输出的调用方,都需要准备好默认的 `text+structured` 双通道响应,或显式设置 `UnrealAngelscript.languageModelTools.outputMode=text-only`.

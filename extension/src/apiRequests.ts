@@ -170,7 +170,7 @@ export type TypeHierarchyClassSource = {
     source: 'cpp';
 } | {
     source: 'as';
-    filePath: string;
+    filePath?: string;
     startLine: number;
     endLine: number;
     preview?: string;
@@ -301,6 +301,7 @@ export type FindReferencesParams = {
         line: number;
         character: number;
     };
+    limit?: number;
 };
 
 // Tool-facing range with 1-based line/character indices.
@@ -324,6 +325,9 @@ export type FindReferencesItem = {
 
 export type FindReferencesData = {
     total: number;
+    returned: number;
+    limit: number;
+    truncated: boolean;
     references: FindReferencesItem[];
     request?: {
         filePath: string;
@@ -331,6 +335,7 @@ export type FindReferencesData = {
             line: number;
             character: number;
         };
+        limit: number;
     };
 };
 

@@ -36,7 +36,7 @@ This extension provides language server and debugger support for UnrealEngine-An
 
 Notes:
 - Core language features still follow the primary workspace.
-- LM tool `filePath` resolution supports multi-root with explicit root prefix (`<workspaceFolderName>/...`).
+- LM tool `filePath` inputs and outputs use normalized absolute paths.
 - Supported workspace layouts are strict: the root must be `Script` itself, or contain `<workspace>/Script`.
 - Startup indexing scans only resolved `Script` roots (`Script/**/*.as`), not the entire workspace tree.
 - Runtime file watching and incremental parse/update handling are also restricted to resolved `Script` roots only.
@@ -81,16 +81,15 @@ Output rules:
   - `====` section headers
   - `---` item separators
   - source previews rendered as `lineNumber + ':'/'-' + 4 spaces + source text`
-- Input `filePath` supports absolute path or workspace-relative path (prefer `<workspaceFolderName>/...`).
-- Output `filePath` prefers workspace-relative path with root prefix; if not in workspace, output falls back to absolute path.
+- Input and output `filePath` use normalized absolute paths.
 - For line-based results, text output includes source previews (max 20 lines, truncated with `... (truncated)`, fallback `<source unavailable>`).
 
 Tool notes:
 - `angelscript_searchApi`: Uses `query` plus optional `mode=smart|exact|regex`, `limit`, `kinds`, `source`, `scopePrefix`, and `includeInheritedFromScope`. Results now return `matches`, optional `notices`, optional `scopeLookup`, optional `inheritedScopeOutcome`, and tool-layer `request`.
-- `angelscript_resolveSymbolAtPosition`: All line/character indices in tool input are 1-based. Output includes symbol summary, optional definition preview, and optional doc block. It checks the line before definition start for `UCLASS/UPROPERTY/UFUNCTION/UENUM`; when matched, that macro line is rendered as preview context.
+- `angelscript_resolveSymbolAtPosition`: Requires an absolute `filePath`. All line/character indices in tool input are 1-based. Output includes symbol summary, optional definition preview, and optional doc block. It checks the line before definition start for `UCLASS/UPROPERTY/UFUNCTION/UENUM`; when matched, that macro line is rendered as preview context.
 - `angelscript_getTypeMembers`: List members for an exact type name, with optional inherited members/docs.
-- `angelscript_getClassHierarchy`: Returns compact hierarchy text with `root`, `supers`, `derivedByParent`, limits/truncation summary, and per-class source blocks. Script classes include preview lines; defaults are `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
-- `angelscript_findReferences`: All line/character indices in tool input are 1-based. Output groups references by file and prints 1-based `range` labels with preview lines.
+- `angelscript_getClassHierarchy`: Returns compact hierarchy text with `root`, `supers`, `derivedByParent`, limits/truncation summary, and per-class source blocks. Script classes include preview lines when a source path can be resolved; otherwise the preview degrades to `<source unavailable>`. Defaults are `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
+- `angelscript_findReferences`: Requires an absolute `filePath`. All line/character indices in tool input are 1-based. Optional `limit` defaults to `30` and caps the returned references at `200`. Output includes `total`, `returned`, `limit`, `truncated`, per-file grouping, 1-based `range` labels, and preview lines.
 
 ### Build
 ```bash
@@ -120,7 +119,7 @@ https://angelscript.hazelight.se
 
 说明:
 - 核心语言功能仍按主工作区运行.
-- LM tool 的 `filePath` 解析支持多工作区,可用 root 前缀(`<workspaceFolderName>/...`)精确定位.
+- LM tool 的 `filePath` 输入和输出统一使用标准化后的绝对路径.
 - 工作区兼容策略为严格模式: 根目录必须是 `Script` 本身,或包含 `<workspace>/Script`.
 - 启动索引只扫描解析后的 `Script` 根目录(`Script/**/*.as`),不会全盘递归扫描工作区.
 - 运行期文件监听与增量解析/更新同样严格限制在解析后的 `Script` 根目录内.
@@ -165,16 +164,15 @@ https://angelscript.hazelight.se
   - `====` 分段
   - `---` 条目分隔
   - 源码预览使用 `行号 + ':'/'-' + 4 个空格 + 源码`
-- 输入 `filePath` 支持绝对路径和工作区路径(建议 `<workspaceFolderName>/...`).
-- 输出 `filePath` 优先返回带 root 名的工作区路径,不在工作区内时回退为绝对路径.
+- 输入和输出 `filePath` 统一使用标准化后的绝对路径.
 - 涉及行号/范围的结果会直接在文本中渲染源码片段(最多 20 行,超出追加 `... (truncated)`,不可读时为 `<source unavailable>`).
 
 工具说明:
 - `angelscript_searchApi`: 使用 `query` 和可选 `mode=smart|exact|regex`、`limit`、`kinds`、`source`、`scopePrefix`、`includeInheritedFromScope`. 结果返回 `matches`、可选 `notices`、可选 `scopeLookup`、可选 `inheritedScopeOutcome`,并在 tool 层补充 `request`.
-- `angelscript_resolveSymbolAtPosition`: 工具输入中的行列索引全部为 1-based. 输出会展示 symbol 摘要、可选定义预览与可选 doc 块. 会检查定义起始行上一行是否为 `UCLASS/UPROPERTY/UFUNCTION/UENUM`,命中时把宏行作为预览上下文输出.
+- `angelscript_resolveSymbolAtPosition`: 需要传入绝对路径 `filePath`. 工具输入中的行列索引全部为 1-based. 输出会展示 symbol 摘要、可选定义预览与可选 doc 块. 会检查定义起始行上一行是否为 `UCLASS/UPROPERTY/UFUNCTION/UENUM`,命中时把宏行作为预览上下文输出.
 - `angelscript_getTypeMembers`: 按精确类型名列出成员,可选包含继承成员和文档.
-- `angelscript_getClassHierarchy`: 按精确类名返回紧凑层级文本,包含 `root`、`supers`、`derivedByParent`、limits/truncated 摘要与按类输出的源码块. 脚本类会附带预览; 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
-- `angelscript_findReferences`: 工具输入中的行列索引全部为 1-based. 输出会按文件分组展示引用,并附带 1-based 的 `range` 标签与源码预览.
+- `angelscript_getClassHierarchy`: 按精确类名返回紧凑层级文本,包含 `root`、`supers`、`derivedByParent`、limits/truncated 摘要与按类输出的源码块. 脚本类仅在能解析到源码路径时附带预览,否则降级为 `<source unavailable>`. 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
+- `angelscript_findReferences`: 需要传入绝对路径 `filePath`. 工具输入中的行列索引全部为 1-based. 可选 `limit` 默认值为 `30`,最大值为 `200`. 输出会返回 `total`、`returned`、`limit`、`truncated`,并按文件分组展示引用,附带 1-based 的 `range` 标签与源码预览.
 
 ### 构建
 ```bash

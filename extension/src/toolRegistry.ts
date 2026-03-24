@@ -17,6 +17,7 @@ import {
     runResolveSymbolAtPosition,
     runSearchApi
 } from './toolShared';
+import { DEFAULT_FIND_REFERENCES_LIMIT } from './toolContractUtils';
 import { formatToolText } from './toolTextFormatter';
 import { buildLmToolResultPartSpecs, LmToolOutputMode } from './toolResultTransport';
 
@@ -130,14 +131,15 @@ function prepareTypeHierarchyInvocation(input: GetTypeHierarchyParams | null | u
     return `Get Angelscript type hierarchy ${label} (${details.join(", ")})`;
 }
 
-function prepareFindReferencesInvocation(input: { filePath?: string; position?: { line?: number; character?: number } } | null | undefined): string
+function prepareFindReferencesInvocation(input: FindReferencesParams | null | undefined): string
 {
     const filePath = typeof input?.filePath === "string" ? input.filePath.trim() : "";
     const line = typeof input?.position?.line === "number" ? input.position.line : undefined;
     const character = typeof input?.position?.character === "number" ? input.position.character : undefined;
+    const limit = typeof input?.limit === "number" ? input.limit : DEFAULT_FIND_REFERENCES_LIMIT;
     const location = (typeof line === "number" && typeof character === "number") ? `${line}:${character}` : "<unknown>";
     const label = filePath ? `"${filePath}"` : "<unknown>";
-    return `Find Angelscript references ${label} (${location})`;
+    return `Find Angelscript references ${label} (${location}, limit=${limit})`;
 }
 
 const toolDefinitions: Array<ToolDefinition<any>> = [
@@ -167,9 +169,9 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_resolveSymbolAtPosition',
-        description: 'Use when you have a file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Optional includeDocumentation controls doc payload (default true). Returns readable text and, by default, structured JSON payload. When definition exists, output includes filePath, line range, preview text, and checks one line above definition start for Unreal macros UCLASS/UPROPERTY/UFUNCTION/UENUM.',
+        description: 'Use when you have an absolute file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires absolute filePath and position (line, character, both 1-based). Optional includeDocumentation controls doc payload (default true). Returns readable text and, by default, structured JSON payload. When definition exists, output includes absolute filePath, line range, preview text, and checks one line above definition start for Unreal macros UCLASS/UPROPERTY/UFUNCTION/UENUM.',
         inputSchema: z.object({
-            filePath: z.string().describe('Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/...").'),
+            filePath: z.string().describe('Absolute path to the file containing the symbol.'),
             position: z.object({
                 line: z.number().int().min(1).describe('1-based line number in tool contract.'),
                 character: z.number().int().min(1).describe('1-based character offset in tool contract.'),
@@ -199,7 +201,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_getClassHierarchy',
-        description: 'Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., "APawn"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns readable text and, by default, structured JSON payload, including root, supers, derivedByParent, limits, truncated info, and script-class preview text when available.',
+        description: 'Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., "APawn"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns readable text and, by default, structured JSON payload, including root, supers, derivedByParent, limits, truncated info, and script-class preview text when available. If a script source path cannot be resolved, that preview degrades to source unavailable instead of failing the tool.',
         inputSchema: z.object({
             name: z.string().describe('Exact class name to inspect (e.g., "APawn").'),
             maxSuperDepth: z.number().int().optional().describe('Maximum number of supertypes to return. Non-negative integer. Default is 3.'),
@@ -214,13 +216,14 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_findReferences',
-        description: 'Use when you have a symbol location and need all project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/..."). Returns readable text and, by default, structured JSON payload with per-file grouping, 1-based range labels, and preview text.',
+        description: 'Use when you have a symbol location and need project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires absolute filePath and position (line, character, both 1-based). Optional limit controls the maximum number of returned references (default 30, max 200). Returns readable text and, by default, structured JSON payload with total, returned, limit, truncated, per-file grouping, 1-based range labels, and preview text.',
         inputSchema: z.object({
-            filePath: z.string().describe('Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer "<workspaceFolderName>/...").'),
+            filePath: z.string().describe('Absolute path to the file containing the symbol.'),
             position: z.object({
                 line: z.number().int().min(1).describe('1-based line number in tool contract.'),
                 character: z.number().int().min(1).describe('1-based character offset in tool contract.')
-            })
+            }),
+            limit: z.number().int().min(1).max(200).optional().describe('Maximum number of references to return. Default is 30.')
         }),
         prepareInvocation: prepareFindReferencesInvocation,
         run: async (context, input: FindReferencesParams | null | undefined) =>

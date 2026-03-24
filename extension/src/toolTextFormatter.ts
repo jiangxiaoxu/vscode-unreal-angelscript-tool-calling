@@ -1,12 +1,4 @@
-import * as path from 'path';
-
 type UnknownRecord = Record<string, unknown>;
-type WorkspaceFolderLike = {
-    name: string;
-    uri: {
-        fsPath: string;
-    };
-};
 
 const MAX_LIST_ITEMS = 50;
 const MAX_BLOCK_LINES = 40;
@@ -50,76 +42,6 @@ function asBoolean(value: unknown): boolean | null
 function asArray(value: unknown): unknown[] | null
 {
     return Array.isArray(value) ? value : null;
-}
-
-function toDisplayPath(filePath: string): string
-{
-    return path.normalize(filePath).replace(/\\/g, '/');
-}
-
-function samePath(a: string, b: string): boolean
-{
-    if (process.platform === 'win32')
-        return a.toLowerCase() === b.toLowerCase();
-    return a === b;
-}
-
-function isPathInsideRoot(filePath: string, rootPath: string): boolean
-{
-    const normalizedFilePath = path.normalize(filePath);
-    const normalizedRootPath = path.normalize(rootPath);
-    if (samePath(normalizedFilePath, normalizedRootPath))
-        return true;
-
-    const relativePath = path.relative(normalizedRootPath, normalizedFilePath);
-    if (!relativePath)
-        return true;
-    return !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
-}
-
-function formatPathForTextOutput(filePath: string): string
-{
-    const normalizedPath = path.normalize(filePath);
-    if (!path.isAbsolute(normalizedPath))
-        return toDisplayPath(normalizedPath);
-
-    const workspaceFolders = getWorkspaceFolders();
-    let bestFolder: WorkspaceFolderLike | null = null;
-    let bestRootPath = '';
-
-    for (const workspaceFolder of workspaceFolders)
-    {
-        const rootPath = path.normalize(workspaceFolder.uri.fsPath);
-        if (!isPathInsideRoot(normalizedPath, rootPath))
-            continue;
-        if (!bestFolder || rootPath.length > bestRootPath.length)
-        {
-            bestFolder = workspaceFolder;
-            bestRootPath = rootPath;
-        }
-    }
-
-    if (!bestFolder)
-        return toDisplayPath(normalizedPath);
-
-    const relativePath = path.relative(bestRootPath, normalizedPath);
-    if (!relativePath)
-        return bestFolder.name;
-
-    return `${bestFolder.name}/${toDisplayPath(relativePath)}`;
-}
-
-function getWorkspaceFolders(): readonly WorkspaceFolderLike[]
-{
-    try
-    {
-        const vscode = require('vscode') as typeof import('vscode');
-        return vscode.workspace.workspaceFolders ?? [];
-    }
-    catch
-    {
-        return [];
-    }
 }
 
 function toDisplayValue(value: unknown): string
@@ -615,7 +537,14 @@ function formatFindReferencesSuccess(data: UnknownRecord): string
     }
 
     const references = asArray(data.references) ?? [];
-    pushValue(lines, 'count', asNumber(data.total) ?? references.length);
+    const total = asNumber(data.total) ?? references.length;
+    const returned = asNumber(data.returned) ?? references.length;
+    const limit = asNumber(data.limit) ?? returned;
+    const truncated = asBoolean(data.truncated) ?? false;
+    pushValue(lines, 'total', total);
+    pushValue(lines, 'returned', returned);
+    pushValue(lines, 'limit', limit);
+    pushValue(lines, 'truncated', truncated);
     if (references.length === 0)
     {
         lines.push('No references found.');
@@ -665,7 +594,12 @@ function formatFindReferencesSuccess(data: UnknownRecord): string
     if (limited.omitted > 0)
     {
         lines.push('====');
-        lines.push(`... and ${limited.omitted} more references`);
+        lines.push(`... and ${limited.omitted} more returned references omitted from text output`);
+    }
+    if (truncated)
+    {
+        lines.push('====');
+        lines.push(`Results truncated at limit ${limit}. Refine the symbol location or increase limit to see more references.`);
     }
     return finalize(lines);
 }

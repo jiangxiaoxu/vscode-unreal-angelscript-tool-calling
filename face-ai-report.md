@@ -38,16 +38,14 @@
 | `angelscript_resolveSymbolAtPosition` | `file`,`position`,`symbol`,`kind`,`signature`,`definition?` | 定义存在时 `==== <filePath>`; 文档存在时 `---` + `doc` | 宏回溯行用 `-`, 定义行用 `:` |
 | `angelscript_getTypeMembers` | `type`,`namespace?`,`count`,`includeInherited`,`includeDocs` | `==== members` + `---` 每个成员 | 无源码预览 |
 | `angelscript_getClassHierarchy` | `root`,`supers`,`limits`,`truncated` | `==== derivedByParent`; 之后每个 source block 用 `====` | 脚本类预览默认按真实行号输出,当前实现把预览行整体标为 `:` |
-| `angelscript_findReferences` | `file`,`position`,`count` | 每个文件 `==== <filePath>`; 每条引用 `---` | `range` 文本标签 + 预览行,命中引用行用 `:` |
+| `angelscript_findReferences` | `file`,`position`,`total`,`returned`,`limit`,`truncated` | 每个文件 `==== <filePath>`; 每条引用 `---` | `range` 文本标签 + 预览行,命中引用行用 `:` |
 
 ## 路径与行号规则
 输入路径:
 - 支持 absolute path.
-- 支持 workspace-relative path,推荐 `rootName/...`.
 
 输出路径:
-- 优先输出 `rootName/relative/path`.
-- 文件不在任一 workspace root 时回退 absolute path.
+- 统一输出 absolute path.
 - 路径分隔符统一 `/`.
 
 行号规则:

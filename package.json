@@ -173,7 +173,7 @@
                 ],
                 "toolReferenceName": "angelscript_resolveSymbolAtPosition",
                 "displayName": "Angelscript Resolve Symbol At Position",
-                "modelDescription": "Use when you have a file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\"). Optional includeDocumentation controls doc payload (default true). Returns readable text and, by default, structured JSON payload. Output includes symbol/kind/signature, optional definition filePath + line range + preview, and optional doc block. Preview checks one line above definition start for Unreal reflection macros (UCLASS|UPROPERTY|UFUNCTION|UENUM).",
+                "modelDescription": "Use when you have an absolute file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires absolute filePath and position (line, character, both 1-based). Optional includeDocumentation controls doc payload (default true). Returns readable text and, by default, structured JSON payload. Output includes symbol/kind/signature, optional absolute definition filePath + line range + preview, and optional doc block. Preview checks one line above definition start for Unreal reflection macros (UCLASS|UPROPERTY|UFUNCTION|UENUM).",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-method)",
                 "inputSchema": {
@@ -181,7 +181,7 @@
                     "properties": {
                         "filePath": {
                             "type": "string",
-                            "description": "Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\")."
+                            "description": "Absolute path to the file containing the symbol."
                         },
                         "position": {
                             "type": "object",
@@ -223,7 +223,7 @@
                 ],
                 "toolReferenceName": "angelscript_getClassHierarchy",
                 "displayName": "Angelscript Class Hierarchy",
-                "modelDescription": "Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., \"APawn\"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns readable text and, by default, structured JSON payload, including root, supers, derivedByParent, limits, truncated info, and script-class preview text when available.",
+                "modelDescription": "Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., \"APawn\"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns readable text and, by default, structured JSON payload, including root, supers, derivedByParent, limits, truncated info, and script-class preview text when available. If a script source path cannot be resolved, that preview degrades to source unavailable instead of failing the tool.",
                 "userDescription": "Get compact class hierarchy with script class file path and line range.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-class)",
@@ -264,7 +264,7 @@
                 ],
                 "toolReferenceName": "angelscript_findReferences",
                 "displayName": "Angelscript Find References",
-                "modelDescription": "Use when you have a symbol location and need all project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\"). Returns readable text and, by default, structured JSON payload with per-file grouping, 1-based range labels, and preview text.",
+                "modelDescription": "Use when you have a symbol location and need project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires absolute filePath and position (line, character, both 1-based). Optional limit controls the maximum number of returned references (default 30, max 200). Returns readable text and, by default, structured JSON payload with total, returned, limit, truncated, per-file grouping, 1-based range labels, and preview text.",
                 "userDescription": "Find references for the symbol at a given document position.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(references)",
@@ -273,7 +273,7 @@
                     "properties": {
                         "filePath": {
                             "type": "string",
-                            "description": "Path to the file containing the symbol. Supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\")."
+                            "description": "Absolute path to the file containing the symbol."
                         },
                         "position": {
                             "type": "object",
@@ -293,6 +293,13 @@
                                 "line",
                                 "character"
                             ]
+                        },
+                        "limit": {
+                            "type": "number",
+                            "description": "Optional. Maximum number of references to return. Default is 30.",
+                            "minimum": 1,
+                            "maximum": 200,
+                            "default": 30
                         }
                     },
                     "required": [

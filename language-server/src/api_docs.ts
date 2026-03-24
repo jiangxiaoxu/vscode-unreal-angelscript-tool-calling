@@ -3,6 +3,7 @@ import * as typedb from './database';
 import * as documentation from './documentation';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'node:url';
 
 type ApiSearchSource = "native" | "script" | "both";
 
@@ -200,11 +201,27 @@ function getLineFromOffset(content: string, offset: number) : number
     return line;
 }
 
-function getModuleRelativePath(modulename: string) : string
+function getAbsoluteModulePath(module: scriptfiles.ASModule | null) : string
 {
-    if (!modulename || modulename.length == 0)
+    if (!module)
         return "";
-    return modulename.replace(/\./g, "/") + ".as";
+
+    let filename = typeof module.filename === "string" ? module.filename.trim() : "";
+    if (filename.length != 0 && path.isAbsolute(filename))
+        return path.normalize(filename);
+
+    let displayUri = typeof module.displayUri === "string" ? module.displayUri.trim() : "";
+    if (!displayUri.startsWith("file://"))
+        return "";
+
+    try
+    {
+        return path.normalize(fileURLToPath(displayUri));
+    }
+    catch
+    {
+        return "";
+    }
 }
 
 function findLastMatchIndex(text: string, regex: RegExp) : number
@@ -272,12 +289,9 @@ function getScriptClassSourceInfo(dbType: typedb.DBType) : {
 
     let moduleName = dbType.declaredModule;
     let module = scriptfiles.GetModule(moduleName);
-    let fallbackPath = getModuleRelativePath(moduleName);
-    let filePath = fallbackPath;
-    if (module && module.filename && module.filename.length != 0)
-        filePath = path.normalize(module.filename);
+    let filePath = getAbsoluteModulePath(module);
 
-    if (!moduleName || moduleName.length == 0 || (filePath.length == 0 && fallbackPath.length == 0))
+    if (!moduleName || moduleName.length == 0 || filePath.length == 0)
     {
         return {
             source: "as",

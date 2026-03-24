@@ -211,7 +211,7 @@ test('resolveSymbol success renders request fields and preview block', () =>
         ok: true,
         data: {
             request: {
-                filePath: 'Game/Characters/Hero.as',
+                filePath: 'G:/Project/Game/Characters/Hero.as',
                 position: {
                     line: 128,
                     character: 17
@@ -223,7 +223,7 @@ test('resolveSymbol success renders request fields and preview block', () =>
                 kind: 'method',
                 signature: 'void JumpToTarget(AActor Target)',
                 definition: {
-                    filePath: 'Game/Characters/Hero.as',
+                    filePath: 'G:/Project/Game/Characters/Hero.as',
                     startLine: 319,
                     endLine: 323,
                     matchStartLine: 320,
@@ -246,14 +246,14 @@ test('resolveSymbol success renders request fields and preview block', () =>
 
     assert.equal(text, [
         'Angelscript resolve symbol',
-        'file: Game/Characters/Hero.as',
+        'file: G:/Project/Game/Characters/Hero.as',
         'position: 128:17',
         'symbol: JumpToTarget',
         'kind: method',
         'signature: void JumpToTarget(AActor Target)',
-        'definition: Game/Characters/Hero.as:319-323',
+        'definition: G:/Project/Game/Characters/Hero.as:319-323',
         '====',
-        'Game/Characters/Hero.as',
+        'G:/Project/Game/Characters/Hero.as',
         '319-        UFUNCTION(BlueprintCallable)',
         '320:        void JumpToTarget(AActor Target)',
         '321:        {',
@@ -350,7 +350,7 @@ test('getClassHierarchy success renders hierarchy summary and source blocks', ()
                 },
                 AMyHeroCharacter: {
                     source: 'as',
-                    filePath: 'Game/Characters/MyHeroCharacter.as',
+                    filePath: 'G:/Project/Game/Characters/MyHeroCharacter.as',
                     startLine: 12,
                     endLine: 15,
                     preview: [
@@ -379,7 +379,7 @@ test('getClassHierarchy success renders hierarchy summary and source blocks', ()
         'class: AActor',
         'source: cpp',
         '====',
-        'Game/Characters/MyHeroCharacter.as',
+        'G:/Project/Game/Characters/MyHeroCharacter.as',
         'class: AMyHeroCharacter',
         'source: as',
         '12:        class AMyHeroCharacter : AHazeCharacter',
@@ -395,16 +395,20 @@ test('findReferences success renders per-file blocks and ranges', () =>
         ok: true,
         data: {
             total: 2,
+            returned: 2,
+            limit: 30,
+            truncated: false,
             request: {
-                filePath: 'Game/Characters/Hero.as',
+                filePath: 'G:/Project/Game/Characters/Hero.as',
                 position: {
                     line: 128,
                     character: 17
-                }
+                },
+                limit: 30
             },
             references: [
                 {
-                    filePath: 'Game/Characters/Hero.as',
+                    filePath: 'G:/Project/Game/Characters/Hero.as',
                     startLine: 128,
                     endLine: 128,
                     range: {
@@ -414,7 +418,7 @@ test('findReferences success renders per-file blocks and ranges', () =>
                     preview: '    JumpToTarget(TargetActor);'
                 },
                 {
-                    filePath: 'Game/Abilities/JumpAbility.as',
+                    filePath: 'G:/Project/Game/Abilities/JumpAbility.as',
                     startLine: 45,
                     endLine: 45,
                     range: {
@@ -429,19 +433,130 @@ test('findReferences success renders per-file blocks and ranges', () =>
 
     assert.equal(text, [
         'Angelscript references',
-        'file: Game/Characters/Hero.as',
+        'file: G:/Project/Game/Characters/Hero.as',
         'position: 128:17',
-        'count: 2',
+        'total: 2',
+        'returned: 2',
+        'limit: 30',
+        'truncated: false',
         '====',
-        'Game/Characters/Hero.as',
+        'G:/Project/Game/Characters/Hero.as',
         '---',
         'range: 128:5-128:17',
         '128:        JumpToTarget(TargetActor);',
         '====',
-        'Game/Abilities/JumpAbility.as',
+        'G:/Project/Game/Abilities/JumpAbility.as',
         '---',
         'range: 45:10-45:22',
         '45:        Hero.JumpToTarget(TargetActor);'
+    ].join('\n'));
+});
+
+test('findReferences renders truncation metadata and notice', () =>
+{
+    const text = formatToolText('angelscript_findReferences', {
+        ok: true,
+        data: {
+            total: 35,
+            returned: 2,
+            limit: 2,
+            truncated: true,
+            request: {
+                filePath: 'G:/Project/Game/Characters/Hero.as',
+                position: {
+                    line: 128,
+                    character: 17
+                },
+                limit: 2
+            },
+            references: [
+                {
+                    filePath: 'G:/Project/Game/Characters/Hero.as',
+                    startLine: 128,
+                    endLine: 128,
+                    range: {
+                        start: { line: 128, character: 5 },
+                        end: { line: 128, character: 17 }
+                    },
+                    preview: '    JumpToTarget(TargetActor);'
+                },
+                {
+                    filePath: 'G:/Project/Game/Abilities/JumpAbility.as',
+                    startLine: 45,
+                    endLine: 45,
+                    range: {
+                        start: { line: 45, character: 10 },
+                        end: { line: 45, character: 22 }
+                    },
+                    preview: '    Hero.JumpToTarget(TargetActor);'
+                }
+            ]
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript references',
+        'file: G:/Project/Game/Characters/Hero.as',
+        'position: 128:17',
+        'total: 35',
+        'returned: 2',
+        'limit: 2',
+        'truncated: true',
+        '====',
+        'G:/Project/Game/Characters/Hero.as',
+        '---',
+        'range: 128:5-128:17',
+        '128:        JumpToTarget(TargetActor);',
+        '====',
+        'G:/Project/Game/Abilities/JumpAbility.as',
+        '---',
+        'range: 45:10-45:22',
+        '45:        Hero.JumpToTarget(TargetActor);',
+        '====',
+        'Results truncated at limit 2. Refine the symbol location or increase limit to see more references.'
+    ].join('\n'));
+});
+
+test('getClassHierarchy degrades unresolved script preview without failing text output', () =>
+{
+    const text = formatToolText('angelscript_getClassHierarchy', {
+        ok: true,
+        data: {
+            root: 'AMyHeroCharacter',
+            supers: [],
+            limits: {
+                maxSuperDepth: 3,
+                maxSubDepth: 2,
+                maxSubBreadth: 10
+            },
+            truncated: {
+                supers: false,
+                derivedDepth: false,
+                derivedBreadthByClass: {}
+            },
+            derivedByParent: {},
+            sourceByClass: {
+                AMyHeroCharacter: {
+                    source: 'as',
+                    startLine: 12,
+                    endLine: 15,
+                    preview: '<source unavailable>'
+                }
+            }
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript class hierarchy',
+        'root: AMyHeroCharacter',
+        'supers: <none>',
+        'limits: super=3, subDepth=2, subBreadth=10',
+        'truncated: supers=false, derivedDepth=false',
+        '====',
+        'AMyHeroCharacter',
+        'class: AMyHeroCharacter',
+        'source: as',
+        '<source unavailable>'
     ].join('\n'));
 });
 
