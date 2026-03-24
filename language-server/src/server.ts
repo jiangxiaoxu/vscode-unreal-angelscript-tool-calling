@@ -45,6 +45,7 @@ import * as inlinevalues from './inline_values';
 import * as colorpicker from './color_picker';
 import * as typehierarchy from './type_hierarchy';
 import * as api_docs from './api_docs';
+import * as api_search from './api_search';
 import * as cache from './cache';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -183,6 +184,7 @@ function connect_unreal()
 
                 let scriptSettings = scriptfiles.GetScriptSettings()
                 typedb.AddPrimitiveTypes(scriptSettings.floatIsFloat64);
+                api_search.InvalidateAPISearchCache();
 
                 // Make sure no modules are resolved anymore
                 if (PendingReResolveAfterInitialParse)
@@ -242,6 +244,7 @@ function connect_unreal()
                     scriptSettings.deprecateActorGenerics = msg.readBool();
                     scriptSettings.disallowActorGenerics = msg.readBool();
                 }
+                api_search.InvalidateAPISearchCache();
                 ScheduleUnrealCacheWrite();
             }
             else if(msg.type == MessageType.ReplaceAssetDefinition)
@@ -347,6 +350,7 @@ function ResetUnrealCacheState()
 {
     DebugDatabaseChunks = [];
     DebugDatabaseComplete = false;
+    api_search.InvalidateAPISearchCache();
 }
 
 function ResolveScriptRoot(workspaceRoot : string) : string
@@ -448,6 +452,7 @@ function LoadCacheFromDisk()
 
         let scriptSettings = scriptfiles.GetScriptSettings();
         typedb.AddPrimitiveTypes(scriptSettings.floatIsFloat64);
+        api_search.InvalidateAPISearchCache();
 
     }
 
@@ -1386,30 +1391,26 @@ connection.onRequest("angelscript/getAPI", (root : string) : any => {
 });
 
 connection.onRequest("angelscript/getAPISearch", (payload : any) : any => {
-    if (!payload || typeof payload !== "object")
-        return new ResponseError<void>(0, "Invalid params. Provide { filter: string, source?: 'native' | 'script' | 'both' }.");
-
-    if (typeof payload.filter !== "string")
-        return new ResponseError<void>(0, "Invalid params. 'filter' must be a string.");
-
-    let filter = payload.filter;
-    let source: string | undefined = undefined;
-    if (payload.source !== undefined)
+    let runSearch = function()
     {
-        if (typeof payload.source !== "string")
-            return new ResponseError<void>(0, "Invalid params. 'source' must be a string.");
-        let normalizedSource = payload.source.trim().toLowerCase();
-        if (normalizedSource != "native" && normalizedSource != "script" && normalizedSource != "both")
-            return new ResponseError<void>(0, "Invalid params. 'source' must be 'native', 'script', or 'both'.");
-        source = normalizedSource;
-    }
+        try
+        {
+            return api_search.GetAPISearch(payload);
+        }
+        catch (error)
+        {
+            if (error instanceof api_search.ApiSearchValidationError)
+                return new ResponseError<void>(0, error.message);
+            throw error;
+        }
+    };
 
     if (typedb.HasTypesFromUnreal())
-        return api_docs.GetAPISearch(filter, source);
+        return runSearch();
 
     function timerFunc(resolve : any, reject : any, triesLeft : number) {
         if (typedb.HasTypesFromUnreal())
-            return resolve(api_docs.GetAPISearch(filter, source));
+            return resolve(runSearch());
         setTimeout(function() { timerFunc(resolve, reject, triesLeft-1); }, 100);
     }
     let promise = new Promise<any>(function(resolve, reject)

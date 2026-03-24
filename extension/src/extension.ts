@@ -14,13 +14,16 @@ import * as vscode from 'vscode';
 import { WorkspaceFolder, DebugConfiguration, ProviderResult, CancellationToken } from 'vscode';
 import { ASDebugSession } from './debug';
 import * as Net from 'net';
-import { SearchSource } from './angelscriptApiSearch';
 import {
     GetAPIRequest,
     GetAPIDetailsRequest,
+    GetAPISearchLspMatch,
+    GetAPISearchLspResult,
     GetAPISearchRequest,
     GetModuleForSymbolRequest,
     ProvideInlineValuesRequest,
+    SearchKind,
+    SearchSource
 } from './apiRequests';
 import { registerLmTools } from './toolRegistry';
 
@@ -537,6 +540,44 @@ class ASApiDetailsProvider implements vscode.WebviewViewProvider
     }
 }
 
+function getSearchMatchShortName(match: GetAPISearchLspMatch): string
+{
+    const dotIndex = match.qualifiedName.lastIndexOf('.');
+    if (dotIndex !== -1 && (match.kind === 'method' || match.kind === 'property'))
+        return match.qualifiedName.substring(dotIndex + 1);
+
+    const namespaceIndex = match.qualifiedName.lastIndexOf('::');
+    if (namespaceIndex !== -1)
+        return match.qualifiedName.substring(namespaceIndex + 2);
+
+    return match.qualifiedName;
+}
+
+function getSearchMatchLabel(match: GetAPISearchLspMatch): string
+{
+    if (match.kind === 'method' || match.kind === 'function')
+        return `${match.qualifiedName}()`;
+    return match.qualifiedName;
+}
+
+function getSearchMatchIcon(match: GetAPISearchLspMatch): vscode.ThemeIcon
+{
+    if (match.kind === 'class')
+        return new vscode.ThemeIcon('symbol-class', new vscode.ThemeColor('charts.cyan'));
+    if (match.kind === 'struct')
+        return new vscode.ThemeIcon('symbol-struct', new vscode.ThemeColor('charts.cyan'));
+    if (match.kind === 'enum')
+        return new vscode.ThemeIcon('symbol-enum', new vscode.ThemeColor('charts.cyan'));
+    if (match.kind === 'method' || match.kind === 'function')
+        return new vscode.ThemeIcon('symbol-function', new vscode.ThemeColor('terminal.ansiBrightYellow'));
+    return new vscode.ThemeIcon('symbol-field', new vscode.ThemeColor('terminal.ansiBrightCyan'));
+}
+
+function getSearchMatchId(match: GetAPISearchLspMatch): string
+{
+    return `${match.kind}|${match.qualifiedName}|${match.signature}`;
+}
+
 class ASApiTreeProvider implements vscode.TreeDataProvider<ASApiItem>
 {
     client: LanguageClient;
@@ -568,17 +609,43 @@ class ASApiTreeProvider implements vscode.TreeDataProvider<ASApiItem>
             request = this.client.sendRequest(GetAPIRequest, element.id);
         else if (this.search)
             request = this.client.sendRequest(GetAPISearchRequest, {
-                filter: this.search,
+                query: this.search,
+                mode: 'smart',
+                limit: 500,
                 source: this.searchSource
             });
         else
             request = this.client.sendRequest(GetAPIRequest, "");
 
         return request.then(
-            function (values: any[])
+            function (values: any[] | GetAPISearchLspResult)
             {
                 let items = new Array<ASApiItem>();
-                for (let api of values)
+                const searchMatches = Array.isArray(values) ? null : values.matches;
+
+                if (searchMatches)
+                {
+                    for (let match of searchMatches)
+                    {
+                        let item = new ASApiItem(getSearchMatchLabel(match), vscode.TreeItemCollapsibleState.None);
+                        item.id = getSearchMatchId(match);
+                        item.data = match.detailsData;
+                        item.type = match.kind;
+                        item.iconPath = getSearchMatchIcon(match);
+                        if (match.detailsData)
+                        {
+                            item.command = {
+                                "title": "View Details",
+                                "command": "angelscript-api-list.view-details",
+                                "arguments": [match.detailsData],
+                            };
+                        }
+                        items.push(item);
+                    }
+                    return items;
+                }
+
+                for (let api of values as any[])
                 {
                     if (api.type == "namespace")
                     {

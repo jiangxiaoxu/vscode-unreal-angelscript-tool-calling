@@ -1,31 +1,35 @@
-export type LmTextResultPartSpec = {
+export type LmToolOutputMode = 'text+structured' | 'text-only';
+
+export type LmToolResultPartSpec = {
     type: 'text';
     text: string;
+} | {
+    type: 'json';
+    value: unknown;
 };
 
-export type McpTextToolResponse = {
-    content: Array<{
-        type: 'text';
-        text: string;
-    }>;
-    isError?: true;
-};
-
-export function buildLmTextResultPartSpecs(text: string): LmTextResultPartSpec[]
+export function buildLmToolResultPartSpecs(
+    text: string,
+    payload: unknown,
+    mode: LmToolOutputMode
+): LmToolResultPartSpec[]
 {
-    return [{
-        type: 'text',
-        text
-    }];
-}
-
-export function buildMcpTextToolResponse(text: string, isError: boolean): McpTextToolResponse
-{
-    return {
-        content: [{
+    if (mode === 'text-only')
+    {
+        return [{
             type: 'text',
             text
-        }],
-        ...(isError ? { isError: true as const } : {})
-    };
+        }];
+    }
+
+    return [
+        {
+            type: 'text',
+            text
+        },
+        {
+            type: 'json',
+            value: payload
+        }
+    ];
 }

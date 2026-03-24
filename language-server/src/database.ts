@@ -1978,6 +1978,11 @@ export function OnDirtyTypeCaches()
     DirtyTypeCacheId++;
 }
 
+export function GetDirtyTypeCacheId() : number
+{
+    return DirtyTypeCacheId;
+}
+
 let UnrealTypesLoaded = false;
 let RootNamespace = new DBNamespace;
 let TypesById = new Map<number, DBType>();
@@ -2437,6 +2442,20 @@ function GetTypenameCharPrefix(typename : string) : string
 
 let DatabaseFloatIsFloat64 = false;
 let PrimitiveAliases = new Map<string, string>();
+
+export function ResetDatabaseForTests()
+{
+    UnrealTypesLoaded = false;
+    RootNamespace = new DBNamespace();
+    TypesById = new Map<number, DBType>();
+    NamespacesByFullName = new Map<string, DBNamespace>([["", RootNamespace]]);
+    TypesByName = new Map<string, DBType | Array<DBType>>();
+    PrimitiveAliases = new Map<string, string>();
+    DatabaseFloatIsFloat64 = false;
+    NextMethodId = 1;
+    NextTypeId = 1;
+    OnDirtyTypeCaches();
+}
 
 export function AddPrimitiveTypes(floatIsFloat64 : boolean)
 {

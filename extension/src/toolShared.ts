@@ -5,13 +5,12 @@ import { promises as fs } from 'node:fs';
 import * as path from 'path';
 import {
     AngelscriptSearchParams,
-    ApiErrorPayload,
-    ApiResponsePayload,
-    SearchSource,
     buildSearchPayload,
-    toApiErrorPayload
+    toApiSearchToolFailure
 } from './angelscriptApiSearch';
 import {
+    GetAPISearchResult,
+    GetAPISearchToolData,
     ToolFailure,
     ToolResult,
     GetTypeMembersParams,
@@ -35,9 +34,8 @@ import {
     ResolveSymbolAtPositionResult
 } from './apiRequests';
 
-export type SearchOutputPayload = ApiResponsePayload & {
+export type SearchOutputPayload = GetAPISearchToolData & {
     text?: string;
-    request?: Record<string, unknown>;
 };
 
 type LspLocation = {
@@ -617,36 +615,6 @@ async function buildFindReferencesItems(references: ResolvedReferenceLocation[])
     return items;
 }
 
-export function formatSearchPayloadForOutput(
-    payload: ApiResponsePayload,
-    input: Partial<AngelscriptSearchParams> | null | undefined
-): SearchOutputPayload
-{
-    const labelQuery = typeof input?.labelQuery === 'string' ? input.labelQuery.trim() : payload.labelQuery;
-    const searchIndex = Number.isFinite(Number(input?.searchIndex)) ? Number(input?.searchIndex) : payload.searchIndex;
-    const maxBatchResults = typeof input?.maxBatchResults === 'number' ? input?.maxBatchResults : 200;
-    const request: Record<string, unknown> = {
-        labelQuery,
-        searchIndex,
-        maxBatchResults,
-        kinds: input?.kinds,
-        source: input?.source ?? 'both',
-        labelQueryUseRegex: input?.labelQueryUseRegex === true
-    };
-    const signatureRegex = typeof input?.signatureRegex === 'string' ? input.signatureRegex.trim() : '';
-    if (signatureRegex)
-    {
-        request.signatureRegex = signatureRegex;
-    }
-    const output: SearchOutputPayload = {
-        ...payload,
-        request
-    };
-    if (!payload.items || payload.items.length === 0)
-        output.text = `No Angelscript API results for "${labelQuery}".`;
-    return output;
-}
-
 function makeError(code: string, message: string, details?: Record<string, unknown>): ToolFailure
 {
     return {
@@ -677,18 +645,6 @@ function makeErrorFromLsp(
             retryable: error.retryable,
             hint: error.hint,
             details
-        }
-    };
-}
-
-function makeErrorFromApiPayload(payload: ApiErrorPayload): ToolFailure
-{
-    return {
-        ok: false,
-        error: {
-            code: payload.error.code,
-            message: payload.error.message,
-            details: payload.error.details
         }
     };
 }
@@ -784,46 +740,37 @@ export async function runSearchApi(
     startedClient: Promise<void>,
     input: unknown,
     shouldCancel?: () => boolean
-): Promise<ToolResult<SearchOutputPayload>>
+): Promise<GetAPISearchResult>
 {
     const raw = input as Partial<AngelscriptSearchParams> | null | undefined;
-    const labelQuery = typeof raw?.labelQuery === 'string' ? raw.labelQuery.trim() : '';
-    if (!labelQuery)
+    const query = typeof raw?.query === 'string' ? raw.query.trim() : '';
+    if (!query)
     {
-        return makeError('MISSING_LABEL_QUERY', 'Missing labelQuery. Please provide labelQuery.');
+        return makeError('MISSING_QUERY', 'Missing query. Please provide query.');
     }
-    const searchIndex = Number(raw?.searchIndex);
-    const maxBatchResults = typeof raw?.maxBatchResults === 'number' ? raw.maxBatchResults : undefined;
-    const source = typeof raw?.source === 'string' ? raw.source : undefined;
-    const kinds = Array.isArray(raw?.kinds) ? raw?.kinds : undefined;
 
     try
     {
         await startedClient;
-        const payload = await buildSearchPayload(
-            client,
-            {
-                labelQuery,
-                searchIndex,
-                maxBatchResults,
-                includeDocs: raw?.includeDocs,
-                kinds,
-                source: source as SearchSource | undefined,
-                labelQueryUseRegex: raw?.labelQueryUseRegex,
-                signatureRegex: raw?.signatureRegex
-            },
-            shouldCancel ?? (() => false)
-        );
         return {
             ok: true,
-            data: formatSearchPayloadForOutput(payload, raw)
+            data: await buildSearchPayload(client, {
+                query,
+                mode: raw?.mode,
+                limit: raw?.limit,
+                kinds: Array.isArray(raw?.kinds) ? raw.kinds : undefined,
+                source: raw?.source,
+                scopePrefix: raw?.scopePrefix,
+                includeInheritedFromScope: raw?.includeInheritedFromScope,
+                includeInternal: raw?.includeInternal
+            })
         };
     }
     catch (error)
     {
-        const apiError = toApiErrorPayload(error);
+        const apiError = toApiSearchToolFailure(error);
         if (apiError)
-            return makeErrorFromApiPayload(apiError);
+            return makeError(apiError.code, apiError.message, apiError.details);
         console.error("angelscript_searchApi tool failed:", error);
         return makeError('INTERNAL_ERROR', 'The Angelscript API tool failed to run. Please ensure the language server is running and try again.');
     }

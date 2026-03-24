@@ -1,5 +1,4 @@
 import { RequestType, RequestType0, TextDocumentPositionParams } from 'vscode-languageclient/node';
-import { SearchSource } from './angelscriptApiSearch';
 
 export const GetModuleForSymbolRequest = new RequestType<TextDocumentPositionParams, string, void>('angelscript/getModuleForSymbol');
 export const GetUnrealConnectionStatusRequest = new RequestType0<boolean, void>('angelscript/getUnrealConnectionStatus');
@@ -25,6 +24,86 @@ export type ToolSuccess<TData> = {
 };
 
 export type ToolResult<TData> = ToolSuccess<TData> | ToolFailure;
+
+export type SearchMode = 'smart' | 'exact' | 'regex';
+export type SearchSource = 'native' | 'script' | 'both';
+export type SearchMatchSource = 'native' | 'script';
+export type SearchKind = 'class' | 'struct' | 'enum' | 'method' | 'function' | 'property' | 'globalVariable';
+export type SearchScopeKind = 'namespace' | 'class' | 'struct' | 'enum';
+export type SearchScopeRelationship = 'declared' | 'inherited' | 'mixin';
+
+export type GetAPISearchParams = {
+    query: string;
+    mode?: SearchMode;
+    limit?: number;
+    kinds?: SearchKind[];
+    source?: SearchSource;
+    scopePrefix?: string;
+    includeInheritedFromScope?: boolean;
+    includeInternal?: boolean;
+};
+
+export type GetAPISearchNotice = {
+    code: string;
+    message: string;
+};
+
+export type InheritedScopeOutcome =
+    | 'applied'
+    | 'ignored_missing_scope_prefix'
+    | 'ignored_scope_not_found'
+    | 'ignored_scope_not_class'
+    | 'ignored_scope_ambiguous';
+
+export type GetAPISearchScopeLookup = {
+    requestedPrefix: string;
+    resolvedQualifiedName?: string;
+    resolvedKind?: SearchScopeKind;
+    ambiguousCandidates?: string[];
+};
+
+export type GetAPISearchLspMatch = {
+    qualifiedName: string;
+    kind: SearchKind;
+    signature: string;
+    summary?: string;
+    containerQualifiedName?: string;
+    source: SearchMatchSource;
+    isMixin?: boolean;
+    scopeRelationship?: SearchScopeRelationship;
+    scopeDistance?: number;
+    detailsData?: unknown;
+};
+
+export type GetAPISearchToolMatch = Omit<GetAPISearchLspMatch, 'detailsData'>;
+
+export type GetAPISearchLspResult = {
+    matches: GetAPISearchLspMatch[];
+    notices?: GetAPISearchNotice[];
+    scopeLookup?: GetAPISearchScopeLookup;
+    inheritedScopeOutcome?: InheritedScopeOutcome;
+};
+
+export type GetAPISearchToolData = {
+    matches: GetAPISearchToolMatch[];
+    notices?: GetAPISearchNotice[];
+    scopeLookup?: GetAPISearchScopeLookup;
+    inheritedScopeOutcome?: InheritedScopeOutcome;
+    request?: {
+        query: string;
+        mode: SearchMode;
+        limit: number;
+        kinds?: SearchKind[];
+        source: SearchSource;
+        scopePrefix?: string;
+        includeInheritedFromScope: boolean;
+        includeInternal: boolean;
+    };
+};
+
+export type GetAPISearchResult = ToolResult<GetAPISearchToolData>;
+
+export const GetAPISearchRequest = new RequestType<GetAPISearchParams, GetAPISearchLspResult, void>('angelscript/getAPISearch');
 
 export type GetTypeMembersParams = {
     name: string;
@@ -142,11 +221,6 @@ export type GetTypeHierarchyToolData = {
 export type GetTypeHierarchyResult = ToolResult<GetTypeHierarchyToolData>;
 
 export const GetTypeHierarchyRequest = new RequestType<GetTypeHierarchyParams, GetTypeHierarchyLspResult, void>('angelscript/getTypeHierarchy');
-export type GetAPISearchParams = {
-    filter: string;
-    source?: SearchSource;
-};
-export const GetAPISearchRequest = new RequestType<GetAPISearchParams, any[], void>('angelscript/getAPISearch');
 export type ResolveSymbolAtPositionParams = {
     uri: string;
     position: {

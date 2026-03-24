@@ -1,7 +1,12 @@
 import * as path from 'path';
-import * as vscode from 'vscode';
 
 type UnknownRecord = Record<string, unknown>;
+type WorkspaceFolderLike = {
+    name: string;
+    uri: {
+        fsPath: string;
+    };
+};
 
 const MAX_LIST_ITEMS = 50;
 const MAX_BLOCK_LINES = 40;
@@ -78,8 +83,8 @@ function formatPathForTextOutput(filePath: string): string
     if (!path.isAbsolute(normalizedPath))
         return toDisplayPath(normalizedPath);
 
-    const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
-    let bestFolder: vscode.WorkspaceFolder | null = null;
+    const workspaceFolders = getWorkspaceFolders();
+    let bestFolder: WorkspaceFolderLike | null = null;
     let bestRootPath = '';
 
     for (const workspaceFolder of workspaceFolders)
@@ -102,6 +107,19 @@ function formatPathForTextOutput(filePath: string): string
         return bestFolder.name;
 
     return `${bestFolder.name}/${toDisplayPath(relativePath)}`;
+}
+
+function getWorkspaceFolders(): readonly WorkspaceFolderLike[]
+{
+    try
+    {
+        const vscode = require('vscode') as typeof import('vscode');
+        return vscode.workspace.workspaceFolders ?? [];
+    }
+    catch
+    {
+        return [];
+    }
 }
 
 function toDisplayValue(value: unknown): string
@@ -279,55 +297,83 @@ function formatSearchApiSuccess(data: UnknownRecord): string
 {
     const lines: string[] = ['Angelscript API search'];
     const request = asRecord(data.request);
-    const query = asString(data.labelQuery) ?? asString(request?.labelQuery) ?? '<empty>';
+    const query = asString(request?.query) ?? '<empty>';
+    const mode = asString(request?.mode) ?? 'smart';
+    const limit = asNumber(request?.limit);
     const source = asString(request?.source) ?? 'both';
     const kinds = asArray(request?.kinds)?.map((item) => asString(item) ?? toDisplayValue(item)).filter(Boolean) as string[] | undefined;
-    const total = asNumber(data.total);
-    const returned = asNumber(data.returned);
-    const remaining = asNumber(data.remainingCount);
-    const searchIndex = asNumber(data.searchIndex);
-    const nextSearchIndex = data.nextSearchIndex;
-    const truncated = asBoolean(data.truncated);
+    const scopePrefix = asString(request?.scopePrefix);
+    const includeInheritedFromScope = asBoolean(request?.includeInheritedFromScope);
+    const includeInternal = asBoolean(request?.includeInternal);
+    const matches = asArray(data.matches) ?? [];
+    const notices = asArray(data.notices) ?? [];
+    const scopeLookup = asRecord(data.scopeLookup);
+    const inheritedScopeOutcome = asString(data.inheritedScopeOutcome);
 
     pushValue(lines, 'query', query);
+    pushValue(lines, 'mode', mode);
+    pushValue(lines, 'limit', limit);
     pushValue(lines, 'source', formatSearchSourceLabel(source));
     if (kinds && kinds.length > 0)
         pushValue(lines, 'kinds', kinds.join('|'));
-    if (returned !== null || total !== null)
-        pushValue(lines, 'count', `${returned ?? 0}/${total ?? returned ?? 0}`);
-    pushValue(lines, 'searchIndex', searchIndex);
-    pushValue(lines, 'nextSearchIndex', nextSearchIndex === null ? 'null' : nextSearchIndex);
-    pushValue(lines, 'remaining', remaining);
-    pushValue(lines, 'truncated', truncated);
+    pushValue(lines, 'scopePrefix', scopePrefix);
+    pushValue(lines, 'includeInheritedFromScope', includeInheritedFromScope);
+    pushValue(lines, 'includeInternal', includeInternal);
+    pushValue(lines, 'inheritedScopeOutcome', inheritedScopeOutcome);
+    pushValue(lines, 'count', matches.length);
 
-    const message = asString(data.text);
-    if (message)
-        pushValue(lines, 'message', message);
+    if (scopeLookup)
+    {
+        const resolvedKind = asString(scopeLookup.resolvedKind);
+        const resolvedQualifiedName = asString(scopeLookup.resolvedQualifiedName);
+        if (resolvedKind && resolvedQualifiedName)
+            pushValue(lines, 'scopeLookup', `${resolvedKind} ${resolvedQualifiedName}`);
+        else
+            pushValue(lines, 'scopeLookup', scopePrefix ? '<unresolved>' : undefined);
+    }
 
-    const items = asArray(data.items) ?? [];
-    if (items.length === 0)
+    if (notices.length > 0)
+    {
+        lines.push('====');
+        lines.push('notices');
+        for (const item of notices)
+        {
+            const record = asRecord(item);
+            lines.push('---');
+            pushValue(lines, 'code', asString(record?.code) ?? 'UNKNOWN');
+            pushValue(lines, 'message', asString(record?.message) ?? 'Unknown notice.');
+        }
+    }
+
+    if (matches.length === 0)
     {
         lines.push('No matches found.');
         return finalize(lines);
     }
 
-    const limited = limitArray(items);
+    const limited = limitArray(matches);
     lines.push('====');
-    lines.push('results');
+    lines.push('matches');
     for (const item of limited.items)
     {
         const record = asRecord(item);
         lines.push('---');
+        pushValue(lines, 'qualifiedName', asString(record?.qualifiedName) ?? '<unknown>');
+        pushValue(lines, 'kind', asString(record?.kind) ?? 'unknown');
+        pushValue(lines, 'source', asString(record?.source) ?? 'unknown');
+        pushValue(lines, 'isMixin', asBoolean(record?.isMixin));
+        pushValue(lines, 'container', asString(record?.containerQualifiedName));
+        pushValue(lines, 'scopeRelationship', asString(record?.scopeRelationship));
+        pushValue(lines, 'scopeDistance', asNumber(record?.scopeDistance));
         pushValue(lines, 'signature', asString(record?.signature) ?? '<unknown signature>');
-        pushValue(lines, 'type', asString(record?.type));
-        const docs = asString(record?.docs);
-        if (docs && docs.trim())
-            pushTextBlock(lines, 'docs', docs);
+        const summary = asString(record?.summary);
+        if (summary && summary.trim())
+            pushTextBlock(lines, 'summary', summary);
     }
     if (limited.omitted > 0)
     {
         lines.push('---');
-        lines.push(`... and ${limited.omitted} more results`);
+        lines.push(`... and ${limited.omitted} more matches`);
     }
     return finalize(lines);
 }

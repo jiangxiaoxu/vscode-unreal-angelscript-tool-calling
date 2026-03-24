@@ -39,26 +39,44 @@ test('searchApi success is rendered in qgrep-style text', () =>
     const text = formatToolText('angelscript_searchApi', {
         ok: true,
         data: {
-            labelQuery: 'MovementComponent',
-            searchIndex: 0,
-            nextSearchIndex: 2,
-            remainingCount: 15,
-            total: 17,
-            returned: 2,
-            truncated: false,
             request: {
+                query: 'MovementComponent',
+                mode: 'smart',
+                limit: 20,
                 source: 'both',
-                kinds: ['class', 'method']
+                kinds: ['class', 'method'],
+                scopePrefix: 'Gameplay::Movement',
+                includeInheritedFromScope: true,
+                includeInternal: false
             },
-            items: [
+            scopeLookup: {
+                requestedPrefix: 'Gameplay::Movement',
+                resolvedQualifiedName: 'Gameplay::Movement::UMovementComponent',
+                resolvedKind: 'class'
+            },
+            inheritedScopeOutcome: 'applied',
+            notices: [
                 {
-                    signature: 'UMovementComponent',
-                    type: 'class'
+                    code: 'SCOPE_INHERITANCE_EMPTY',
+                    message: 'Scope "Gameplay::Movement::UMovementComponent" has no inherited members to expand.'
+                }
+            ],
+            matches: [
+                {
+                    qualifiedName: 'Gameplay::Movement::UMovementComponent',
+                    kind: 'class',
+                    source: 'native',
+                    signature: 'class Gameplay::Movement::UMovementComponent'
                 },
                 {
-                    signature: 'void UMovementComponent::StartMovement()',
-                    type: 'method',
-                    docs: 'Starts movement on the current actor.'
+                    qualifiedName: 'Gameplay::Movement::UMovementComponent.StartMovement',
+                    kind: 'method',
+                    source: 'script',
+                    containerQualifiedName: 'Gameplay::Movement::UMovementComponent',
+                    scopeRelationship: 'declared',
+                    scopeDistance: 0,
+                    signature: 'void Gameplay::Movement::UMovementComponent.StartMovement()',
+                    summary: 'Starts movement on the current actor.'
                 }
             ]
         }
@@ -67,22 +85,37 @@ test('searchApi success is rendered in qgrep-style text', () =>
     assert.equal(text, [
         'Angelscript API search',
         'query: MovementComponent',
+        'mode: smart',
+        'limit: 20',
         'source: native|script',
         'kinds: class|method',
-        'count: 2/17',
-        'searchIndex: 0',
-        'nextSearchIndex: 2',
-        'remaining: 15',
-        'truncated: false',
+        'scopePrefix: Gameplay::Movement',
+        'includeInheritedFromScope: true',
+        'includeInternal: false',
+        'inheritedScopeOutcome: applied',
+        'count: 2',
+        'scopeLookup: class Gameplay::Movement::UMovementComponent',
         '====',
-        'results',
+        'notices',
         '---',
-        'signature: UMovementComponent',
-        'type: class',
+        'code: SCOPE_INHERITANCE_EMPTY',
+        'message: Scope "Gameplay::Movement::UMovementComponent" has no inherited members to expand.',
+        '====',
+        'matches',
         '---',
-        'signature: void UMovementComponent::StartMovement()',
-        'type: method',
-        'docs:',
+        'qualifiedName: Gameplay::Movement::UMovementComponent',
+        'kind: class',
+        'source: native',
+        'signature: class Gameplay::Movement::UMovementComponent',
+        '---',
+        'qualifiedName: Gameplay::Movement::UMovementComponent.StartMovement',
+        'kind: method',
+        'source: script',
+        'container: Gameplay::Movement::UMovementComponent',
+        'scopeRelationship: declared',
+        'scopeDistance: 0',
+        'signature: void Gameplay::Movement::UMovementComponent.StartMovement()',
+        'summary:',
         'Starts movement on the current actor.'
     ].join('\n'));
 });
@@ -92,17 +125,13 @@ test('searchApi source keeps native and script labels unchanged', () =>
     const nativeText = formatToolText('angelscript_searchApi', {
         ok: true,
         data: {
-            labelQuery: 'MovementComponent',
-            searchIndex: 0,
-            nextSearchIndex: null,
-            remainingCount: 0,
-            total: 0,
-            returned: 0,
-            truncated: false,
             request: {
+                query: 'MovementComponent',
+                mode: 'smart',
+                limit: 20,
                 source: 'native'
             },
-            items: []
+            matches: []
         }
     });
     assert.match(nativeText, /source: native/u);
@@ -110,20 +139,74 @@ test('searchApi source keeps native and script labels unchanged', () =>
     const scriptText = formatToolText('angelscript_searchApi', {
         ok: true,
         data: {
-            labelQuery: 'MovementComponent',
-            searchIndex: 0,
-            nextSearchIndex: null,
-            remainingCount: 0,
-            total: 0,
-            returned: 0,
-            truncated: false,
             request: {
+                query: 'MovementComponent',
+                mode: 'smart',
+                limit: 20,
                 source: 'script'
             },
-            items: []
+            matches: []
         }
     });
     assert.match(scriptText, /source: script/u);
+});
+
+test('searchApi renders mixin metadata in text output', () =>
+{
+    const text = formatToolText('angelscript_searchApi', {
+        ok: true,
+        data: {
+            request: {
+                query: 'UMovementDerived ApplyDerivedMovement',
+                mode: 'smart',
+                limit: 20,
+                source: 'both',
+                kinds: ['function'],
+                scopePrefix: 'Gameplay::Movement::UMovementDerived',
+                includeInheritedFromScope: true,
+                includeInternal: false
+            },
+            matches: [
+                {
+                    qualifiedName: 'Gameplay::Movement::ApplyDerivedMovement',
+                    kind: 'function',
+                    source: 'script',
+                    isMixin: true,
+                    containerQualifiedName: 'Gameplay::Movement',
+                    scopeRelationship: 'mixin',
+                    scopeDistance: 0,
+                    signature: 'void UMovementDerived.ApplyDerivedMovement(float Scale)',
+                    summary: 'Applies derived movement through a mixin.'
+                }
+            ]
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript API search',
+        'query: UMovementDerived ApplyDerivedMovement',
+        'mode: smart',
+        'limit: 20',
+        'source: native|script',
+        'kinds: function',
+        'scopePrefix: Gameplay::Movement::UMovementDerived',
+        'includeInheritedFromScope: true',
+        'includeInternal: false',
+        'count: 1',
+        '====',
+        'matches',
+        '---',
+        'qualifiedName: Gameplay::Movement::ApplyDerivedMovement',
+        'kind: function',
+        'source: script',
+        'isMixin: true',
+        'container: Gameplay::Movement',
+        'scopeRelationship: mixin',
+        'scopeDistance: 0',
+        'signature: void UMovementDerived.ApplyDerivedMovement(float Scale)',
+        'summary:',
+        'Applies derived movement through a mixin.'
+    ].join('\n'));
 });
 
 test('resolveSymbol success renders request fields and preview block', () =>
@@ -372,14 +455,14 @@ test('searchApi error renders title and code', () =>
         formatToolText('angelscript_searchApi', {
             ok: false,
             error: {
-                code: 'MISSING_LABEL_QUERY',
-                message: 'Missing labelQuery. Please provide labelQuery.'
+                code: 'MISSING_QUERY',
+                message: 'Missing query. Please provide query.'
             }
         }),
         [
             'Angelscript API search',
-            'error: Missing labelQuery. Please provide labelQuery.',
-            'code: MISSING_LABEL_QUERY'
+            'error: Missing query. Please provide query.',
+            'code: MISSING_QUERY'
         ].join('\n')
     );
 });

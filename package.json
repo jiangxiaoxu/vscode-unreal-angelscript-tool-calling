@@ -46,39 +46,33 @@
                 ],
                 "toolReferenceName": "angelscript_searchApi",
                 "displayName": "Angelscript API Search",
-                "modelDescription": "Use when you need to discover Angelscript API symbols or docs by keyword and filters before you know the exact symbol. Do not use when you already have a concrete file position and need symbol resolution. Requires labelQuery and searchIndex. Query supports fuzzy syntax: space for ordered tokens (\"a b\" => a...b), \"|\" for OR, and separator constraints with \".\" or \"::\" (exact when adjacent, still fuzzy when separated by space, e.g. \"UObject .\", \"Math ::\"). Optional filters: kinds (class|struct|enum|method|function|property|globalVariable, case-insensitive, multi-value), source (native|script|both, default both), includeDocs, maxBatchResults (default 200). Regex support: labelQueryUseRegex applies regex to labels after kind filtering (supports /pattern/flags; omit i for case-sensitive; non-literal defaults to ignore case), and signatureRegex filters parsed signatures with the same regex syntax. Returns qgrep-style plain text only.",
+                "modelDescription": "Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires query. Optional controls: mode (smart|exact|regex, default smart), limit (default 20, max 200), kinds (class|struct|enum|method|function|property|globalVariable), source (native|script|both, default both), scopePrefix, includeInheritedFromScope, includeInternal. Function results include namespace/global functions and mixin functions. Regex mode matches short names, canonical qualified names, and mixin member-view aliases only. When includeInheritedFromScope is requested, the top-level result may include inheritedScopeOutcome. Returns readable text and, by default, structured JSON payload.",
                 "userDescription": "Search Angelscript API symbols and docs.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(search)",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "labelQuery": {
+                        "query": {
                             "type": "string",
-                            "description": "Search query text for Angelscript API symbols."
+                            "description": "Search query for Angelscript API symbols."
                         },
-                        "searchIndex": {
-                            "type": "number",
-                            "description": "0-based start index for paged results."
-                        },
-                        "maxBatchResults": {
-                            "type": "number",
-                            "description": "Optional. Maximum number of results to return in this batch. Default is 200.",
-                            "default": 200
-                        },
-                        "includeDocs": {
-                            "type": "boolean",
-                            "description": "Optional. Include documentation text in the docs field. Default is false.",
-                            "default": false
-                        },
-                        "labelQueryUseRegex": {
-                            "type": "boolean",
-                            "description": "Optional. Treat labelQuery as a regular expression applied to labels after kind filtering. Supports /pattern/flags (omit i for case-sensitive). If not using /pattern/flags, default ignore case. Default is false.",
-                            "default": false
-                        },
-                        "signatureRegex": {
+                        "mode": {
                             "type": "string",
-                            "description": "Optional. Regular expression to filter parsed signatures. Supports /pattern/flags (omit i for case-sensitive). If not using /pattern/flags, default ignore case."
+                            "description": "Optional. Search mode. Default is smart.",
+                            "enum": [
+                                "smart",
+                                "exact",
+                                "regex"
+                            ],
+                            "default": "smart"
+                        },
+                        "limit": {
+                            "type": "number",
+                            "description": "Optional. Maximum number of matches to return. Default is 20.",
+                            "minimum": 1,
+                            "maximum": 200,
+                            "default": 20
                         },
                         "source": {
                             "type": "string",
@@ -91,7 +85,7 @@
                         },
                         "kinds": {
                             "type": "array",
-                            "description": "Optional. Filter results by kinds. Supported values: class, struct, enum, method, function, property, globalVariable. Case-insensitive; multiple values allowed.",
+                            "description": "Optional. Filter results by kinds.",
                             "items": {
                                 "type": "string",
                                 "enum": [
@@ -104,11 +98,24 @@
                                     "globalVariable"
                                 ]
                             }
+                        },
+                        "scopePrefix": {
+                            "type": "string",
+                            "description": "Optional. Namespace or type scope. Type scopes can expand inherited methods and properties, and also surface applicable mixin functions."
+                        },
+                        "includeInheritedFromScope": {
+                            "type": "boolean",
+                            "description": "Optional. Only applies to class/type scopes. Expand inherited methods and properties.",
+                            "default": false
+                        },
+                        "includeInternal": {
+                            "type": "boolean",
+                            "description": "Optional. Include symbols whose namespace, type, or member name starts with \"_\".",
+                            "default": false
                         }
                     },
                     "required": [
-                        "labelQuery",
-                        "searchIndex"
+                        "query"
                     ]
                 }
             },
@@ -121,7 +128,7 @@
                 ],
                 "toolReferenceName": "angelscript_getTypeMembers",
                 "displayName": "Angelscript Type Members",
-                "modelDescription": "Use when you need the member list of a specific Angelscript type, including inherited members when requested. Do not use when you need parent/child hierarchy traversal between classes. Requires exact name (optional namespace for disambiguation). Optional switches: includeInherited (default false), includeDocs (default false), and kinds (both|method|property, default both). Returns qgrep-style plain text only with type identity and member entries.",
+                "modelDescription": "Use when you need the member list of a specific Angelscript type, including inherited members when requested. Do not use when you need parent/child hierarchy traversal between classes. Requires exact name (optional namespace for disambiguation). Optional switches: includeInherited (default false), includeDocs (default false), and kinds (both|method|property, default both). Returns readable text and, by default, structured JSON payload with type identity and member entries.",
                 "userDescription": "List members for a given Angelscript type, optionally including inherited members.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-class)",
@@ -171,7 +178,7 @@
                 ],
                 "toolReferenceName": "angelscript_resolveSymbolAtPosition",
                 "displayName": "Angelscript Resolve Symbol At Position",
-                "modelDescription": "Use when you have a file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\"). Optional includeDocumentation controls doc payload (default true). Returns qgrep-style plain text only. Output includes symbol/kind/signature, optional definition filePath + line range + preview, and optional doc block. Preview checks one line above definition start for Unreal reflection macros (UCLASS|UPROPERTY|UFUNCTION|UENUM).",
+                "modelDescription": "Use when you have a file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\"). Optional includeDocumentation controls doc payload (default true). Returns readable text and, by default, structured JSON payload. Output includes symbol/kind/signature, optional definition filePath + line range + preview, and optional doc block. Preview checks one line above definition start for Unreal reflection macros (UCLASS|UPROPERTY|UFUNCTION|UENUM).",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-method)",
                 "inputSchema": {
@@ -221,7 +228,7 @@
                 ],
                 "toolReferenceName": "angelscript_getClassHierarchy",
                 "displayName": "Angelscript Class Hierarchy",
-                "modelDescription": "Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., \"APawn\"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns qgrep-style plain text only, including root, supers, derivedByParent, limits, truncated info, and script-class preview text when available.",
+                "modelDescription": "Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., \"APawn\"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns readable text and, by default, structured JSON payload, including root, supers, derivedByParent, limits, truncated info, and script-class preview text when available.",
                 "userDescription": "Get compact class hierarchy with script class file path and line range.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-class)",
@@ -262,7 +269,7 @@
                 ],
                 "toolReferenceName": "angelscript_findReferences",
                 "displayName": "Angelscript Find References",
-                "modelDescription": "Use when you have a symbol location and need all project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\"). Returns qgrep-style plain text only with per-file grouping, 1-based range labels, and preview text.",
+                "modelDescription": "Use when you have a symbol location and need all project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires filePath and position (line, character, both 1-based); input filePath supports absolute path or workspace-relative path (prefer \"<workspaceFolderName>/...\"). Returns readable text and, by default, structured JSON payload with per-file grouping, 1-based range labels, and preview text.",
                 "userDescription": "Find references for the symbol at a given document position.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(references)",
@@ -360,6 +367,15 @@
                     "type": "number",
                     "default": 27099,
                     "description": "What port to use when connecting to the Unreal engine game or editor instance for auto-completion and debugging. Must match the debug port configured in the Unreal Engine project settings, or as a launch argument (-asdebugport=)."
+                },
+                "UnrealAngelscript.languageModelTools.outputMode": {
+                    "type": "string",
+                    "default": "text+structured",
+                    "enum": [
+                        "text+structured",
+                        "text-only"
+                    ],
+                    "description": "Controls whether Language Model Tools return readable text only or readable text plus structured JSON payload."
                 },
                 "UnrealAngelscript.inlayHints.inlayHintsEnabled": {
                     "type": "boolean",
@@ -988,7 +1004,7 @@
         "watch": "npm-run-all -p watch:*",
         "watch:extension": "cd extension && node esbuild.js --watch",
         "watch:language-server": "cd language-server && node esbuild.js --watch",
-        "test": "npm run compile && node --test extension/out/__tests__/*.test.js",
+        "test": "npm run compile && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/*.test.js language-server/out/__tests__/*.test.js",
         "postinstall": "cd extension && npm install && cd ../language-server && npm install && cd ..",
         "pegjs:compile": "cd language-server/pegjs && peggy angelscript.pegjs --allowed-start-rules start,start_global,start_class,start_enum",
         "pegjs:test": "cd language-server/pegjs && peggy angelscript.pegjs --allowed-start-rules start,start_global,start_class,start_enum --trace --test-file test.as -S start"

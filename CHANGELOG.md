@@ -20,21 +20,24 @@ Maintenance rule:
 - `angelscript_resolveSymbolAtPosition` and `angelscript_findReferences` now accept `filePath` as either absolute path or workspace-relative path (prefer `<workspaceFolderName>/...`).
 - Path output now prefers workspace-relative format with root prefix (for example `CthulhuGame/Source/...`), and falls back to absolute path only when the file is outside all workspace folders.
 - Multi-root path resolution now detects ambiguity for relative `filePath` and returns `InvalidParams` with candidate paths instead of silently picking one root.
-- All `angelscript_` tools now return qgrep-style plain text only; JSON success/error envelopes are no longer exposed as the public contract.
-- VS Code LM tools now return only `LanguageModelTextPart`.
-- MCP `tools/call` now returns only text `content`; failures still set `isError`, but no longer expose `structuredContent`.
+- `angelscript_searchApi` now uses the new request contract: `query`, `mode`, `limit`, `kinds`, `source`, `scopePrefix`, `includeInheritedFromScope`, and `includeInternal`.
+- `angelscript_searchApi` now returns `matches`, optional `notices`, optional `scopeLookup`, and tool-layer `request`.
+- Search execution moved into a dedicated language-server index with smart/exact/regex matching, compact-query expansion, token-order fallback, namespace/type scoping, inherited member expansion, and nearest-override dedupe.
+- The API panel search path now consumes the new `angelscript/getAPISearch` result directly instead of applying client-side pagination, regex, and secondary sorting.
+- VS Code LM tools now default to `LanguageModelTextPart` + `LanguageModelDataPart.json(...)`, and `UnrealAngelscript.languageModelTools.outputMode` can switch them to `text-only`.
+- This repository no longer carries MCP server/runtime transport helpers or MCP-specific test/doc promises.
 - Tool text formatting is now unified around `Title + key: value + ==== + ---` and line-based previews use `lineNumber + ':'/'-' + 4 spaces + source text`.
 - `angelscript_resolveSymbolAtPosition` preview still checks one line above definition start for Unreal reflection macros (`UCLASS/UPROPERTY/UFUNCTION/UENUM`) and renders that macro line as context when matched.
 - `angelscript_findReferences` plain-text output now includes 1-based `range` labels and per-file grouping.
-- Added formatter and transport tests to lock the pure-text contract and ensure LM/MCP outputs no longer expose JSON payload parts.
-- Updated tool descriptions, schema docs, README, and face-ai report to match the plain-text contract.
+- Added language-server search behavior tests plus refreshed formatter/transport tests for LM `text+structured` and `text-only`.
+- Updated tool descriptions, schema docs, README, and face-ai report to match the LM-only contract.
 - CI release workflow migrated from `beta/release` to `pre-release/release`: now publishes to VS Code Marketplace only (no GitHub release assets), keeps `runs-on: ubuntu-latest`, packages VSIX without platform target, and force-updates branch tags `pre-release`/`release` on successful runs.
 
 #### Breaking Changes
 - Callers that assumed output `filePath` is always absolute should migrate to parse both workspace-relative and absolute path formats.
-- Any caller that previously parsed JSON from LM/MCP tool results must migrate to plain-text parsing or stop depending on machine-readable payloads.
-- Any caller that relied on `LanguageModelDataPart` or MCP `structuredContent` for `angelscript_*` tools must migrate because those channels are no longer emitted.
-- Any caller that assumed previous JSON success envelopes or `references[*].range` object parsing must migrate to the new qgrep-style text contract.
+- Any caller using the old `angelscript_searchApi` parameters (`labelQuery`, `searchIndex`, `maxBatchResults`, `includeDocs`, `labelQueryUseRegex`, `signatureRegex`) must migrate to the new search contract.
+- Any caller depending on in-repo MCP server/runtime helpers must remove that dependency because this repository now exposes only VS Code LM tools.
+- Any caller consuming LM tool output should be prepared for the default `text+structured` dual-channel response, or explicitly set `UnrealAngelscript.languageModelTools.outputMode=text-only`.
 
 ### 中文
 
@@ -48,21 +51,24 @@ Maintenance rule:
 - `angelscript_resolveSymbolAtPosition` 与 `angelscript_findReferences` 的 `filePath` 输入支持绝对路径和工作区路径(建议 `<workspaceFolderName>/...`).
 - 路径输出改为优先使用带 root 名的工作区路径(例如 `CthulhuGame/Source/...`),仅当文件不在任何工作区时才回退为绝对路径.
 - 多工作区下,相对 `filePath` 若存在歧义会返回带候选路径的 `InvalidParams`,不再静默选择某个 root.
-- 全部 `angelscript_` 工具现在只对外返回 qgrep 风格纯文本,不再暴露 JSON 成功/失败 envelope 作为公共契约.
-- VS Code LM tool 现在仅返回 `LanguageModelTextPart`.
-- MCP `tools/call` 现在仅返回文本 `content`; 失败时仍保留 `isError`,但不再返回 `structuredContent`.
+- `angelscript_searchApi` 现在使用新请求契约:`query`、`mode`、`limit`、`kinds`、`source`、`scopePrefix`、`includeInheritedFromScope`、`includeInternal`.
+- `angelscript_searchApi` 现在返回 `matches`、可选 `notices`、可选 `scopeLookup`,并在 tool 层附加 `request`.
+- 搜索执行已下沉到独立的 language-server 索引,支持 smart/exact/regex、compact query expansion、token 顺序回退、namespace/type scope、继承成员扩展与最近 override 去重.
+- API 面板搜索路径现在直接消费新的 `angelscript/getAPISearch` 结果,不再在 extension 侧做分页、正则和二次排序.
+- VS Code LM tool 默认返回 `LanguageModelTextPart` + `LanguageModelDataPart.json(...)`,并可通过 `UnrealAngelscript.languageModelTools.outputMode` 切换为 `text-only`.
+- 当前仓库已不再保留 MCP server/runtime transport helper 和 MCP 专属测试/文档承诺.
 - 工具文本格式统一为 `标题 + key: value + ==== + ---`,所有行级预览统一使用 `行号 + ':'/'-' + 4 个空格 + 源码`.
 - `angelscript_resolveSymbolAtPosition` 的预览仍会检查定义起始行上一行是否为 Unreal 反射宏(`UCLASS/UPROPERTY/UFUNCTION/UENUM`),命中时把宏行作为上下文输出.
 - `angelscript_findReferences` 的纯文本输出现在会显示 1-based 的 `range` 标签,并按文件分组展示引用.
-- 新增 formatter 与 transport 测试,用于锁定纯文本契约并确保 LM/MCP 不再暴露 JSON payload 通道.
-- 已同步更新工具描述、schema 文案、README 与 face-ai report,确保契约一致.
+- 新增 language-server 搜索行为测试,并更新 formatter/transport 测试以覆盖 LM `text+structured` 与 `text-only`.
+- 已同步更新工具描述、schema 文案、README 与 face-ai report,确保 LM-only 契约一致.
 - CI 发布流程从 `beta/release` 迁移到 `pre-release/release`: 仅发布到 VS Code Marketplace(不再发布 GitHub 资产),保持 `runs-on: ubuntu-latest`,VSIX 打包不限定平台,并在成功后强制更新分支同名 tag(`pre-release`/`release`).
 
 #### Breaking Changes
 - 如果调用方假设输出 `filePath` 永远是绝对路径,需要迁移为同时兼容工作区路径和绝对路径.
-- 任何此前从 LM/MCP 工具结果中解析 JSON 的调用方,都需要迁移为解析纯文本或放弃机器可读依赖.
-- 任何依赖 `LanguageModelDataPart` 或 MCP `structuredContent` 获取 `angelscript_*` 工具结果的调用方,都需要迁移,因为这些通道已被移除.
-- 任何依赖旧 JSON success envelope 或 `references[*].range` 对象解析的调用方,都需要迁移到新的 qgrep 风格文本契约.
+- 任何仍在使用旧 `angelscript_searchApi` 参数(`labelQuery`、`searchIndex`、`maxBatchResults`、`includeDocs`、`labelQueryUseRegex`、`signatureRegex`)的调用方,都需要迁移到新搜索契约.
+- 任何依赖仓库内 MCP server/runtime helper 的调用方,都需要移除这层依赖,因为当前仓库只暴露 VS Code LM tools.
+- 任何消费 LM tool 输出的调用方,都需要准备好默认的 `text+structured` 双通道响应,或显式设置 `UnrealAngelscript.languageModelTools.outputMode=text-only`.
 
 ## [1.8.8035] - 2026-02-06
 

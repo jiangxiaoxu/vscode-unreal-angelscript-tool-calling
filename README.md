@@ -9,7 +9,6 @@
 [Core Features](#core-features)
 [Offline Cache](#offline-cache)
 [Language Model Tools](#language-model-tools)
-[MCPhttp Support](#mcphttp-support)
 [Build](#build)
 [Known Limits](#known-limits)
 [Upstream](#upstream)
@@ -19,7 +18,6 @@
 [核心功能](#核心功能)
 [离线缓存](#离线缓存)
 [Language Model Tools](#language-model-tools-1)
-[MCPhttp 支持](#mcphttp-支持)
 [构建](#构建)
 [已知限制](#已知限制)
 [上游](#上游)
@@ -70,13 +68,13 @@ Exposed tools:
 - `angelscript_getClassHierarchy`
 - `angelscript_findReferences`
 
-If you need an HTTP MCP endpoint, install this extension to bridge VS Code `languageModelTools`: https://marketplace.visualstudio.com/items?itemName=jiangxiaoxu.lm-tools-bridge
-
-
 Output rules:
-- All tools now return plain text only.
-- VS Code LM tools return only `LanguageModelTextPart`.
-- MCP `tools/call` returns only text `content`; failures still set `isError`.
+- This repository now implements VS Code `Language Model Tool` only.
+- There is no built-in MCP server/runtime in this repository.
+- LM tools return human-readable text and, by default, structured JSON payloads.
+- `UnrealAngelscript.languageModelTools.outputMode` controls LM output mode:
+  - `text+structured` (default)
+  - `text-only`
 - Output style follows qgrep closely:
   - stable title line
   - `key: value` summary fields
@@ -88,7 +86,7 @@ Output rules:
 - For line-based results, text output includes source previews (max 20 lines, truncated with `... (truncated)`, fallback `<source unavailable>`).
 
 Tool notes:
-- `angelscript_searchApi`: Search Angelscript APIs and docs with fuzzy tokens, OR(`|`), separator constraints(`.`/`::`), optional filters, pagination, and regex.
+- `angelscript_searchApi`: Uses `query` plus optional `mode=smart|exact|regex`, `limit`, `kinds`, `source`, `scopePrefix`, `includeInheritedFromScope`, and `includeInternal`. Results now return `matches`, optional `notices`, optional `scopeLookup`, optional `inheritedScopeOutcome`, and tool-layer `request`.
 - `angelscript_resolveSymbolAtPosition`: All line/character indices in tool input are 1-based. Output includes symbol summary, optional definition preview, and optional doc block. It checks the line before definition start for `UCLASS/UPROPERTY/UFUNCTION/UENUM`; when matched, that macro line is rendered as preview context.
 - `angelscript_getTypeMembers`: List members for an exact type name, with optional inherited members/docs.
 - `angelscript_getClassHierarchy`: Returns compact hierarchy text with `root`, `supers`, `derivedByParent`, limits/truncation summary, and per-class source blocks. Script classes include preview lines; defaults are `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
@@ -154,13 +152,13 @@ https://angelscript.hazelight.se
 - `angelscript_getClassHierarchy`
 - `angelscript_findReferences`
 
-如果需要 HTTP MCP 服务,可以安装这个插件,把 VS Code `languageModelTools` 桥接出来: https://marketplace.visualstudio.com/items?itemName=jiangxiaoxu.lm-tools-bridge
-
-
 输出规则:
-- 所有工具现在都只返回纯文本.
-- VS Code LM tool 仅返回 `LanguageModelTextPart`.
-- MCP `tools/call` 仅返回文本 `content`; 失败时仍保留 `isError`.
+- 当前仓库只实现 VS Code `Language Model Tool`.
+- 仓库内不再提供内建 MCP server/runtime.
+- LM tool 会返回可读文本,并且默认同时返回结构化 JSON payload.
+- `UnrealAngelscript.languageModelTools.outputMode` 用于控制 LM 输出模式:
+  - `text+structured`(默认)
+  - `text-only`
 - 输出风格尽量贴近 qgrep:
   - 稳定标题行
   - `key: value` 摘要字段
@@ -172,7 +170,7 @@ https://angelscript.hazelight.se
 - 涉及行号/范围的结果会直接在文本中渲染源码片段(最多 20 行,超出追加 `... (truncated)`,不可读时为 `<source unavailable>`).
 
 工具说明:
-- `angelscript_searchApi`: 支持模糊 token、OR(`|`)、分隔符约束(`.`/`::`)、过滤、分页与正则搜索.
+- `angelscript_searchApi`: 使用 `query` 和可选 `mode=smart|exact|regex`、`limit`、`kinds`、`source`、`scopePrefix`、`includeInheritedFromScope`、`includeInternal`. 结果返回 `matches`、可选 `notices`、可选 `scopeLookup`、可选 `inheritedScopeOutcome`,并在 tool 层补充 `request`.
 - `angelscript_resolveSymbolAtPosition`: 工具输入中的行列索引全部为 1-based. 输出会展示 symbol 摘要、可选定义预览与可选 doc 块. 会检查定义起始行上一行是否为 `UCLASS/UPROPERTY/UFUNCTION/UENUM`,命中时把宏行作为预览上下文输出.
 - `angelscript_getTypeMembers`: 按精确类型名列出成员,可选包含继承成员和文档.
 - `angelscript_getClassHierarchy`: 按精确类名返回紧凑层级文本,包含 `root`、`supers`、`derivedByParent`、limits/truncated 摘要与按类输出的源码块. 脚本类会附带预览; 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
