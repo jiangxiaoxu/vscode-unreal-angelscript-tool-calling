@@ -611,7 +611,7 @@ class ASApiTreeProvider implements vscode.TreeDataProvider<ASApiItem>
             request = this.client.sendRequest(GetAPISearchRequest, {
                 query: this.search,
                 mode: 'smart',
-                limit: 500,
+                limit: 1000,
                 source: this.searchSource
             });
         else

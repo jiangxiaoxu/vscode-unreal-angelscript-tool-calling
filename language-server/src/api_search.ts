@@ -157,7 +157,7 @@ type NormalizedQuery = {
 };
 
 const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 500;
+const MAX_LIMIT = 1000;
 const QUERY_TOO_SHORT_THRESHOLD = 2;
 
 const allKinds = new Set<ApiSearchKind>([
