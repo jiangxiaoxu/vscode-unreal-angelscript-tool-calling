@@ -410,6 +410,54 @@ test('searchApi renders empty results as a code-style comment', () =>
     ].join('\n'));
 });
 
+test('searchApi does not render ignored inherited-scope noise for auto namespace scopes', () =>
+{
+    const text = formatToolText('angelscript_searchApi', {
+        ok: true,
+        data: {
+            request: {
+                query: 'Movement',
+                regex: false,
+                limit: 20,
+                source: 'both',
+                scope: 'Gameplay::Movement',
+                includeInheritedFromScopeMode: 'auto',
+                includeInheritedFromScope: false,
+                includeDocs: false
+            },
+            scopeLookup: {
+                requestedScope: 'Gameplay::Movement',
+                resolvedQualifiedName: 'Gameplay::Movement',
+                resolvedKind: 'namespace'
+            },
+            matchCounts: {
+                total: 1,
+                returned: 1,
+                omitted: 0
+            },
+            matches: [
+                {
+                    qualifiedName: 'Gameplay::Movement::BuildMovementPath',
+                    kind: 'function',
+                    matchReason: 'ordered-wildcard',
+                    source: 'script',
+                    containerQualifiedName: 'Gameplay::Movement',
+                    signature: 'void Gameplay::Movement::BuildMovementPath(FVector Target)'
+                }
+            ]
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript API search',
+        '// scope: namespace Gameplay::Movement',
+        '',
+        '// Gameplay::Movement',
+        '// match: ordered-wildcard',
+        'void BuildMovementPath(FVector Target);'
+    ].join('\n'));
+});
+
 test('resolveSymbol success renders doc comment and preview-first output', () =>
 {
     const text = formatToolText('angelscript_resolveSymbolAtPosition', {

@@ -11,6 +11,7 @@ Maintenance rule:
 ### English
 
 #### Changed
+- `angelscript_searchApi` and `GetAPISearch` now treat omitted `includeInheritedFromScope` as auto-on only for resolved class scopes, keep namespace/struct/enum or unresolved scopes silent, and add tool-layer request metadata for resolved inheritance mode/value.
 - `angelscript_getTypeMembers` now always returns the target type description as `type.description`, keeps member descriptions gated by `includeDocs=true`, and renders human-readable text as Angelscript-style declarations with comment-based docs/origin notes.
 - Activation strategy now includes `onLanguage:angelscript` and `workspaceContains:**/*.as`, keeps all `onLanguageModelTool:*`, and removes `onDebug` to avoid unrelated startup.
 - Startup indexing now resolves only supported Script roots (workspace root is `Script`, or contains `<workspace>/Script`) and scans `Script/**/*.as` only; unsupported layouts now fail fast with an explicit error and skip initial indexing.
@@ -36,6 +37,7 @@ Maintenance rule:
 - CI release workflow migrated from `beta/release` to `pre-release/release`: now publishes to VS Code Marketplace only (no GitHub release assets), keeps `runs-on: ubuntu-latest`, packages VSIX without platform target, and force-updates branch tags `pre-release`/`release` on successful runs.
 
 #### Breaking Changes
+- `angelscript_searchApi` and `GetAPISearch` now use a new default for omitted `includeInheritedFromScope`: resolved class scopes auto-expand inherited methods/properties instead of behaving like hard `false`.
 - Any caller sending workspace-relative `filePath` to `angelscript_resolveSymbolAtPosition` or `angelscript_findReferences` must migrate to absolute paths.
 - Any caller using the old `angelscript_searchApi` parameters (`labelQuery`, `searchIndex`, `maxBatchResults`, `includeDocs`, `labelQueryUseRegex`, `signatureRegex`) must migrate to the new search contract.
 - Any caller depending on in-repo MCP server/runtime helpers must remove that dependency because this repository now exposes only VS Code LM tools.
@@ -44,6 +46,7 @@ Maintenance rule:
 ### 中文
 
 #### 变更
+- `angelscript_searchApi` 与 `GetAPISearch` 现在会把省略的 `includeInheritedFromScope` 解释为仅在解析到 class scope 时自动开启,对 namespace/struct/enum 或未解析 scope 保持静默关闭,并在 tool 层 `request` 中补充解析后的继承模式和值.
 - `angelscript_getTypeMembers` 现在始终通过 `type.description` 返回目标类型自身描述,成员描述仍仅在 `includeDocs=true` 时返回,且可读文本会改为更接近 Angelscript 的声明式输出,通过注释补充文档和来源信息.
 - 激活策略新增 `onLanguage:angelscript` 与 `workspaceContains:**/*.as`, 保留全部 `onLanguageModelTool:*`, 并移除 `onDebug` 以避免无关场景启动.
 - 启动索引改为仅解析受支持的 Script 根目录(工作区根为 `Script` 或包含 `<workspace>/Script`)并仅扫描 `Script/**/*.as`; 对不受支持的工作区形态会明确报错并跳过初始索引.
@@ -69,6 +72,7 @@ Maintenance rule:
 - CI 发布流程从 `beta/release` 迁移到 `pre-release/release`: 仅发布到 VS Code Marketplace(不再发布 GitHub 资产),保持 `runs-on: ubuntu-latest`,VSIX 打包不限定平台,并在成功后强制更新分支同名 tag(`pre-release`/`release`).
 
 #### Breaking Changes
+- `angelscript_searchApi` 与 `GetAPISearch` 现在对省略的 `includeInheritedFromScope` 使用新的默认语义: 解析到 class scope 时会自动展开 inherited method/property,不再等同于硬编码 `false`.
 - 任何向 `angelscript_resolveSymbolAtPosition` 或 `angelscript_findReferences` 传入工作区相对 `filePath` 的调用方,都需要迁移为传入绝对路径.
 - 任何仍在使用旧 `angelscript_searchApi` 参数(`labelQuery`、`searchIndex`、`maxBatchResults`、`includeDocs`、`labelQueryUseRegex`、`signatureRegex`)的调用方,都需要迁移到新搜索契约.
 - 任何依赖仓库内 MCP server/runtime helper 的调用方,都需要移除这层依赖,因为当前仓库只暴露 VS Code LM tools.

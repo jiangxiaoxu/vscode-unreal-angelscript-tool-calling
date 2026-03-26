@@ -594,6 +594,53 @@ test('class scope can expand inherited members and dedupe overridden ancestors',
     assert.equal(scoped.inheritedScopeOutcome, 'applied');
 });
 
+test('omitted inherited-scope flag auto-expands class scopes', () =>
+{
+    const scoped = GetAPISearch({
+        query: 'Movement',
+        mode: 'smart',
+        scope: 'Gameplay::Movement::UMovementDerived',
+        kinds: ['method', 'property'],
+        limit: 20
+    });
+
+    assert.ok(scoped.matches.some((match) =>
+        match.qualifiedName === 'Gameplay::Movement::UMovementBase.TickMovement'
+        && match.scopeRelationship === 'inherited'
+        && match.scopeDistance === 2
+    ));
+    assert.ok(scoped.matches.some((match) =>
+        match.qualifiedName === 'Gameplay::Movement::UMovementBase.MaxSpeed'
+        && match.scopeRelationship === 'inherited'
+        && match.scopeDistance === 2
+    ));
+    assert.equal(scoped.inheritedScopeOutcome, 'applied');
+});
+
+test('explicit false keeps class scopes on declared and mixin matches only', () =>
+{
+    const scoped = GetAPISearch({
+        query: 'Movement',
+        mode: 'smart',
+        scope: 'Gameplay::Movement::UMovementDerived',
+        kinds: ['method', 'property'],
+        includeInheritedFromScope: false,
+        limit: 20
+    });
+
+    assert.ok(scoped.matches.some((match) =>
+        match.qualifiedName === 'Gameplay::Movement::UMovementDerived.StartMovement'
+        && match.scopeRelationship === 'declared'
+    ));
+    assert.ok(!scoped.matches.some((match) =>
+        match.qualifiedName === 'Gameplay::Movement::UMovementBase.TickMovement'
+    ));
+    assert.ok(!scoped.matches.some((match) =>
+        match.qualifiedName === 'Gameplay::Movement::UMovementBase.MaxSpeed'
+    ));
+    assert.equal(scoped.inheritedScopeOutcome, undefined);
+});
+
 test('type scope includes applicable mixin functions and preserves function kind', () =>
 {
     const scoped = GetAPISearch({
@@ -687,6 +734,52 @@ test('invalid scope lookup returns notices without throwing', () =>
     assert.equal(nonClass.notices, undefined);
 });
 
+test('omitted inherited-scope flag keeps invalid and non-class scopes silent', () =>
+{
+    const missingScopePrefix = GetAPISearch({
+        query: 'Movement',
+        mode: 'smart',
+        limit: 10
+    });
+    assert.equal(missingScopePrefix.inheritedScopeOutcome, undefined);
+
+    const missing = GetAPISearch({
+        query: 'Movement',
+        mode: 'smart',
+        scope: 'Gameplay::Missing',
+        limit: 10
+    });
+    assert.equal(missing.matches.length, 0);
+    assert.equal(missing.inheritedScopeOutcome, undefined);
+
+    const ambiguous = GetAPISearch({
+        query: 'Movement',
+        mode: 'smart',
+        scope: 'Movement',
+        limit: 10
+    });
+    assert.equal(ambiguous.matches.length, 0);
+    assert.equal(ambiguous.inheritedScopeOutcome, undefined);
+
+    const namespaceScope = GetAPISearch({
+        query: 'Movement',
+        mode: 'smart',
+        scope: 'Gameplay::Movement',
+        limit: 10
+    });
+    assert.equal(namespaceScope.scopeLookup?.resolvedKind, 'namespace');
+    assert.equal(namespaceScope.inheritedScopeOutcome, undefined);
+
+    const nonClass = GetAPISearch({
+        query: 'Movement',
+        mode: 'smart',
+        scope: 'Gameplay::Movement::EMovementState',
+        limit: 10
+    });
+    assert.equal(nonClass.scopeLookup?.resolvedKind, 'enum');
+    assert.equal(nonClass.inheritedScopeOutcome, undefined);
+});
+
 test('scope lookup dedupes identical qualified-name candidates before ambiguity checks', () =>
 {
     createType(declareNamespace('Gameplay::Characters', 'Game.Modules.Characters'), 'UCthuBattleSet', {
@@ -716,7 +809,7 @@ test('scope lookup dedupes identical qualified-name candidates before ambiguity 
         resolvedQualifiedName: 'Gameplay::Characters::UCthuBattleSet',
         resolvedKind: 'class'
     });
-    assert.equal(scoped.inheritedScopeOutcome, undefined);
+    assert.equal(scoped.inheritedScopeOutcome, 'applied');
 });
 
 test('scope collision auto-merges same-name namespace and class groups', () =>
@@ -791,6 +884,59 @@ test('scope collision auto-merges same-name namespace and class groups', () =>
         scoped.scopeGroups?.[1].matches.map((match) => match.qualifiedName),
         ['UCthuBattleSet::GetManaAttr']
     );
+});
+
+test('same-name merged scope auto-expands inherited matches only for the class side', () =>
+{
+    createType(GetRootNamespace(), 'UBaseBattleSet', {
+        declaredModule: 'Game.Modules.Characters',
+        methods: [
+            createMethod('GetBaseTags', 'void', 'Game.Modules.Characters', [], 'Inherited member.')
+        ]
+    });
+
+    const collisionNamespace = declareNamespace('UMergedBattleSet', 'Game.Modules.Characters');
+    collisionNamespace.addSymbol(createMethod(
+        'GetManaAttr',
+        'FGameplayAttribute',
+        'Game.Modules.Characters',
+        [],
+        'Namespace accessor.'
+    ));
+
+    createType(GetRootNamespace(), 'UMergedBattleSet', {
+        declaredModule: 'Game.Modules.Characters',
+        supertype: 'UBaseBattleSet',
+        methods: [
+            createMethod('GetOwnedGameplayTags', 'void', 'Game.Modules.Characters', [], 'Type member.')
+        ]
+    });
+
+    OnDirtyTypeCaches();
+    InvalidateAPISearchCache();
+
+    const scoped = GetAPISearch({
+        query: 'Get',
+        mode: 'plain',
+        scope: 'UMergedBattleSet',
+        limit: 10
+    });
+
+    assert.equal(scoped.inheritedScopeOutcome, 'applied');
+    assert.deepEqual(scoped.scopeGroups?.[0].scope, {
+        requestedScope: 'UMergedBattleSet',
+        resolvedQualifiedName: 'UMergedBattleSet',
+        resolvedKind: 'class'
+    });
+    assert.deepEqual(
+        scoped.scopeGroups?.[0].matches.map((match) => match.qualifiedName),
+        ['UMergedBattleSet.GetOwnedGameplayTags', 'UBaseBattleSet.GetBaseTags']
+    );
+    assert.deepEqual(
+        scoped.scopeGroups?.[1].matches.map((match) => match.qualifiedName),
+        ['UMergedBattleSet::GetManaAttr']
+    );
+    assert.ok(!scoped.scopeGroups?.[1].matches.some((match) => match.qualifiedName === 'UBaseBattleSet.GetBaseTags'));
 });
 
 test('applied inheritedScopeOutcome does not suppress empty inheritance notice', () =>

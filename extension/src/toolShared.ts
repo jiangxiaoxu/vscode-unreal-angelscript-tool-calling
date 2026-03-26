@@ -424,6 +424,10 @@ export async function runSearchApi(
 {
     const raw = input as Partial<AngelscriptSearchToolParams> | null | undefined;
     const query = typeof raw?.query === 'string' ? raw.query.trim() : '';
+    const hasExplicitIncludeInheritedFromScope = raw !== null
+        && raw !== undefined
+        && Object.prototype.hasOwnProperty.call(raw, 'includeInheritedFromScope')
+        && typeof raw.includeInheritedFromScope === 'boolean';
     if (!query)
     {
         return makeError('MISSING_QUERY', 'Missing query. Please provide query.');
@@ -439,7 +443,7 @@ export async function runSearchApi(
                 limit: raw?.limit,
                 source: raw?.source,
                 scope: raw?.scope,
-                includeInheritedFromScope: raw?.includeInheritedFromScope,
+                ...(hasExplicitIncludeInheritedFromScope ? { includeInheritedFromScope: raw.includeInheritedFromScope } : {}),
                 includeDocs: raw?.includeDocs,
                 regex: raw?.regex
             })

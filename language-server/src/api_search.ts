@@ -97,6 +97,8 @@ export type SearchMatchReason =
     | 'short-ordered'
     | 'weak-reorder';
 
+type ScopeInheritanceMode = 'auto' | 'on' | 'off';
+
 type NormalizedSearchParams = {
     query: string;
     mode: ApiSearchMode;
@@ -104,7 +106,7 @@ type NormalizedSearchParams = {
     kinds: Set<ApiSearchKind>;
     source: ApiSearchSource;
     scope?: string;
-    includeInheritedFromScope: boolean;
+    includeInheritedFromScopeMode: ScopeInheritanceMode;
     includeDocs: boolean;
     smartQueries?: ParsedSmartQuery[];
     plainQuery?: ParsedSmartQuery;
@@ -286,12 +288,12 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
     let resolvedScopes: ResolvedScope[] = [];
     let hasMergedSameNameScope = false;
 
-    if (params.includeInheritedFromScope && !params.scope)
+    if (params.includeInheritedFromScopeMode == 'on' && !params.scope)
         inheritedScopeOutcome = 'ignored_missing_scope';
 
     if (params.scope)
     {
-        let scopeResolution = resolveScope(index, params.scope, params.includeInheritedFromScope);
+        let scopeResolution = resolveScope(index, params.scope, params.includeInheritedFromScopeMode);
         notices.push(...scopeResolution.notices);
         scopeLookup = scopeResolution.scopeLookup;
         inheritedScopeOutcome = scopeResolution.inheritedScopeOutcome;
@@ -368,7 +370,7 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
     let kinds = normalizeKinds(record.kinds);
     let source = normalizeSource(record.source);
     let scope = typeof record.scope === 'string' ? record.scope.trim() : '';
-    let includeInheritedFromScope = record.includeInheritedFromScope === true;
+    let includeInheritedFromScopeMode = normalizeScopeInheritanceMode(record);
     let includeDocs = record.includeDocs === true;
     let smartQueries = mode == 'smart' ? parseSmartQueries(query) : undefined;
     let plainQuery = mode == 'plain' ? parsePlainQuery(query) : undefined;
@@ -380,11 +382,18 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
         kinds,
         source,
         ...(scope.length > 0 ? { scope } : {}),
-        includeInheritedFromScope,
+        includeInheritedFromScopeMode,
         includeDocs,
         ...(smartQueries ? { smartQueries } : {}),
         ...(plainQuery ? { plainQuery } : {})
     };
+}
+
+function normalizeScopeInheritanceMode(record: Record<string, unknown>) : ScopeInheritanceMode
+{
+    if (!Object.prototype.hasOwnProperty.call(record, 'includeInheritedFromScope'))
+        return 'auto';
+    return record.includeInheritedFromScope === true ? 'on' : 'off';
 }
 
 function normalizeSearchMode(value: unknown) : ApiSearchMode
@@ -773,7 +782,7 @@ function createSearchEntry(input: {
 function resolveScope(
     index: SearchIndex,
     scopeName: string,
-    includeInheritedFromScope: boolean
+    includeInheritedFromScopeMode: ScopeInheritanceMode
 ) : ScopeResolution
 {
     let notices: GetAPISearchNotice[] = [];
@@ -807,14 +816,14 @@ function resolveScope(
             scopes: [],
             notices,
             scopeLookup,
-            inheritedScopeOutcome: includeInheritedFromScope ? 'ignored_scope_not_found' : undefined
+            inheritedScopeOutcome: getInvalidInheritedScopeOutcome(includeInheritedFromScopeMode, 'ignored_scope_not_found')
         };
     }
 
     let mergedScopeResolution = tryResolveMergedSameNameScope(
         candidates,
         normalizedScope,
-        includeInheritedFromScope,
+        includeInheritedFromScopeMode,
         candidateMatchMode
     );
     if (mergedScopeResolution)
@@ -834,19 +843,19 @@ function resolveScope(
             scopes: [],
             notices,
             scopeLookup,
-            inheritedScopeOutcome: includeInheritedFromScope ? 'ignored_scope_ambiguous' : undefined
+            inheritedScopeOutcome: getInvalidInheritedScopeOutcome(includeInheritedFromScopeMode, 'ignored_scope_ambiguous')
         };
     }
 
     let candidate = candidates[0];
-    let resolvedScope = buildResolvedScope(candidate, normalizedScope, includeInheritedFromScope);
+    let resolvedScope = buildResolvedScope(candidate, normalizedScope, includeInheritedFromScopeMode);
     if (!resolvedScope)
     {
         return {
             scopes: [],
             notices,
             scopeLookup,
-            inheritedScopeOutcome: includeInheritedFromScope ? 'ignored_scope_not_found' : undefined
+            inheritedScopeOutcome: getInvalidInheritedScopeOutcome(includeInheritedFromScopeMode, 'ignored_scope_not_found')
         };
     }
 
@@ -854,7 +863,7 @@ function resolveScope(
         scopes: [resolvedScope],
         notices,
         scopeLookup: resolvedScope.scopeLookup,
-        inheritedScopeOutcome: getInheritedScopeOutcomeForCandidate(candidate, includeInheritedFromScope)
+        inheritedScopeOutcome: getInheritedScopeOutcomeForCandidate(candidate, includeInheritedFromScopeMode)
     };
 }
 
@@ -965,7 +974,7 @@ function applyTypeScope(
 function tryResolveMergedSameNameScope(
     candidates: ScopeCandidate[],
     requestedScope: string,
-    includeInheritedFromScope: boolean,
+    includeInheritedFromScopeMode: ScopeInheritanceMode,
     candidateMatchMode: ScopeCandidateMatchMode
 ) : Omit<ScopeResolution, 'notices'> | null
 {
@@ -981,15 +990,15 @@ function tryResolveMergedSameNameScope(
     if (!namespaceCandidate || !typeCandidate)
         return null;
 
-    let namespaceScope = buildResolvedScope(namespaceCandidate, requestedScope, false);
-    let typeScope = buildResolvedScope(typeCandidate, requestedScope, includeInheritedFromScope);
+    let namespaceScope = buildResolvedScope(namespaceCandidate, requestedScope, 'off');
+    let typeScope = buildResolvedScope(typeCandidate, requestedScope, includeInheritedFromScopeMode);
     if (!namespaceScope || !typeScope)
         return null;
 
     return {
         scopes: [typeScope, namespaceScope],
         scopeLookup: typeScope.scopeLookup,
-        inheritedScopeOutcome: getInheritedScopeOutcomeForCandidate(typeCandidate, includeInheritedFromScope),
+        inheritedScopeOutcome: getInheritedScopeOutcomeForCandidate(typeCandidate, includeInheritedFromScopeMode),
         hasMergedSameNameScope: true
     };
 }
@@ -997,7 +1006,7 @@ function tryResolveMergedSameNameScope(
 function buildResolvedScope(
     candidate: ScopeCandidate,
     requestedScope: string,
-    includeInheritedFromScope: boolean
+    includeInheritedFromScopeMode: ScopeInheritanceMode
 ) : ResolvedScope | null
 {
     let scopeLookup: GetAPISearchScopeLookup = {
@@ -1027,20 +1036,38 @@ function buildResolvedScope(
         qualifiedName: candidate.qualifiedName,
         dbType: candidate.dbType,
         scopeLookup,
-        includeInherited: includeInheritedFromScope && candidate.isClassType
+        includeInherited: shouldEnableInheritedScope(candidate, includeInheritedFromScopeMode)
     };
 }
 
 function getInheritedScopeOutcomeForCandidate(
     candidate: ScopeCandidate,
-    includeInheritedFromScope: boolean
+    includeInheritedFromScopeMode: ScopeInheritanceMode
 ) : ApiInheritedScopeOutcome | undefined
 {
-    if (!includeInheritedFromScope)
+    if (includeInheritedFromScopeMode == 'off')
         return undefined;
-    if (candidate.kind == 'namespace')
-        return 'ignored_scope_not_class';
-    return candidate.isClassType ? 'applied' : 'ignored_scope_not_class';
+    if (shouldEnableInheritedScope(candidate, includeInheritedFromScopeMode))
+        return 'applied';
+    return includeInheritedFromScopeMode == 'on' ? 'ignored_scope_not_class' : undefined;
+}
+
+function shouldEnableInheritedScope(
+    candidate: ScopeCandidate,
+    includeInheritedFromScopeMode: ScopeInheritanceMode
+) : boolean
+{
+    return includeInheritedFromScopeMode != 'off'
+        && candidate.kind != 'namespace'
+        && candidate.isClassType;
+}
+
+function getInvalidInheritedScopeOutcome(
+    includeInheritedFromScopeMode: ScopeInheritanceMode,
+    outcome: Exclude<ApiInheritedScopeOutcome, 'applied'>
+) : ApiInheritedScopeOutcome | undefined
+{
+    return includeInheritedFromScopeMode == 'on' ? outcome : undefined;
 }
 
 function applyResolvedScope(

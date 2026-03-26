@@ -6,6 +6,7 @@ import {
     GetAPISearchToolScopeGroup,
     GetAPISearchToolData,
     GetAPISearchToolMatch,
+    SearchIncludeInheritedFromScopeMode,
     SearchSource
 } from './apiRequests';
 
@@ -46,6 +47,14 @@ export function toApiSearchToolFailure(error: unknown): { code: string; message:
 
 const MAX_LIMIT = 200;
 const DEFAULT_LIMIT = 20;
+
+function hasExplicitIncludeInheritedFromScope(
+    params: AngelscriptSearchToolParams
+): params is AngelscriptSearchToolParams & { includeInheritedFromScope: boolean }
+{
+    return Object.prototype.hasOwnProperty.call(params, 'includeInheritedFromScope')
+        && typeof params.includeInheritedFromScope === 'boolean';
+}
 
 function normalizeSource(rawSource: unknown): SearchSource
 {
@@ -114,22 +123,24 @@ export async function buildSearchPayload(
     const limit = normalizeLimit(params?.limit);
     const source = normalizeSource(params?.source);
     const scope = typeof params?.scope === 'string' ? params.scope.trim() : '';
-    const includeInheritedFromScope = params?.includeInheritedFromScope === true;
+    const hasExplicitInheritanceMode = hasExplicitIncludeInheritedFromScope(params);
     const includeDocs = params?.includeDocs === true;
-
+    const includeInheritedFromScopeMode: SearchIncludeInheritedFromScopeMode = hasExplicitInheritanceMode ? 'explicit' : 'auto';
     const request: GetAPISearchParams = {
         query,
         mode,
         limit,
         source,
         ...(scope ? { scope } : {}),
-        includeInheritedFromScope,
+        ...(hasExplicitInheritanceMode ? { includeInheritedFromScope: params.includeInheritedFromScope } : {}),
         includeDocs
     };
     const result = await client.sendRequest(GetAPISearchRequest, request) as GetAPISearchLspResult;
 
     if (!result || !Array.isArray(result.matches))
         throw new ApiSearchError('INVALID_RESPONSE', 'The language server returned an invalid search payload.');
+
+    const resolvedIncludeInheritedFromScope = resultUsesInheritedScope(result);
 
     return {
         matches: result.matches.map(stripInternalSearchMatch),
@@ -146,8 +157,14 @@ export async function buildSearchPayload(
             limit,
             source,
             ...(scope ? { scope } : {}),
-            includeInheritedFromScope,
+            includeInheritedFromScopeMode,
+            includeInheritedFromScope: resolvedIncludeInheritedFromScope,
             includeDocs
         }
     };
+}
+
+function resultUsesInheritedScope(result: GetAPISearchLspResult): boolean
+{
+    return result.inheritedScopeOutcome === 'applied';
 }

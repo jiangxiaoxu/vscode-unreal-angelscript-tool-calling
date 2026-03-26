@@ -32,6 +32,7 @@ export type SearchKind = 'class' | 'struct' | 'enum' | 'method' | 'function' | '
 export type SearchScopeKind = 'namespace' | 'class' | 'struct' | 'enum';
 export type SearchScopeRelationship = 'declared' | 'inherited' | 'mixin';
 export type SearchMatchReason = 'exact-qualified' | 'exact-short' | 'boundary-ordered' | 'ordered-wildcard' | 'short-ordered' | 'weak-reorder';
+export type SearchIncludeInheritedFromScopeMode = 'auto' | 'explicit';
 
 export type GetAPISearchParams = {
     query: string;
@@ -128,6 +129,7 @@ export type GetAPISearchToolData = {
         limit: number;
         source: SearchSource;
         scope?: string;
+        includeInheritedFromScopeMode: SearchIncludeInheritedFromScopeMode;
         includeInheritedFromScope: boolean;
         includeDocs: boolean;
     };
