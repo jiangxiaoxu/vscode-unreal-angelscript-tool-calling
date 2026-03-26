@@ -44,11 +44,9 @@ import * as inlayhints from './inlay_hints';
 import * as inlinevalues from './inline_values';
 import * as colorpicker from './color_picker';
 import * as typehierarchy from './type_hierarchy';
-import * as api_docs from './api_docs';
-import * as api_search from './api_search';
-import * as cache from './cache';
-import * as fs from 'fs';
-import * as path from 'path';
+import { registerApiRequestHandlers } from './apiRequestHandlers';
+import { createUnrealCacheController } from './unrealCacheController';
+import * as workspaceLayout from './workspaceLayout';
 import glob from 'glob';
 
 import {
@@ -80,14 +78,12 @@ let SetTypeTimeout = false;
 let UnrealTypesTimedOut = false;
 let UnrealConnected = false;
 let CacheRootPath : string = null;
-let DebugDatabaseChunks : Array<any> = [];
-let DebugDatabaseComplete = false;
-let UnrealCacheWriteTimeout : any = null;
 let PendingReResolveAfterInitialParse = false;
 let SemanticTokensRefreshTimeout : any = null;
 
 let settings : any = null;
 let reconnectTimeoutId : any = undefined;
+const unrealCacheController = createUnrealCacheController();
 
 function connect_unreal()
 {
@@ -168,7 +164,7 @@ function connect_unreal()
                 let dbStr = msg.readString();
                 let dbObj = JSON.parse(dbStr);
                 typedb.AddTypesFromUnreal(dbObj);
-                DebugDatabaseChunks.push(dbObj);
+                unrealCacheController.recordDebugDatabaseChunk(dbObj);
 
                 UnrealTypesTimedOut = false;
                 if (ReceivingTypesTimeout)
@@ -180,17 +176,17 @@ function connect_unreal()
                 if (ReceivingTypesTimeout)
                     clearTimeout(ReceivingTypesTimeout);
                 typedb.FinishTypesFromUnreal();
-                DebugDatabaseComplete = true;
+                unrealCacheController.markDebugDatabaseComplete();
 
                 let scriptSettings = scriptfiles.GetScriptSettings()
                 typedb.AddPrimitiveTypes(scriptSettings.floatIsFloat64);
-                api_search.InvalidateAPISearchCache();
+                unrealCacheController.invalidateSearchCache();
 
                 // Make sure no modules are resolved anymore
                 if (PendingReResolveAfterInitialParse)
                     PendingReResolveAfterInitialParse = false;
                 ReResolveAllModules();
-                ScheduleUnrealCacheWrite();
+                unrealCacheController.scheduleWrite(CacheRootPath, UnrealConnected);
             }
             else if(msg.type == MessageType.AssetDatabase)
             {
@@ -244,8 +240,8 @@ function connect_unreal()
                     scriptSettings.deprecateActorGenerics = msg.readBool();
                     scriptSettings.disallowActorGenerics = msg.readBool();
                 }
-                api_search.InvalidateAPISearchCache();
-                ScheduleUnrealCacheWrite();
+                unrealCacheController.invalidateSearchCache();
+                unrealCacheController.scheduleWrite(CacheRootPath, UnrealConnected);
             }
             else if(msg.type == MessageType.ReplaceAssetDefinition)
             {
@@ -288,7 +284,7 @@ function connect_unreal()
     {
         // connection.console.log('Connection to unreal editor established.');
         UnrealConnected = true;
-        ResetUnrealCacheState();
+        unrealCacheController.resetState();
         setTimeout(function()
         {
             if (!unreal)
@@ -304,191 +300,39 @@ function connect_unreal()
 
 connect_unreal();
 
-function GetCurrentScriptSettings() : cache.CachedScriptSettings
-{
-    let scriptSettings = scriptfiles.GetScriptSettings();
-    return {
-        automaticImports: scriptSettings.automaticImports,
-        floatIsFloat64: scriptSettings.floatIsFloat64,
-        useAngelscriptHaze: scriptSettings.useAngelscriptHaze,
-        deprecateStaticClass: scriptSettings.deprecateStaticClass,
-        disallowStaticClass: scriptSettings.disallowStaticClass,
-        exposeGlobalFunctions: scriptSettings.exposeGlobalFunctions,
-        deprecateActorGenerics: scriptSettings.deprecateActorGenerics,
-        disallowActorGenerics: scriptSettings.disallowActorGenerics,
-    };
-}
-
-function ApplyCachedScriptSettings(settings : cache.CachedScriptSettings, engineSupportsCreateBlueprint : boolean)
-{
-    if (!settings)
-        return;
-
-    let scriptSettings = scriptfiles.GetScriptSettings();
-    if (typeof settings.automaticImports === "boolean")
-        scriptSettings.automaticImports = settings.automaticImports;
-    if (typeof settings.floatIsFloat64 === "boolean")
-        scriptSettings.floatIsFloat64 = settings.floatIsFloat64;
-    if (typeof settings.useAngelscriptHaze === "boolean")
-        scriptSettings.useAngelscriptHaze = settings.useAngelscriptHaze;
-    if (typeof settings.deprecateStaticClass === "boolean")
-        scriptSettings.deprecateStaticClass = settings.deprecateStaticClass;
-    if (typeof settings.disallowStaticClass === "boolean")
-        scriptSettings.disallowStaticClass = settings.disallowStaticClass;
-    if (typeof settings.exposeGlobalFunctions === "boolean")
-        scriptSettings.exposeGlobalFunctions = settings.exposeGlobalFunctions;
-    if (typeof settings.deprecateActorGenerics === "boolean")
-        scriptSettings.deprecateActorGenerics = settings.deprecateActorGenerics;
-    if (typeof settings.disallowActorGenerics === "boolean")
-        scriptSettings.disallowActorGenerics = settings.disallowActorGenerics;
-
-    if (typeof engineSupportsCreateBlueprint === "boolean")
-        scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint = engineSupportsCreateBlueprint;
-}
-
-function ResetUnrealCacheState()
-{
-    DebugDatabaseChunks = [];
-    DebugDatabaseComplete = false;
-    api_search.InvalidateAPISearchCache();
-}
-
 function ResolveScriptRoot(workspaceRoot : string) : string
 {
-    if (!workspaceRoot)
-        return null;
-
-    let normalizedWorkspaceRoot = path.normalize(workspaceRoot);
-    let rootName = path.basename(normalizedWorkspaceRoot).toLowerCase();
-    if (rootName == "script")
-        return normalizedWorkspaceRoot;
-
-    let scriptRoot = path.join(normalizedWorkspaceRoot, "Script");
-    try
-    {
-        let stat = fs.statSync(scriptRoot);
-        if (stat.isDirectory())
-            return scriptRoot;
-    }
-    catch
-    {
-    }
-    return null;
+    return workspaceLayout.ResolveScriptRoot(workspaceRoot);
 }
 
 function ResolveScriptRoots(workspaceRoots : Array<string>) : Array<string>
 {
-    if (!workspaceRoots || workspaceRoots.length == 0)
-        return [];
-
-    let resolvedRoots : Array<string> = [];
-    let seenRoots = new Set<string>();
-
-    for (let workspaceRoot of workspaceRoots)
-    {
-        let scriptRoot = ResolveScriptRoot(workspaceRoot);
-        if (!scriptRoot)
-            continue;
-
-        let normalizedScriptRoot = path.normalize(scriptRoot);
-        let dedupeKey = process.platform == "win32" ? normalizedScriptRoot.toLowerCase() : normalizedScriptRoot;
-        if (seenRoots.has(dedupeKey))
-            continue;
-
-        seenRoots.add(dedupeKey);
-        resolvedRoots.push(normalizedScriptRoot);
-    }
-
-    return resolvedRoots;
+    return workspaceLayout.ResolveScriptRoots(workspaceRoots);
 }
 
 function ResolveCacheRoot(scriptRoots : Array<string>) : string
 {
-    if (!scriptRoots || scriptRoots.length == 0)
-        return null;
-    return scriptRoots[0];
+    return workspaceLayout.ResolveCacheRoot(scriptRoots);
 }
 
 function ResolveScriptRootUris(scriptRoots : Array<string>) : Array<string>
 {
-    if (!scriptRoots || scriptRoots.length == 0)
-        return [];
-    return scriptRoots.map((scriptRoot) => decodeURIComponent(getFileUri(scriptRoot)));
+    return workspaceLayout.ResolveScriptRootUris(scriptRoots, getFileUri);
 }
 
 function ResolveInitialScriptIgnorePatterns(initializationOptions : any) : Array<string>
 {
-    let configuredPatterns = initializationOptions?.scriptIgnorePatterns;
-    if (Array.isArray(configuredPatterns))
-    {
-        let sanitizedPatterns = configuredPatterns
-            .filter((pattern : any) => typeof pattern == "string")
-            .map((pattern : string) => pattern.trim())
-            .filter((pattern : string) => pattern.length != 0);
-        if (sanitizedPatterns.length != 0)
-            return sanitizedPatterns;
-    }
-
-    return [];
+    return workspaceLayout.ResolveInitialScriptIgnorePatterns(initializationOptions);
 }
 
 function LoadCacheFromDisk()
 {
-    if (!CacheRootPath)
-        return;
-
-    cache.SetCacheRoot(CacheRootPath);
-    if (typedb.HasTypesFromUnreal())
-        return;
-
-    let unrealCache = cache.LoadUnrealCache();
-    if (unrealCache && unrealCache.debugDatabaseChunks && unrealCache.debugDatabaseChunks.length != 0)
-    {
-        ApplyCachedScriptSettings(unrealCache.scriptSettings, unrealCache.engineSupportsCreateBlueprint);
-
-        for (let chunk of unrealCache.debugDatabaseChunks)
-            typedb.AddTypesFromUnreal(chunk);
-        typedb.FinishTypesFromUnreal();
-
-        let scriptSettings = scriptfiles.GetScriptSettings();
-        typedb.AddPrimitiveTypes(scriptSettings.floatIsFloat64);
-        api_search.InvalidateAPISearchCache();
-
-    }
-
-    if (UnrealConnected)
-    {
-        ScheduleUnrealCacheWrite();
-    }
+    unrealCacheController.loadCacheFromDisk(CacheRootPath, UnrealConnected);
 }
 
 function ScheduleUnrealCacheWrite()
 {
-    if (!CacheRootPath || !UnrealConnected)
-        return;
-    if (!DebugDatabaseComplete)
-        return;
-    if (UnrealCacheWriteTimeout)
-        clearTimeout(UnrealCacheWriteTimeout);
-    UnrealCacheWriteTimeout = setTimeout(function()
-    {
-        UnrealCacheWriteTimeout = null;
-        if (!CacheRootPath || !UnrealConnected)
-            return;
-        if (!DebugDatabaseComplete)
-            return;
-        if (DebugDatabaseChunks.length == 0)
-            return;
-
-        cache.SaveUnrealCache({
-            version: 0,
-            createdAt: "",
-            workspaceRoot: "",
-            debugDatabaseChunks: DebugDatabaseChunks,
-            scriptSettings: GetCurrentScriptSettings(),
-            engineSupportsCreateBlueprint: scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint,
-        });
-    }, 500);
+    unrealCacheController.scheduleWrite(CacheRootPath, UnrealConnected);
 }
 
 // Create a simple text document manager. The text document manager
@@ -500,37 +344,9 @@ let shouldSendDiagnosticRelatedInformation: boolean = false;
 let RootUris : string[] = [];
 let ScriptRootPaths : string[] = [];
 
-function NormalizePathForMatch(pathname : string) : string
-{
-    let normalized = path.normalize(pathname);
-    if (process.platform == "win32")
-        return normalized.toLowerCase();
-    return normalized;
-}
-
-function IsPathWithinScriptRoots(pathname : string) : boolean
-{
-    if (!pathname || !ScriptRootPaths || ScriptRootPaths.length == 0)
-        return false;
-
-    let normalizedPath = NormalizePathForMatch(pathname);
-    for (let scriptRoot of ScriptRootPaths)
-    {
-        let normalizedRoot = NormalizePathForMatch(scriptRoot);
-        if (normalizedPath == normalizedRoot)
-            return true;
-        if (normalizedPath.startsWith(normalizedRoot + path.sep))
-            return true;
-    }
-    return false;
-}
-
 function IsScriptUri(uri : string) : boolean
 {
-    if (!uri || !uri.startsWith("file://"))
-        return false;
-    let pathname = getPathName(uri);
-    return IsPathWithinScriptRoots(pathname);
+    return workspaceLayout.IsScriptUri(uri, ScriptRootPaths, getPathName);
 }
 
 // After the server has started the client sends an initialize request. The server receives
@@ -1359,130 +1175,11 @@ connection.onRequest("angelscript/getModuleForSymbol", (...params: any[]) : stri
     }
 });
 
-connection.onRequest("angelscript/getUnrealConnectionStatus", () : boolean => {
-    return UnrealConnected;
-});
-
-connection.onRequest("angelscript/resolveSymbolAtPosition", (params : scriptsymbols.ResolveSymbolAtPositionParams) : scriptsymbols.ResolveSymbolAtPositionResult => {
-    if (!params || !params.uri || !params.position)
-        return { ok: false, error: { code: "InvalidParams", message: "uri and position are required." } };
-
-    let asmodule = GetAndParseModule(params.uri);
-    if (!asmodule)
-        return { ok: false, error: { code: "NotFound", message: "Module not found." } };
-
-    return scriptsymbols.ResolveSymbolAtPosition(asmodule, params.position, params.includeDocumentation !== false);
-});
-
-connection.onRequest("angelscript/getAPI", (root : string) : any => {
-    if (typedb.HasTypesFromUnreal())
-        return api_docs.GetAPIList(root);
-
-    function timerFunc(resolve : any, reject : any, triesLeft : number) {
-        if (typedb.HasTypesFromUnreal())
-            return resolve(api_docs.GetAPIList(root));
-        setTimeout(function() { timerFunc(resolve, reject, triesLeft-1); }, 100);
-    }
-    let promise = new Promise<any>(function(resolve, reject)
-    {
-        timerFunc(resolve, reject, 50);
-    });
-    return promise;
-});
-
-connection.onRequest("angelscript/getAPISearch", (payload : any) : any => {
-    let runSearch = function()
-    {
-        try
-        {
-            return api_search.GetAPISearch(payload);
-        }
-        catch (error)
-        {
-            if (error instanceof api_search.ApiSearchValidationError)
-                return new ResponseError<void>(0, error.message);
-            throw error;
-        }
-    };
-
-    if (typedb.HasTypesFromUnreal())
-        return runSearch();
-
-    function timerFunc(resolve : any, reject : any, triesLeft : number) {
-        if (typedb.HasTypesFromUnreal())
-            return resolve(runSearch());
-        setTimeout(function() { timerFunc(resolve, reject, triesLeft-1); }, 100);
-    }
-    let promise = new Promise<any>(function(resolve, reject)
-    {
-        timerFunc(resolve, reject, 50);
-    });
-    return promise;
-});
-
-connection.onRequest("angelscript/getAPIDetails", (root : any) : any => {
-    if (typedb.HasTypesFromUnreal())
-        return api_docs.GetAPIDetails(root);
-
-    function timerFunc(resolve : any, reject : any, triesLeft : number) {
-        if (typedb.HasTypesFromUnreal())
-            return resolve(api_docs.GetAPIDetails(root));
-        setTimeout(function() { timerFunc(resolve, reject, triesLeft-1); }, 100);
-    }
-    let promise = new Promise<any>(function(resolve, reject)
-    {
-        timerFunc(resolve, reject, 50);
-    });
-    return promise;
-});
-
-connection.onRequest("angelscript/getAPIDetailsBatch", (roots : any) : any => {
-    let dataList = Array.isArray(roots) ? roots : [];
-    if (typedb.HasTypesFromUnreal())
-        return api_docs.GetAPIDetailsBatch(dataList);
-
-    function timerFunc(resolve : any, reject : any, triesLeft : number) {
-        if (typedb.HasTypesFromUnreal())
-            return resolve(api_docs.GetAPIDetailsBatch(dataList));
-        setTimeout(function() { timerFunc(resolve, reject, triesLeft-1); }, 100);
-    }
-    let promise = new Promise<any>(function(resolve, reject)
-    {
-        timerFunc(resolve, reject, 50);
-    });
-    return promise;
-});
-
-connection.onRequest("angelscript/getTypeMembers", (params : any) : any => {
-    if (typedb.HasTypesFromUnreal())
-        return api_docs.GetTypeMembers(params);
-
-    function timerFunc(resolve : any, reject : any, triesLeft : number) {
-        if (typedb.HasTypesFromUnreal())
-            return resolve(api_docs.GetTypeMembers(params));
-        setTimeout(function() { timerFunc(resolve, reject, triesLeft-1); }, 100);
-    }
-    let promise = new Promise<any>(function(resolve, reject)
-    {
-        timerFunc(resolve, reject, 50);
-    });
-    return promise;
-});
-
-connection.onRequest("angelscript/getTypeHierarchy", (params : any) : any => {
-    if (typedb.HasTypesFromUnreal())
-        return api_docs.GetTypeHierarchy(params);
-
-    function timerFunc(resolve : any, reject : any, triesLeft : number) {
-        if (typedb.HasTypesFromUnreal())
-            return resolve(api_docs.GetTypeHierarchy(params));
-        setTimeout(function() { timerFunc(resolve, reject, triesLeft-1); }, 100);
-    }
-    let promise = new Promise<any>(function(resolve, reject)
-    {
-        timerFunc(resolve, reject, 50);
-    });
-    return promise;
+registerApiRequestHandlers({
+    connection,
+    getAndParseModule: GetAndParseModule,
+    getModuleName: getModuleName,
+    isUnrealConnected: () => UnrealConnected
 });
 
 connection.languages.inlineValue.on(function (params : InlineValueParams) : Array<InlineValue> {

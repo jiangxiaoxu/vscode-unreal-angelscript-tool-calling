@@ -11,6 +11,7 @@
 [Language Model Tools](#language-model-tools)
 [Build](#build)
 [Known Limits](#known-limits)
+[Fork Maintenance](#fork-maintenance)
 [Upstream](#upstream)
 [中文](#中文)
 [概览](#概览)
@@ -20,6 +21,7 @@
 [Language Model Tools](#language-model-tools-1)
 [构建](#构建)
 [已知限制](#已知限制)
+[维护策略](#维护策略)
 [上游](#上游)
 
 ---
@@ -103,6 +105,22 @@ npm run compile
 - When engine is disconnected, details depend on cached DebugDatabase and available `doc` fields.
 - Cache is not written before DebugDatabase processing completes.
 - This extension is incompatible with `Hazelight.unreal-angelscript`. On each startup, if that extension is installed, this extension shows an error message with an `Open Extensions` action, then stops initialization.
+
+### Fork Maintenance
+This fork uses a layered-compatibility maintenance strategy to keep future upstream merges manageable.
+
+- Fork-only LM/tooling work should stay near contract, adapter, formatter, and query layers when possible.
+- Public `angelscript_*` tool contracts should evolve additively by default.
+- Upstream-sensitive entrypoints should take small bugfixes only unless integration work is unavoidable.
+
+Recommended maintainer commands:
+- `npm run test:fork-boundary`
+- `npm run upstream:divergence:stat`
+- `npm run upstream:divergence:log`
+- `npm run merge:smoke -- --base upstream/master`
+- `npm run merge:dry-run:upstream` (run from a clean worktree)
+
+Detailed guidance and the merge smoke checklist live in [MAINTAINING.md](./MAINTAINING.md).
 
 ### Upstream
 Language Server and Debug Adapter for UnrealEngine-Angelscript:
@@ -189,6 +207,22 @@ npm run compile
 - 引擎断开时,详情能力依赖缓存 DebugDatabase 与 `doc` 字段可用性.
 - DebugDatabase 完整结束前不会写入缓存.
 - 本扩展与 `Hazelight.unreal-angelscript` 不兼容. 每次启动如果检测到该扩展已安装,会弹出错误提示并提供 `Open Extensions` 入口,随后停止初始化.
+
+### 维护策略
+这个 fork 默认采用分层兼容维护策略,以便后续继续合并 upstream 时把冲突控制在可管理范围内.
+
+- fork 专属 LM/tooling 能力尽量停留在 contract、adapter、formatter 和 query 边界层.
+- 公开 `angelscript_*` tool contract 默认只做加法式演进.
+- upstream 敏感入口除非确实无法避免,否则只接受小型 bugfix.
+
+推荐维护命令:
+- `npm run test:fork-boundary`
+- `npm run upstream:divergence:stat`
+- `npm run upstream:divergence:log`
+- `npm run merge:smoke -- --base upstream/master`
+- `npm run merge:dry-run:upstream`(需要干净工作区)
+
+更详细的维护说明和 merge smoke checklist 见 [MAINTAINING.md](./MAINTAINING.md).
 
 ### 上游
 Language Server and Debug Adapter for UnrealEngine-Angelscript:

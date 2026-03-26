@@ -993,7 +993,12 @@
         "watch": "npm-run-all -p watch:*",
         "watch:extension": "cd extension && node esbuild.js --watch",
         "watch:language-server": "cd language-server && node esbuild.js --watch",
+        "test:fork-boundary": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/toolContractUtils.test.js extension/out/__tests__/toolResultTransport.test.js extension/out/__tests__/toolTextFormatter.test.js language-server/out/__tests__/apiSearch.test.js language-server/out/__tests__/getTypeMembers.test.js language-server/out/__tests__/symbolResolve.test.js language-server/out/__tests__/workspaceLayout.test.js",
         "test": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/*.test.js language-server/out/__tests__/*.test.js",
+        "upstream:divergence:log": "git log --oneline upstream/master..HEAD",
+        "upstream:divergence:stat": "git diff --stat upstream/master..HEAD",
+        "merge:smoke": "node scripts/merge-smoke.mjs",
+        "merge:dry-run:upstream": "git merge --no-commit --no-ff --dry-run upstream/master",
         "postinstall": "cd extension && npm install && cd ../language-server && npm install && cd ..",
         "pegjs:compile": "cd language-server/pegjs && peggy angelscript.pegjs --allowed-start-rules start,start_global,start_class,start_enum",
         "pegjs:test": "cd language-server/pegjs && peggy angelscript.pegjs --allowed-start-rules start,start_global,start_class,start_enum --trace --test-file test.as -S start"
