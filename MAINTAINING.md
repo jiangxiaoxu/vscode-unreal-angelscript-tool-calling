@@ -4,46 +4,72 @@
 
 ## Table of Contents
 [English](#english)
-[Goals](#goals)
-[Layered Compatibility Rules](#layered-compatibility-rules)
+[File Tier Rules](#file-tier-rules)
 [Public Contract Rules](#public-contract-rules)
 [Commit Hygiene](#commit-hygiene)
+[Required Checks](#required-checks)
 [Upstream Merge Routine](#upstream-merge-routine)
-[Merge Smoke Checklist](#merge-smoke-checklist)
 [中文](#中文)
-[目标](#目标)
-[分层兼容规则](#分层兼容规则)
+[文件分层规则](#文件分层规则)
 [公开契约规则](#公开契约规则)
 [提交卫生](#提交卫生)
+[必跑检查](#必跑检查)
 [上游合并流程](#上游合并流程)
-[合并冒烟清单](#合并冒烟清单)
 
 ---
 
 ## English
 
-### Goals
 This fork keeps LM tools and related contract/formatter features, while reducing long-term merge cost against `upstream/master`.
 
 The default strategy is layered compatibility:
-- keep fork-only behavior near adapter and contract boundaries
-- avoid invasive edits in upstream-heavy entrypoints
-- prefer additive public API changes over replacement
+- keep fork-only behavior near adapter, contract, formatter, and query boundaries
+- keep upstream-sensitive entrypoints thin
+- prefer additive public API evolution over replacement
 
-### Layered Compatibility Rules
-Treat these files as upstream-sensitive. Change them only for small bugfixes or unavoidable integration work:
+### File Tier Rules
+Use these file tiers to decide where new work should land.
+
+Frozen / minimize changes:
 - `extension/src/extension.ts`
 - `language-server/src/server.ts`
 - `language-server/src/symbols.ts`
+- `package.json`
 
-Prefer landing fork-only behavior in these boundary layers:
+These files should only take small bugfixes, thin glue, registration wiring, or unavoidable integration edits.
+
+Cautious / change deliberately:
+- `extension/src/apiRequests.ts`
+- `README.md`
+- `AGENTS.md`
+- `MAINTAINING.md`
+- `scripts/merge-smoke.mjs`
+
+Boundary / preferred expansion area:
+- `extension/src/apiPanel.ts`
+- `extension/src/scriptRoots.ts`
 - `extension/src/toolRegistry.ts`
 - `extension/src/toolShared.ts`
 - `extension/src/toolTextFormatter.ts`
 - `extension/src/toolResultTransport.ts`
+- `extension/src/toolContractUtils.ts`
+- `extension/src/angelscriptApiSearch.ts`
+- `language-server/src/apiRequestHandlers.ts`
+- `language-server/src/workspaceLayout.ts`
+- `language-server/src/unrealCacheController.ts`
+- `language-server/src/symbolResolve.ts`
 - `language-server/src/api_search.ts`
+- `language-server/src/api_docs.ts`
+- `language-server/src/__tests__/apiSearch.test.ts`
+- `language-server/src/__tests__/getTypeMembers.test.ts`
+- `language-server/src/__tests__/symbolResolve.test.ts`
+- `language-server/src/__tests__/workspaceLayout.test.ts`
 
-Avoid pushing LM text rendering, structured output shaping, and prompt-facing tool behavior into parser/database core files unless no boundary-layer option exists.
+Parser/database/core files should not be modified for fork-only features by default. This includes files such as:
+- `language-server/src/as_parser.ts`
+- `language-server/src/database.ts`
+- `language-server/src/parsed_completion.ts`
+- `language-server/src/references.ts`
 
 ### Public Contract Rules
 All `angelscript_*` tool contracts should evolve additively by default:
@@ -77,61 +103,96 @@ Recommended prefixes for fork-only work:
 - `fork(release):`
 - `fork(docs):`
 
+### Required Checks
+Run these checks before risky maintenance work:
+- `npm run test:fork-boundary`
+- `npm run merge:smoke -- --base upstream/master`
+- `npm run upstream:divergence:stat`
+- `npm run upstream:divergence:log`
+
+Use this quick checklist during review:
+- Did new fork work stay in boundary files when possible?
+- Were frozen files touched only for bugfixes or unavoidable integration?
+- Did any `angelscript_*` schema or activation/config behavior change?
+- Do `README.md` and `CHANGELOG.md` still match the current contract?
+
 ### Upstream Merge Routine
 1. Fetch upstream:
    `git fetch upstream`
 2. Review current divergence:
    `npm run upstream:divergence:stat`
    `npm run upstream:divergence:log`
-3. Create a temporary merge-smoke branch from current work:
+3. Run merge smoke first:
+   `npm run merge:smoke -- --base upstream/master`
+4. Create a temporary merge-smoke branch from current work:
    `git switch -c codex/upstream-smoke-YYYYMMDD`
-4. Attempt a non-final merge:
+5. Attempt a non-final merge:
    `git merge --no-commit --no-ff upstream/master`
-5. Inspect high-risk files first:
+6. Inspect high-risk files first:
    `extension/src/extension.ts`
    `language-server/src/server.ts`
    `package.json`
-6. Run the fork boundary regression suite:
+7. Run the fork boundary regression suite:
    `npm run test:fork-boundary`
-7. If the smoke pass is only for inspection, abort the merge:
+8. If the smoke pass is only for inspection, abort the merge:
    `git merge --abort`
 
 If a change looks generally useful and low-coupling, consider extracting it into a standalone commit that can be proposed upstream.
-
-### Merge Smoke Checklist
-- Has any `angelscript_*` tool schema changed?
-- Has any activation/config behavior changed in `package.json` or `extension/src/extension.ts`?
-- Has any search request/response payload changed?
-- Do README and CHANGELOG still match the actual contract?
-- Did new fork work stay inside boundary layers when possible?
-- Were upstream-sensitive files touched only for bugfixes or unavoidable integration?
 
 ---
 
 ## 中文
 
-### 目标
 这个 fork 会继续保留 LM tools 及其 contract/formatter 能力,同时尽量降低与 `upstream/master` 的长期合并成本.
 
 默认采用分层兼容策略:
-- 把 fork 专属行为尽量留在 adapter 和 contract 边界层
-- 避免频繁修改 upstream 高频入口
+- 把 fork 专属行为尽量留在 adapter、contract、formatter、query 边界层
+- 保持 upstream 敏感入口足够薄
 - 公开 API 优先采用加法式演进,不要直接替换旧语义
 
-### 分层兼容规则
-以下文件视为 upstream 敏感文件. 只有在小型 bugfix 或确实无法绕开的集成场景下才修改:
+### 文件分层规则
+新增工作默认按以下分层落位.
+
+Frozen / 尽量冻结:
 - `extension/src/extension.ts`
 - `language-server/src/server.ts`
 - `language-server/src/symbols.ts`
+- `package.json`
 
-以下边界层优先承载 fork 专属能力:
+这些文件只应承载小型 bugfix、薄 glue、注册 wiring 或无法避免的集成改动.
+
+Cautious / 谨慎改:
+- `extension/src/apiRequests.ts`
+- `README.md`
+- `AGENTS.md`
+- `MAINTAINING.md`
+- `scripts/merge-smoke.mjs`
+
+Boundary / 可继续扩展:
+- `extension/src/apiPanel.ts`
+- `extension/src/scriptRoots.ts`
 - `extension/src/toolRegistry.ts`
 - `extension/src/toolShared.ts`
 - `extension/src/toolTextFormatter.ts`
 - `extension/src/toolResultTransport.ts`
+- `extension/src/toolContractUtils.ts`
+- `extension/src/angelscriptApiSearch.ts`
+- `language-server/src/apiRequestHandlers.ts`
+- `language-server/src/workspaceLayout.ts`
+- `language-server/src/unrealCacheController.ts`
+- `language-server/src/symbolResolve.ts`
 - `language-server/src/api_search.ts`
+- `language-server/src/api_docs.ts`
+- `language-server/src/__tests__/apiSearch.test.ts`
+- `language-server/src/__tests__/getTypeMembers.test.ts`
+- `language-server/src/__tests__/symbolResolve.test.ts`
+- `language-server/src/__tests__/workspaceLayout.test.ts`
 
-LM 文本渲染、structured output 组织、prompt-facing tool 行为,默认不要继续下沉到 parser/database 核心层,除非边界层确实无法承载.
+parser/database/core 文件默认不要为了 fork-only 功能去改,包括但不限于:
+- `language-server/src/as_parser.ts`
+- `language-server/src/database.ts`
+- `language-server/src/parsed_completion.ts`
+- `language-server/src/references.ts`
 
 ### 公开契约规则
 所有 `angelscript_*` tool contract 默认只允许加法式演进:
@@ -165,31 +226,38 @@ fork-only 提交推荐前缀:
 - `fork(release):`
 - `fork(docs):`
 
+### 必跑检查
+以下检查用于高风险维护动作前的基线验证:
+- `npm run test:fork-boundary`
+- `npm run merge:smoke -- --base upstream/master`
+- `npm run upstream:divergence:stat`
+- `npm run upstream:divergence:log`
+
+评审时至少快速确认:
+- 新的 fork 能力是否尽量留在 boundary 文件?
+- Frozen 文件是否只因 bugfix 或无法避免的集成需求而被修改?
+- `angelscript_*` schema 或 activation/config 行为是否发生变化?
+- `README.md` 和 `CHANGELOG.md` 是否仍与当前 contract 一致?
+
 ### 上游合并流程
 1. 拉取 upstream:
    `git fetch upstream`
 2. 查看当前分叉情况:
    `npm run upstream:divergence:stat`
    `npm run upstream:divergence:log`
-3. 从当前工作创建一个临时 merge smoke 分支:
+3. 先运行 merge smoke:
+   `npm run merge:smoke -- --base upstream/master`
+4. 从当前工作创建一个临时 merge smoke 分支:
    `git switch -c codex/upstream-smoke-YYYYMMDD`
-4. 执行一次不落盘的合并尝试:
+5. 执行一次不落盘的合并尝试:
    `git merge --no-commit --no-ff upstream/master`
-5. 优先检查高风险文件:
+6. 优先检查高风险文件:
    `extension/src/extension.ts`
    `language-server/src/server.ts`
    `package.json`
-6. 运行 fork 边界回归测试:
+7. 运行 fork 边界回归测试:
    `npm run test:fork-boundary`
-7. 如果这次只是做 smoke 检查,则中止合并:
+8. 如果这次只是做 smoke 检查,则中止合并:
    `git merge --abort`
 
 如果某些改动本身通用、耦合低,优先把它们抽成独立 commit,必要时尝试回灌 upstream.
-
-### 合并冒烟清单
-- `angelscript_*` tool schema 是否发生变化?
-- `package.json` 或 `extension/src/extension.ts` 中的 activation/config 行为是否发生变化?
-- search request/response payload 是否发生变化?
-- README 和 CHANGELOG 是否仍然与实际 contract 一致?
-- 新的 fork 能力是否尽量留在边界层?
-- upstream 敏感文件是否只因 bugfix 或无法避免的集成需求而被修改?

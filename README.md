@@ -96,10 +96,7 @@ Tool notes:
 - `angelscript_getClassHierarchy`: Returns `root`, `supers`, `derivedByParent`, `limits`, `truncated`, and `sourceByClass` in structured JSON. Human-readable text now uses comment-based lineage/derived trees plus code-first source blocks. Script classes prefer preview lines; native classes render as declaration stubs such as `class AActor;`; unresolved script sources degrade to `// source unavailable` plus a declaration stub. Defaults are `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
 - `angelscript_findReferences`: Requires an absolute `filePath`. All line/character indices in tool input are 1-based. Optional `limit` defaults to `30` and caps the returned references at `200`. Human-readable text now renders `// <filePath>` + `// range: ...` + preview blocks, with truncation surfaced as a final comment.
 
-### Build
-```bash
-npm run compile
-```
+
 
 ### Known Limits
 - When engine is disconnected, details depend on cached DebugDatabase and available `doc` fields.
@@ -109,18 +106,9 @@ npm run compile
 ### Fork Maintenance
 This fork uses a layered-compatibility maintenance strategy to keep future upstream merges manageable.
 
-- Fork-only LM/tooling work should stay near contract, adapter, formatter, and query layers when possible.
-- Public `angelscript_*` tool contracts should evolve additively by default.
-- Upstream-sensitive entrypoints should take small bugfixes only unless integration work is unavoidable.
-
-Recommended maintainer commands:
-- `npm run test:fork-boundary`
-- `npm run upstream:divergence:stat`
-- `npm run upstream:divergence:log`
-- `npm run merge:smoke -- --base upstream/master`
-- `npm run merge:dry-run:upstream` (run from a clean worktree)
-
-Detailed guidance and the merge smoke checklist live in [MAINTAINING.md](./MAINTAINING.md).
+- This repository follows a layered-compatibility strategy for future upstream merges.
+- Detailed maintenance rules live in [MAINTAINING.md](./MAINTAINING.md).
+- Agent and automation execution rules live in [AGENTS.md](./AGENTS.md).
 
 ### Upstream
 Language Server and Debug Adapter for UnrealEngine-Angelscript:
@@ -198,10 +186,6 @@ https://angelscript.hazelight.se
 - `angelscript_getClassHierarchy`: 结构化结果返回 `root`、`supers`、`derivedByParent`、`limits`、`truncated` 与 `sourceByClass`. 可读文本现在会用注释化 lineage/derived tree 加 code-first 的源码块展示层级. 脚本类优先显示预览, native 类显示 `class AActor;` 这类声明桩,脚本源码不可解析时降级为 `// source unavailable` 加声明桩. 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
 - `angelscript_findReferences`: 需要传入绝对路径 `filePath`. 工具输入中的行列索引全部为 1-based. 可选 `limit` 默认值为 `30`,最大值为 `200`. 可读文本现在会按 `// <filePath>` + `// range: ...` + 预览块的形式输出引用,只有截断时才追加最小注释提示.
 
-### 构建
-```bash
-npm run compile
-```
 
 ### 已知限制
 - 引擎断开时,详情能力依赖缓存 DebugDatabase 与 `doc` 字段可用性.
@@ -211,18 +195,9 @@ npm run compile
 ### 维护策略
 这个 fork 默认采用分层兼容维护策略,以便后续继续合并 upstream 时把冲突控制在可管理范围内.
 
-- fork 专属 LM/tooling 能力尽量停留在 contract、adapter、formatter 和 query 边界层.
-- 公开 `angelscript_*` tool contract 默认只做加法式演进.
-- upstream 敏感入口除非确实无法避免,否则只接受小型 bugfix.
-
-推荐维护命令:
-- `npm run test:fork-boundary`
-- `npm run upstream:divergence:stat`
-- `npm run upstream:divergence:log`
-- `npm run merge:smoke -- --base upstream/master`
-- `npm run merge:dry-run:upstream`(需要干净工作区)
-
-更详细的维护说明和 merge smoke checklist 见 [MAINTAINING.md](./MAINTAINING.md).
+- 本仓库采用 layered compatibility 策略来降低未来合并 upstream 的成本.
+- 更完整的维护规则见 [MAINTAINING.md](./MAINTAINING.md).
+- agent 和自动化执行约束见 [AGENTS.md](./AGENTS.md).
 
 ### 上游
 Language Server and Debug Adapter for UnrealEngine-Angelscript:
