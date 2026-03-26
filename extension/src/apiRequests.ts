@@ -63,6 +63,12 @@ export type GetAPISearchScopeLookup = {
     ambiguousCandidates?: string[];
 };
 
+export type GetAPISearchResolvedScope = {
+    requestedScope: string;
+    resolvedQualifiedName: string;
+    resolvedKind: SearchScopeKind;
+};
+
 export type GetAPISearchLspMatch = {
     qualifiedName: string;
     kind: SearchKind;
@@ -80,17 +86,41 @@ export type GetAPISearchLspMatch = {
 
 export type GetAPISearchToolMatch = Omit<GetAPISearchLspMatch, 'detailsData'>;
 
+export type GetAPISearchMatchCounts = {
+    total: number;
+    returned: number;
+    omitted: number;
+};
+
+export type GetAPISearchLspScopeGroup = {
+    scope: GetAPISearchResolvedScope;
+    matches: GetAPISearchLspMatch[];
+    totalMatches: number;
+    omittedMatches: number;
+};
+
+export type GetAPISearchToolScopeGroup = {
+    scope: GetAPISearchResolvedScope;
+    matches: GetAPISearchToolMatch[];
+    totalMatches: number;
+    omittedMatches: number;
+};
+
 export type GetAPISearchLspResult = {
     matches: GetAPISearchLspMatch[];
+    matchCounts: GetAPISearchMatchCounts;
     notices?: GetAPISearchNotice[];
     scopeLookup?: GetAPISearchScopeLookup;
+    scopeGroups?: GetAPISearchLspScopeGroup[];
     inheritedScopeOutcome?: InheritedScopeOutcome;
 };
 
 export type GetAPISearchToolData = {
     matches: GetAPISearchToolMatch[];
+    matchCounts: GetAPISearchMatchCounts;
     notices?: GetAPISearchNotice[];
     scopeLookup?: GetAPISearchScopeLookup;
+    scopeGroups?: GetAPISearchToolScopeGroup[];
     inheritedScopeOutcome?: InheritedScopeOutcome;
     request?: {
         query: string;

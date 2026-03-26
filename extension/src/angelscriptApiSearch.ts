@@ -3,6 +3,7 @@ import {
     GetAPISearchLspResult,
     GetAPISearchParams,
     GetAPISearchRequest,
+    GetAPISearchToolScopeGroup,
     GetAPISearchToolData,
     GetAPISearchToolMatch,
     SearchSource
@@ -77,6 +78,16 @@ function stripInternalSearchMatch(match: GetAPISearchLspResult['matches'][number
     return publicMatch;
 }
 
+function stripInternalSearchScopeGroup(group: NonNullable<GetAPISearchLspResult['scopeGroups']>[number]): GetAPISearchToolScopeGroup
+{
+    return {
+        scope: group.scope,
+        matches: group.matches.map(stripInternalSearchMatch),
+        totalMatches: group.totalMatches,
+        omittedMatches: group.omittedMatches
+    };
+}
+
 export async function isUnrealConnected(client: LanguageClient): Promise<boolean>
 {
     try
@@ -122,8 +133,12 @@ export async function buildSearchPayload(
 
     return {
         matches: result.matches.map(stripInternalSearchMatch),
+        matchCounts: result.matchCounts,
         ...(Array.isArray(result.notices) && result.notices.length > 0 ? { notices: result.notices } : {}),
         ...(result.scopeLookup ? { scopeLookup: result.scopeLookup } : {}),
+        ...(Array.isArray(result.scopeGroups) && result.scopeGroups.length > 0
+            ? { scopeGroups: result.scopeGroups.map(stripInternalSearchScopeGroup) }
+            : {}),
         ...(result.inheritedScopeOutcome ? { inheritedScopeOutcome: result.inheritedScopeOutcome } : {}),
         request: {
             query,

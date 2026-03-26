@@ -389,6 +389,95 @@ function buildSearchGroupBlock(group: SearchGroup, request: UnknownRecord | null
     return lines;
 }
 
+function buildGroupedSearchBlocks(
+    matches: unknown[],
+    request: UnknownRecord | null,
+    limitOutput: boolean = true
+): { blocks: string[][]; omitted: number }
+{
+    const limited = limitOutput ? limitArray(matches) : { items: matches, omitted: 0 };
+    const grouped = new Map<string, SearchGroup>();
+    for (const item of limited.items)
+    {
+        const record = asRecord(item);
+        if (!record)
+            continue;
+
+        const groupInfo = getSearchGroupInfo(record);
+        const existing = grouped.get(groupInfo.key);
+        if (existing)
+        {
+            existing.items.push(record);
+            continue;
+        }
+
+        grouped.set(groupInfo.key, {
+            key: groupInfo.key,
+            header: groupInfo.header,
+            items: [record]
+        });
+    }
+
+    const blocks: string[][] = [];
+    for (const group of grouped.values())
+    {
+        const block = buildSearchGroupBlock(group, request);
+        if (block.length > 0)
+            blocks.push(block);
+    }
+
+    return {
+        blocks,
+        omitted: limited.omitted
+    };
+}
+
+function buildSearchScopeGroupSection(scopeGroup: UnknownRecord, request: UnknownRecord | null): string[]
+{
+    const lines: string[] = [];
+    const scope = asRecord(scopeGroup.scope);
+    const resolvedKind = asString(scope?.resolvedKind);
+    const resolvedQualifiedName = asString(scope?.resolvedQualifiedName);
+    if (resolvedKind && resolvedQualifiedName)
+        pushComment(lines, `scope: ${resolvedKind} ${resolvedQualifiedName}`);
+    else
+        pushComment(lines, 'scope: <unresolved>');
+
+    const matches = asArray(scopeGroup.matches) ?? [];
+    const returnedMatches = matches.length;
+    const totalMatches = Math.max(
+        returnedMatches,
+        asNumber(scopeGroup.totalMatches) ?? returnedMatches
+    );
+    const omittedMatches = asNumber(scopeGroup.omittedMatches) ?? Math.max(0, totalMatches - returnedMatches);
+    if (omittedMatches > 0)
+        pushComment(lines, `returned: ${returnedMatches}/${totalMatches}`);
+
+    const groupedBlocks = buildGroupedSearchBlocks(matches, request, false);
+    if (groupedBlocks.blocks.length === 0)
+    {
+        appendSeparatedBlock(lines, ['// No matches found.']);
+        return lines;
+    }
+
+    let hasRenderedGroup = false;
+    for (const block of groupedBlocks.blocks)
+    {
+        if (!hasRenderedGroup)
+        {
+            appendSeparatedBlock(lines, block);
+            hasRenderedGroup = true;
+            continue;
+        }
+
+        lines.push('====');
+        lines.push(...block);
+        hasRenderedGroup = true;
+    }
+
+    return lines;
+}
+
 function buildResolveDeclaration(symbol: UnknownRecord): string
 {
     const signature = (asString(symbol.signature) ?? asString(symbol.name) ?? '<unknown>').trim();
@@ -638,11 +727,16 @@ function formatSearchApiSuccess(data: UnknownRecord): string
     const request = asRecord(data.request);
     const scope = asString(request?.scope);
     const matches = asArray(data.matches) ?? [];
+    const matchCounts = asRecord(data.matchCounts);
+    const scopeGroups = asArray(data.scopeGroups) ?? [];
     const notices = asArray(data.notices) ?? [];
     const scopeLookup = asRecord(data.scopeLookup);
     const inheritedScopeOutcome = asString(data.inheritedScopeOutcome);
+    const totalMatches = Math.max(matches.length, asNumber(matchCounts?.total) ?? matches.length);
+    const returnedMatches = Math.max(0, asNumber(matchCounts?.returned) ?? matches.length);
+    const omittedMatches = asNumber(matchCounts?.omitted) ?? Math.max(0, totalMatches - returnedMatches);
 
-    if (scopeLookup)
+    if (scopeGroups.length === 0 && scopeLookup)
     {
         const resolvedKind = asString(scopeLookup.resolvedKind);
         const resolvedQualifiedName = asString(scopeLookup.resolvedQualifiedName);
@@ -674,40 +768,50 @@ function formatSearchApiSuccess(data: UnknownRecord): string
         }
     }
 
+    if (omittedMatches > 0)
+        pushComment(lines, `returned: ${returnedMatches}/${totalMatches}`);
+
+    if (scopeGroups.length > 0)
+    {
+        let hasRenderedScopeGroup = false;
+        for (const item of scopeGroups)
+        {
+            const record = asRecord(item);
+            if (!record)
+                continue;
+
+            const block = buildSearchScopeGroupSection(record, request);
+            if (block.length === 0)
+                continue;
+
+            if (!hasRenderedScopeGroup)
+            {
+                appendSeparatedBlock(lines, block);
+                hasRenderedScopeGroup = true;
+                continue;
+            }
+
+            lines.push('====');
+            lines.push(...block);
+            hasRenderedScopeGroup = true;
+        }
+
+        if (!hasRenderedScopeGroup)
+            appendSeparatedBlock(lines, ['// No matches found.']);
+
+        return finalize(lines);
+    }
+
     if (matches.length === 0)
     {
         appendSeparatedBlock(lines, ['// No matches found.']);
         return finalize(lines);
     }
 
-    const limited = limitArray(matches);
-    const grouped = new Map<string, SearchGroup>();
-    for (const item of limited.items)
-    {
-        const record = asRecord(item);
-        if (!record)
-            continue;
-        const groupInfo = getSearchGroupInfo(record);
-        const existing = grouped.get(groupInfo.key);
-        if (existing)
-        {
-            existing.items.push(record);
-            continue;
-        }
-        grouped.set(groupInfo.key, {
-            key: groupInfo.key,
-            header: groupInfo.header,
-            items: [record]
-        });
-    }
-
+    const grouped = buildGroupedSearchBlocks(matches, request);
     let hasRenderedGroup = false;
-    for (const group of grouped.values())
+    for (const block of grouped.blocks)
     {
-        const block = buildSearchGroupBlock(group, request);
-        if (block.length === 0)
-            continue;
-
         if (!hasRenderedGroup)
         {
             appendSeparatedBlock(lines, block);
@@ -720,8 +824,8 @@ function formatSearchApiSuccess(data: UnknownRecord): string
         hasRenderedGroup = true;
     }
 
-    if (limited.omitted > 0)
-        appendSeparatedBlock(lines, [`// ... and ${limited.omitted} more matches`]);
+    if (grouped.omitted > 0)
+        appendSeparatedBlock(lines, [`// ... and ${grouped.omitted} more matches`]);
 
     return finalize(lines);
 }
@@ -881,14 +985,17 @@ function formatFindReferencesSuccess(data: UnknownRecord): string
 {
     const lines: string[] = ['Angelscript references'];
     const references = asArray(data.references) ?? [];
+    const total = Math.max(references.length, asNumber(data.total) ?? references.length);
     const returned = asNumber(data.returned) ?? references.length;
-    const limit = asNumber(data.limit) ?? returned;
     const truncated = asBoolean(data.truncated) ?? false;
     if (references.length === 0)
     {
         appendSeparatedBlock(lines, ['// No references found.']);
         return finalize(lines);
     }
+
+    if (truncated || returned < total)
+        pushComment(lines, `returned: ${returned}/${total}`);
 
     const limited = limitArray(references);
     const grouped = new Map<string, UnknownRecord[]>();
@@ -945,8 +1052,6 @@ function formatFindReferencesSuccess(data: UnknownRecord): string
     }
     if (limited.omitted > 0)
         appendSeparatedBlock(lines, [`// ... and ${limited.omitted} more returned references omitted from text output`]);
-    if (truncated)
-        appendSeparatedBlock(lines, [`// truncated at limit ${limit}. Refine the symbol location or increase limit to see more references.`]);
     return finalize(lines);
 }
 

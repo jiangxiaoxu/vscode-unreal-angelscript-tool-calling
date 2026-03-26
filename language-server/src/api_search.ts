@@ -37,6 +37,12 @@ export type GetAPISearchScopeLookup = {
     ambiguousCandidates?: string[];
 };
 
+export type GetAPISearchResolvedScope = {
+    requestedScope: string;
+    resolvedQualifiedName: string;
+    resolvedKind: ApiSearchScopeKind;
+};
+
 export type GetAPISearchMatch = {
     qualifiedName: string;
     kind: ApiSearchKind;
@@ -52,10 +58,25 @@ export type GetAPISearchMatch = {
     detailsData?: unknown;
 };
 
+export type GetAPISearchMatchCounts = {
+    total: number;
+    returned: number;
+    omitted: number;
+};
+
+export type GetAPISearchScopeGroup = {
+    scope: GetAPISearchResolvedScope;
+    matches: GetAPISearchMatch[];
+    totalMatches: number;
+    omittedMatches: number;
+};
+
 export type GetAPISearchResult = {
     matches: GetAPISearchMatch[];
+    matchCounts: GetAPISearchMatchCounts;
     notices?: GetAPISearchNotice[];
     scopeLookup?: GetAPISearchScopeLookup;
+    scopeGroups?: GetAPISearchScopeGroup[];
     inheritedScopeOutcome?: ApiInheritedScopeOutcome;
 };
 
@@ -163,13 +184,26 @@ type ResolvedScope = {
 };
 
 type ScopeResolution = {
-    scope: ResolvedScope | null;
+    scopes: ResolvedScope[];
     notices: GetAPISearchNotice[];
     scopeLookup: GetAPISearchScopeLookup;
     inheritedScopeOutcome?: ApiInheritedScopeOutcome;
+    hasMergedSameNameScope?: boolean;
 };
 
-type ScopeSelectorPreference = 'any' | 'namespace';
+type ScopeCandidateMatchMode = 'exact-qualified' | 'exact-short' | 'prefix';
+
+type RankedScopeGroup = {
+    scope: ResolvedScope;
+    candidates: SearchCandidate[];
+};
+
+type LimitedScopeGroup = {
+    scope: ResolvedScope;
+    candidates: SearchCandidate[];
+    totalMatches: number;
+    omittedMatches: number;
+};
 
 type SearchConnector = 'space' | 'namespace' | 'member';
 
@@ -245,9 +279,12 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
     let notices: GetAPISearchNotice[] = [];
     let scopeLookup: GetAPISearchScopeLookup | undefined = undefined;
     let inheritedScopeOutcome: ApiInheritedScopeOutcome | undefined = undefined;
+    let scopeGroups: GetAPISearchScopeGroup[] | undefined = undefined;
 
     let index = getSearchIndex();
-    let candidates = index.entries.map((entry) : SearchCandidate => ({ entry }));
+    let baseCandidates = index.entries.map((entry) : SearchCandidate => ({ entry }));
+    let resolvedScopes: ResolvedScope[] = [];
+    let hasMergedSameNameScope = false;
 
     if (params.includeInheritedFromScope && !params.scope)
         inheritedScopeOutcome = 'ignored_missing_scope';
@@ -258,16 +295,17 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
         notices.push(...scopeResolution.notices);
         scopeLookup = scopeResolution.scopeLookup;
         inheritedScopeOutcome = scopeResolution.inheritedScopeOutcome;
-        if (!scopeResolution.scope)
-            return finalizeSearchResult([], notices, scopeLookup, inheritedScopeOutcome);
-
-        if (scopeResolution.scope.kind == 'namespace')
-            candidates = applyNamespaceScope(candidates, scopeResolution.scope.qualifiedName);
-        else
-            candidates = applyTypeScope(candidates, scopeResolution.scope, notices);
+        resolvedScopes = scopeResolution.scopes;
+        hasMergedSameNameScope = scopeResolution.hasMergedSameNameScope === true;
+        if (resolvedScopes.length == 0)
+        {
+            return finalizeSearchResult([], notices, {
+                scopeLookup,
+                inheritedScopeOutcome,
+                matchCounts: createMatchCounts(0, 0)
+            });
+        }
     }
-
-    candidates = candidates.filter((candidate) => filterCandidate(candidate.entry, params));
 
     if (params.mode == 'smart' && params.smartQueries && params.smartQueries.every((query) => isTinySmartQuery(query)))
     {
@@ -275,12 +313,44 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
             code: 'QUERY_TOO_SHORT',
             message: `Smart search requires at least ${QUERY_TOO_SHORT_THRESHOLD} searchable characters.`
         });
-        return finalizeSearchResult([], notices, scopeLookup, inheritedScopeOutcome);
+        if (hasMergedSameNameScope)
+            scopeGroups = buildScopeGroupsFromLimitedGroups([], resolvedScopes, params.includeDocs);
+
+        return finalizeSearchResult([], notices, {
+            scopeLookup,
+            scopeGroups,
+            inheritedScopeOutcome,
+            matchCounts: createMatchCounts(0, 0)
+        });
     }
 
-    let scoredMatches = rankCandidates(candidates, params);
-    let limitedMatches = scoredMatches.slice(0, params.limit).map((candidate) => buildMatch(candidate, params.includeDocs));
-    return finalizeSearchResult(limitedMatches, notices, scopeLookup, inheritedScopeOutcome);
+    if (!hasMergedSameNameScope)
+    {
+        let candidates = baseCandidates;
+        if (resolvedScopes.length == 1)
+            candidates = applyResolvedScope(candidates, resolvedScopes[0], notices);
+
+        candidates = candidates.filter((candidate) => filterCandidate(candidate.entry, params));
+        let scoredMatches = rankCandidates(candidates, params);
+        let limitedMatches = scoredMatches.slice(0, params.limit).map((candidate) => buildMatch(candidate, params.includeDocs));
+        return finalizeSearchResult(limitedMatches, notices, {
+            scopeLookup,
+            inheritedScopeOutcome,
+            matchCounts: createMatchCounts(scoredMatches.length, limitedMatches.length)
+        });
+    }
+
+    let rankedScopeGroups = buildRankedScopeGroups(baseCandidates, resolvedScopes, notices, params);
+    let limitedScopeGroups = limitMergedScopeGroups(rankedScopeGroups, params.limit);
+    scopeGroups = buildScopeGroupsFromLimitedGroups(limitedScopeGroups, resolvedScopes, params.includeDocs);
+    let matches = scopeGroups.flatMap((group) => group.matches);
+    let totalMatches = scopeGroups.reduce((sum, group) => sum + group.totalMatches, 0);
+    return finalizeSearchResult(matches, notices, {
+        scopeLookup,
+        scopeGroups,
+        inheritedScopeOutcome,
+        matchCounts: createMatchCounts(totalMatches, matches.length)
+    });
 }
 
 function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
@@ -382,22 +452,40 @@ function normalizeSource(value: unknown) : ApiSearchSource
 function finalizeSearchResult(
     matches: GetAPISearchMatch[],
     notices: GetAPISearchNotice[],
-    scopeLookup?: GetAPISearchScopeLookup,
-    inheritedScopeOutcome?: ApiInheritedScopeOutcome
+    options: {
+        scopeLookup?: GetAPISearchScopeLookup;
+        scopeGroups?: GetAPISearchScopeGroup[];
+        inheritedScopeOutcome?: ApiInheritedScopeOutcome;
+        matchCounts: GetAPISearchMatchCounts;
+    }
 ) : GetAPISearchResult
 {
     let result: GetAPISearchResult = {
-        matches
+        matches,
+        matchCounts: options.matchCounts
     };
 
     if (notices.length != 0)
         result.notices = notices;
-    if (scopeLookup)
-        result.scopeLookup = scopeLookup;
-    if (inheritedScopeOutcome)
-        result.inheritedScopeOutcome = inheritedScopeOutcome;
+    if (options.scopeLookup)
+        result.scopeLookup = options.scopeLookup;
+    if (options.scopeGroups && options.scopeGroups.length > 0)
+        result.scopeGroups = options.scopeGroups;
+    if (options.inheritedScopeOutcome)
+        result.inheritedScopeOutcome = options.inheritedScopeOutcome;
 
     return result;
+}
+
+function createMatchCounts(total: number, returned: number) : GetAPISearchMatchCounts
+{
+    let safeTotal = Math.max(0, total);
+    let safeReturned = Math.max(0, Math.min(returned, safeTotal));
+    return {
+        total: safeTotal,
+        returned: safeReturned,
+        omitted: Math.max(0, safeTotal - safeReturned)
+    };
 }
 
 function getSearchIndex() : SearchIndex
@@ -689,37 +777,51 @@ function resolveScope(
 ) : ScopeResolution
 {
     let notices: GetAPISearchNotice[] = [];
-    let selector = parseScopeSelector(scopeName);
-    let normalizedScope = selector.lookupScope;
+    let normalizedScope = scopeName.trim();
     let normalizedScopeLower = normalizedScope.toLowerCase();
 
     let exactQualifiedCandidates = index.scopeCandidates.filter((candidate) => candidate.qualifiedName.toLowerCase() == normalizedScopeLower);
     let candidates = exactQualifiedCandidates;
+    let candidateMatchMode: ScopeCandidateMatchMode = 'exact-qualified';
     if (candidates.length == 0)
     {
         let exactShortCandidates = index.scopeCandidates.filter((candidate) => candidate.shortName.toLowerCase() == normalizedScopeLower);
         candidates = exactShortCandidates;
+        candidateMatchMode = 'exact-short';
     }
     if (candidates.length == 0)
     {
         let prefixCandidates = index.scopeCandidates.filter((candidate) => candidate.qualifiedName.toLowerCase().startsWith(normalizedScopeLower));
         candidates = prefixCandidates;
+        candidateMatchMode = 'prefix';
     }
-    candidates = applyScopeSelectorPreference(candidates, selector.preference);
     candidates = dedupeScopeCandidates(candidates);
-    candidates = disambiguateScopeCandidates(candidates, selector.preference);
 
     let scopeLookup: GetAPISearchScopeLookup = {
-        requestedScope: selector.requestedScope
+        requestedScope: normalizedScope
     };
 
     if (candidates.length == 0)
     {
         return {
-            scope: null,
+            scopes: [],
             notices,
             scopeLookup,
             inheritedScopeOutcome: includeInheritedFromScope ? 'ignored_scope_not_found' : undefined
+        };
+    }
+
+    let mergedScopeResolution = tryResolveMergedSameNameScope(
+        candidates,
+        normalizedScope,
+        includeInheritedFromScope,
+        candidateMatchMode
+    );
+    if (mergedScopeResolution)
+    {
+        return {
+            ...mergedScopeResolution,
+            notices
         };
     }
 
@@ -729,7 +831,7 @@ function resolveScope(
             .map((candidate) => candidate.qualifiedName)
             .sort((left, right) => left.localeCompare(right));
         return {
-            scope: null,
+            scopes: [],
             notices,
             scopeLookup,
             inheritedScopeOutcome: includeInheritedFromScope ? 'ignored_scope_ambiguous' : undefined
@@ -737,87 +839,23 @@ function resolveScope(
     }
 
     let candidate = candidates[0];
-    scopeLookup.resolvedQualifiedName = candidate.qualifiedName;
-    scopeLookup.resolvedKind = candidate.kind;
-
-    if (candidate.kind == 'namespace')
+    let resolvedScope = buildResolvedScope(candidate, normalizedScope, includeInheritedFromScope);
+    if (!resolvedScope)
     {
         return {
-            scope: {
-                kind: 'namespace',
-                qualifiedName: candidate.qualifiedName,
-                namespace: candidate.namespace,
-                scopeLookup
-            },
+            scopes: [],
             notices,
             scopeLookup,
-            inheritedScopeOutcome: includeInheritedFromScope ? 'ignored_scope_not_class' : undefined
+            inheritedScopeOutcome: includeInheritedFromScope ? 'ignored_scope_not_found' : undefined
         };
     }
 
-    let appliedIncludeInherited = includeInheritedFromScope && candidate.isClassType;
-
     return {
-        scope: {
-            kind: 'type',
-            qualifiedName: candidate.qualifiedName,
-            dbType: candidate.dbType,
-            scopeLookup,
-            includeInherited: appliedIncludeInherited
-        },
+        scopes: [resolvedScope],
         notices,
-        scopeLookup,
-        inheritedScopeOutcome: includeInheritedFromScope
-            ? (candidate.isClassType ? 'applied' : 'ignored_scope_not_class')
-            : undefined
+        scopeLookup: resolvedScope.scopeLookup,
+        inheritedScopeOutcome: getInheritedScopeOutcomeForCandidate(candidate, includeInheritedFromScope)
     };
-}
-
-function parseScopeSelector(scopeName: string) : { requestedScope: string; lookupScope: string; preference: ScopeSelectorPreference }
-{
-    let requestedScope = scopeName.trim();
-    if (requestedScope.endsWith('::'))
-    {
-        let lookupScope = requestedScope.slice(0, -2).trimEnd();
-        if (lookupScope.length > 0)
-        {
-            return {
-                requestedScope,
-                lookupScope,
-                preference: 'namespace'
-            };
-        }
-    }
-
-    return {
-        requestedScope,
-        lookupScope: requestedScope,
-        preference: 'any'
-    };
-}
-
-function applyScopeSelectorPreference(candidates: ScopeCandidate[], preference: ScopeSelectorPreference) : ScopeCandidate[]
-{
-    if (preference != 'namespace')
-        return candidates;
-
-    return candidates.filter((candidate) => candidate.kind == 'namespace');
-}
-
-function disambiguateScopeCandidates(candidates: ScopeCandidate[], preference: ScopeSelectorPreference) : ScopeCandidate[]
-{
-    if (preference != 'any' || candidates.length <= 1)
-        return candidates;
-
-    let qualifiedNames = new Set(candidates.map((candidate) => candidate.qualifiedName.toLowerCase()));
-    if (qualifiedNames.size != 1)
-        return candidates;
-
-    let typeCandidates = candidates.filter((candidate) => candidate.kind != 'namespace');
-    if (typeCandidates.length == 1)
-        return typeCandidates;
-
-    return candidates;
 }
 
 function applyNamespaceScope(candidates: SearchCandidate[], namespaceQualifiedName: string) : SearchCandidate[]
@@ -922,6 +960,216 @@ function applyTypeScope(
     }
 
     return scopedCandidates;
+}
+
+function tryResolveMergedSameNameScope(
+    candidates: ScopeCandidate[],
+    requestedScope: string,
+    includeInheritedFromScope: boolean,
+    candidateMatchMode: ScopeCandidateMatchMode
+) : Omit<ScopeResolution, 'notices'> | null
+{
+    if (candidateMatchMode == 'prefix' || candidates.length != 2)
+        return null;
+
+    let qualifiedNames = new Set(candidates.map((candidate) => candidate.qualifiedName.toLowerCase()));
+    if (qualifiedNames.size != 1)
+        return null;
+
+    let namespaceCandidate = candidates.find((candidate) => candidate.kind == 'namespace');
+    let typeCandidate = candidates.find((candidate) => candidate.kind != 'namespace');
+    if (!namespaceCandidate || !typeCandidate)
+        return null;
+
+    let namespaceScope = buildResolvedScope(namespaceCandidate, requestedScope, false);
+    let typeScope = buildResolvedScope(typeCandidate, requestedScope, includeInheritedFromScope);
+    if (!namespaceScope || !typeScope)
+        return null;
+
+    return {
+        scopes: [typeScope, namespaceScope],
+        scopeLookup: typeScope.scopeLookup,
+        inheritedScopeOutcome: getInheritedScopeOutcomeForCandidate(typeCandidate, includeInheritedFromScope),
+        hasMergedSameNameScope: true
+    };
+}
+
+function buildResolvedScope(
+    candidate: ScopeCandidate,
+    requestedScope: string,
+    includeInheritedFromScope: boolean
+) : ResolvedScope | null
+{
+    let scopeLookup: GetAPISearchScopeLookup = {
+        requestedScope,
+        resolvedQualifiedName: candidate.qualifiedName,
+        resolvedKind: candidate.kind
+    };
+
+    if (candidate.kind == 'namespace')
+    {
+        if (!candidate.namespace)
+            return null;
+
+        return {
+            kind: 'namespace',
+            qualifiedName: candidate.qualifiedName,
+            namespace: candidate.namespace,
+            scopeLookup
+        };
+    }
+
+    if (!candidate.dbType)
+        return null;
+
+    return {
+        kind: 'type',
+        qualifiedName: candidate.qualifiedName,
+        dbType: candidate.dbType,
+        scopeLookup,
+        includeInherited: includeInheritedFromScope && candidate.isClassType
+    };
+}
+
+function getInheritedScopeOutcomeForCandidate(
+    candidate: ScopeCandidate,
+    includeInheritedFromScope: boolean
+) : ApiInheritedScopeOutcome | undefined
+{
+    if (!includeInheritedFromScope)
+        return undefined;
+    if (candidate.kind == 'namespace')
+        return 'ignored_scope_not_class';
+    return candidate.isClassType ? 'applied' : 'ignored_scope_not_class';
+}
+
+function applyResolvedScope(
+    candidates: SearchCandidate[],
+    scope: ResolvedScope,
+    notices: GetAPISearchNotice[]
+) : SearchCandidate[]
+{
+    if (scope.kind == 'namespace')
+        return applyNamespaceScope(candidates, scope.qualifiedName);
+    return applyTypeScope(candidates, scope, notices);
+}
+
+function buildRankedScopeGroups(
+    baseCandidates: SearchCandidate[],
+    scopes: ResolvedScope[],
+    notices: GetAPISearchNotice[],
+    params: NormalizedSearchParams
+) : RankedScopeGroup[]
+{
+    let rankedGroups: RankedScopeGroup[] = [];
+    for (let scope of scopes)
+    {
+        let scopedCandidates = applyResolvedScope(baseCandidates, scope, notices)
+            .filter((candidate) => filterCandidate(candidate.entry, params));
+        rankedGroups.push({
+            scope,
+            candidates: rankCandidates(scopedCandidates, params)
+        });
+    }
+    return rankedGroups;
+}
+
+function limitMergedScopeGroups(groups: RankedScopeGroup[], limit: number) : LimitedScopeGroup[]
+{
+    let selectedByGroup = groups.map(() => new Array<SearchCandidate>());
+    let nextIndexByGroup = groups.map(() => 0);
+    let remainingLimit = limit;
+
+    for (let index = 0; index < groups.length; index += 1)
+    {
+        if (remainingLimit <= 0)
+            break;
+        if (groups[index].candidates.length == 0)
+            continue;
+
+        selectedByGroup[index].push(groups[index].candidates[0]);
+        nextIndexByGroup[index] = 1;
+        remainingLimit -= 1;
+    }
+
+    while (remainingLimit > 0)
+    {
+        let bestGroupIndex = -1;
+        let bestCandidate: SearchCandidate | null = null;
+
+        for (let index = 0; index < groups.length; index += 1)
+        {
+            let nextCandidate = groups[index].candidates[nextIndexByGroup[index]];
+            if (!nextCandidate)
+                continue;
+
+            if (!bestCandidate || compareCandidates(nextCandidate, bestCandidate) < 0)
+            {
+                bestCandidate = nextCandidate;
+                bestGroupIndex = index;
+            }
+        }
+
+        if (bestGroupIndex == -1 || !bestCandidate)
+            break;
+
+        selectedByGroup[bestGroupIndex].push(bestCandidate);
+        nextIndexByGroup[bestGroupIndex] += 1;
+        remainingLimit -= 1;
+    }
+
+    return groups.map((group, index) => ({
+        scope: group.scope,
+        candidates: selectedByGroup[index],
+        totalMatches: group.candidates.length,
+        omittedMatches: Math.max(0, group.candidates.length - selectedByGroup[index].length)
+    }));
+}
+
+function buildScopeGroupsFromLimitedGroups(
+    limitedGroups: LimitedScopeGroup[],
+    scopes: ResolvedScope[],
+    includeDocs: boolean
+) : GetAPISearchScopeGroup[]
+{
+    let groupsByQualifiedName = new Map<string, LimitedScopeGroup>();
+    for (let group of limitedGroups)
+        groupsByQualifiedName.set(getScopeGroupKey(group.scope), group);
+
+    return scopes.map((scope) =>
+    {
+        let limitedGroup = groupsByQualifiedName.get(getScopeGroupKey(scope));
+        let candidates = limitedGroup ? limitedGroup.candidates : [];
+        let totalMatches = limitedGroup ? limitedGroup.totalMatches : 0;
+        let omittedMatches = limitedGroup ? limitedGroup.omittedMatches : 0;
+        return {
+            scope: buildResolvedScopeInfo(scope),
+            matches: candidates.map((candidate) => buildMatch(candidate, includeDocs)),
+            totalMatches,
+            omittedMatches
+        };
+    });
+}
+
+function getScopeGroupKey(scope: ResolvedScope) : string
+{
+    return `${getResolvedScopeKind(scope)}|${scope.qualifiedName}`;
+}
+
+function buildResolvedScopeInfo(scope: ResolvedScope) : GetAPISearchResolvedScope
+{
+    return {
+        requestedScope: scope.scopeLookup.requestedScope,
+        resolvedQualifiedName: scope.qualifiedName,
+        resolvedKind: getResolvedScopeKind(scope)
+    };
+}
+
+function getResolvedScopeKind(scope: ResolvedScope) : ApiSearchScopeKind
+{
+    if (scope.kind == 'namespace')
+        return 'namespace';
+    return getTypeKind(scope.dbType);
 }
 
 function getScopeInheritanceChain(dbType: typedb.DBType) : Array<{ qualifiedName: string; distance: number }>

@@ -52,6 +52,11 @@ test('searchApi success is rendered as grouped code-first text', () =>
                 resolvedQualifiedName: 'Gameplay::Movement::UMovementComponent',
                 resolvedKind: 'class'
             },
+            matchCounts: {
+                total: 2,
+                returned: 2,
+                omitted: 0
+            },
             inheritedScopeOutcome: 'applied',
             notices: [
                 {
@@ -97,6 +102,57 @@ test('searchApi success is rendered as grouped code-first text', () =>
         '/**',
         ' * Starts movement on the current actor.',
         ' */',
+        'void StartMovement();'
+    ].join('\n'));
+});
+
+test('searchApi renders top-level returned count only when truncated', () =>
+{
+    const text = formatToolText('angelscript_searchApi', {
+        ok: true,
+        data: {
+            request: {
+                query: 'Movement',
+                regex: false,
+                limit: 2,
+                source: 'both'
+            },
+            matchCounts: {
+                total: 5,
+                returned: 2,
+                omitted: 3
+            },
+            matches: [
+                {
+                    qualifiedName: 'Gameplay::Movement::UMovementComponent',
+                    kind: 'class',
+                    matchReason: 'exact-qualified',
+                    source: 'native',
+                    signature: 'class Gameplay::Movement::UMovementComponent'
+                },
+                {
+                    qualifiedName: 'Gameplay::Movement::UMovementComponent.StartMovement',
+                    kind: 'method',
+                    matchReason: 'boundary-ordered',
+                    source: 'script',
+                    containerQualifiedName: 'Gameplay::Movement::UMovementComponent',
+                    signature: 'void Gameplay::Movement::UMovementComponent.StartMovement()'
+                }
+            ]
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript API search',
+        '// returned: 2/5',
+        '',
+        '// namespace Gameplay::Movement',
+        '// match: exact-qualified',
+        '// native',
+        'class UMovementComponent;',
+        '====',
+        '// Gameplay::Movement::UMovementComponent',
+        '// match: boundary-ordered',
         'void StartMovement();'
     ].join('\n'));
 });
@@ -227,6 +283,107 @@ test('searchApi prefers full documentation over summary when includeDocs is enab
     ].join('\n'));
 });
 
+test('searchApi renders merged same-name scope groups as separate sections', () =>
+{
+    const text = formatToolText('angelscript_searchApi', {
+        ok: true,
+        data: {
+            request: {
+                query: 'Get',
+                regex: false,
+                limit: 2,
+                source: 'script',
+                scope: 'UCthuBattleSet'
+            },
+            scopeLookup: {
+                requestedScope: 'UCthuBattleSet',
+                resolvedQualifiedName: 'UCthuBattleSet',
+                resolvedKind: 'class'
+            },
+            matchCounts: {
+                total: 3,
+                returned: 2,
+                omitted: 1
+            },
+            scopeGroups: [
+                {
+                    scope: {
+                        requestedScope: 'UCthuBattleSet',
+                        resolvedQualifiedName: 'UCthuBattleSet',
+                        resolvedKind: 'class'
+                    },
+                    totalMatches: 1,
+                    omittedMatches: 0,
+                    matches: [
+                        {
+                            qualifiedName: 'UCthuBattleSet.GetOwnedGameplayTags',
+                            kind: 'method',
+                            matchReason: 'boundary-ordered',
+                            source: 'script',
+                            containerQualifiedName: 'UCthuBattleSet',
+                            signature: 'void UCthuBattleSet.GetOwnedGameplayTags()'
+                        }
+                    ]
+                },
+                {
+                    scope: {
+                        requestedScope: 'UCthuBattleSet',
+                        resolvedQualifiedName: 'UCthuBattleSet',
+                        resolvedKind: 'namespace'
+                    },
+                    totalMatches: 2,
+                    omittedMatches: 1,
+                    matches: [
+                        {
+                            qualifiedName: 'UCthuBattleSet::GetManaAttr',
+                            kind: 'function',
+                            matchReason: 'boundary-ordered',
+                            source: 'script',
+                            containerQualifiedName: 'UCthuBattleSet',
+                            signature: 'FGameplayAttribute UCthuBattleSet::GetManaAttr()'
+                        }
+                    ]
+                }
+            ],
+            matches: [
+                {
+                    qualifiedName: 'UCthuBattleSet.GetOwnedGameplayTags',
+                    kind: 'method',
+                    matchReason: 'boundary-ordered',
+                    source: 'script',
+                    containerQualifiedName: 'UCthuBattleSet',
+                    signature: 'void UCthuBattleSet.GetOwnedGameplayTags()'
+                },
+                {
+                    qualifiedName: 'UCthuBattleSet::GetManaAttr',
+                    kind: 'function',
+                    matchReason: 'boundary-ordered',
+                    source: 'script',
+                    containerQualifiedName: 'UCthuBattleSet',
+                    signature: 'FGameplayAttribute UCthuBattleSet::GetManaAttr()'
+                }
+            ]
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript API search',
+        '// returned: 2/3',
+        '',
+        '// scope: class UCthuBattleSet',
+        '// UCthuBattleSet',
+        '// match: boundary-ordered',
+        'void GetOwnedGameplayTags();',
+        '====',
+        '// scope: namespace UCthuBattleSet',
+        '// returned: 1/2',
+        '',
+        '// UCthuBattleSet',
+        '// match: boundary-ordered',
+        'FGameplayAttribute GetManaAttr();'
+    ].join('\n'));
+});
+
 test('searchApi renders empty results as a code-style comment', () =>
 {
     const text = formatToolText('angelscript_searchApi', {
@@ -237,6 +394,11 @@ test('searchApi renders empty results as a code-style comment', () =>
                 regex: false,
                 limit: 20,
                 source: 'both'
+            },
+            matchCounts: {
+                total: 0,
+                returned: 0,
+                omitted: 0
             },
             matches: []
         }
@@ -743,15 +905,15 @@ test('findReferences renders truncation metadata and notice', () =>
 
     assert.equal(text, [
         'Angelscript references',
+        '// returned: 2/35',
+        '',
         '// G:/Project/Game/Characters/Hero.as',
         '// range: 128:5-128:17',
         '128:        JumpToTarget(TargetActor);',
         '====',
         '// G:/Project/Game/Abilities/JumpAbility.as',
         '// range: 45:10-45:22',
-        '45:        Hero.JumpToTarget(TargetActor);',
-        '',
-        '// truncated at limit 2. Refine the symbol location or increase limit to see more references.'
+        '45:        Hero.JumpToTarget(TargetActor);'
     ].join('\n'));
 });
 
