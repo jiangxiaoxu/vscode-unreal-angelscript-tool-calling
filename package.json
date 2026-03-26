@@ -46,8 +46,8 @@
                 ],
                 "toolReferenceName": "angelscript_searchApi",
                 "displayName": "Angelscript API Search",
-                "modelDescription": "Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires query. Optional controls: mode (smart|exact|regex, default smart), limit (default 20, max 200), kinds (class|struct|enum|method|function|property|globalVariable), source (native|script|both, default both), scopePrefix, includeInheritedFromScope. Function results include namespace/global functions and mixin functions. Regex mode matches short names, canonical qualified names, and mixin member-view aliases only. When includeInheritedFromScope is requested, the top-level result may include inheritedScopeOutcome. Returns readable text and, by default, structured JSON payload.",
-                "userDescription": "Search Angelscript API symbols and docs.",
+                "modelDescription": "Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires query. Default plain search is case-insensitive, favors code-like queries such as `Type.Member` and `Namespace::Func`, supports ordered token gaps, and uses weak token reorder only as a low-priority fallback. A trailing `(` or `()` means callable-only and restricts plain results to `method` and `function`; it does not match argument lists or zero-arg signatures. Optional controls: limit (default 20, max 200), source (native|script|both, default both), scope, includeInheritedFromScope, includeDocs, and regex. `scope` narrows the search domain to a known namespace or containing type before ranking. `includeDocs=true` only enriches returned matches with full documentation and does not affect ranking. When `regex=true`, `query` must use VS Code-style `/pattern/flags` syntax and matches only symbol name views: short names, qualified names, mixin member-view aliases, and callable `...()` views for methods/functions. When includeInheritedFromScope is requested, the top-level result may include inheritedScopeOutcome. Structured matches may include `matchReason` to help the model judge confidence. Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Success text groups matches by owner or namespace and renders declarations with minimal comment metadata.",
+                "userDescription": "Search Angelscript API symbols with plain name search by default. Use `Type.Member`, `Namespace::Func`, token gaps like `Status AI`, a trailing `(` for callable-only, optional `scope`, or `regex=true` with `/pattern/flags` when needed. `includeDocs=true` only enriches returned matches.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(search)",
                 "inputSchema": {
@@ -55,17 +55,7 @@
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "Search query for Angelscript API symbols."
-                        },
-                        "mode": {
-                            "type": "string",
-                            "description": "Optional. Search mode. Default is smart.",
-                            "enum": [
-                                "smart",
-                                "exact",
-                                "regex"
-                            ],
-                            "default": "smart"
+                            "description": "Search query for Angelscript API symbols. Plain search is case-insensitive and supports code-like queries such as `Type.Member` and `Namespace::Func`, ordered token gaps such as `Status AI`, and a low-priority weak reorder fallback. A trailing `(` or `()` limits plain results to callable symbols (`method` and `function`) without matching argument lists. When `regex=true`, provide a VS Code-style `/pattern/flags` regex."
                         },
                         "limit": {
                             "type": "number",
@@ -83,29 +73,23 @@
                                 "both"
                             ]
                         },
-                        "kinds": {
-                            "type": "array",
-                            "description": "Optional. Filter results by kinds.",
-                            "items": {
-                                "type": "string",
-                                "enum": [
-                                    "class",
-                                    "struct",
-                                    "enum",
-                                    "method",
-                                    "function",
-                                    "property",
-                                    "globalVariable"
-                                ]
-                            }
-                        },
-                        "scopePrefix": {
+                        "scope": {
                             "type": "string",
-                            "description": "Optional. Namespace or type scope. Type scopes can expand inherited methods and properties, and also surface applicable mixin functions."
+                            "description": "Optional. Known namespace or containing type. Type scopes can expand inherited methods and properties, and also surface applicable mixin functions."
                         },
                         "includeInheritedFromScope": {
                             "type": "boolean",
                             "description": "Optional. Only applies to class/type scopes. Expand inherited methods and properties.",
+                            "default": false
+                        },
+                        "includeDocs": {
+                            "type": "boolean",
+                            "description": "Optional. Attach full documentation text to returned matches. This enriches results only and does not affect search ranking.",
+                            "default": false
+                        },
+                        "regex": {
+                            "type": "boolean",
+                            "description": "Optional. Interpret `query` as a VS Code-style `/pattern/flags` regex. Regex search matches only symbol name views, plus callable `...()` views for methods and functions.",
                             "default": false
                         }
                     },
@@ -123,8 +107,8 @@
                 ],
                 "toolReferenceName": "angelscript_getTypeMembers",
                 "displayName": "Angelscript Type Members",
-                "modelDescription": "Use when you need the member list of a specific Angelscript type, including inherited members when requested. Do not use when you need parent/child hierarchy traversal between classes. Requires exact name (optional namespace for disambiguation). Optional switches: includeInherited (default false), includeDocs (default false), and kinds (both|method|property, default both). Returns readable text and, by default, structured JSON payload with type identity and member entries.",
-                "userDescription": "List members for a given Angelscript type, optionally including inherited members.",
+                "modelDescription": "Use when you need the member list of a specific Angelscript type, including inherited members when requested. Do not use when you need parent/child hierarchy traversal between classes. Requires exact name (optional namespace for disambiguation). Optional switches: includeInherited (default false), includeDocs (default false), and kinds (both|method|property, default both). Returns readable text by default; structured JSON is included only when output mode is `text+structured`. Structured payload includes `type.name`, `type.namespace`, `type.qualifiedName`, always-on `type.description`, and member entries whose descriptions are populated only when `includeDocs=true`.",
+                "userDescription": "List members for a given Angelscript type. Structured JSON is optional via `text+structured` mode.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-class)",
                 "inputSchema": {
@@ -173,7 +157,8 @@
                 ],
                 "toolReferenceName": "angelscript_resolveSymbolAtPosition",
                 "displayName": "Angelscript Resolve Symbol At Position",
-                "modelDescription": "Use when you have an absolute file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires absolute filePath and position (line, character, both 1-based). Optional includeDocumentation controls doc payload (default true). Returns readable text and, by default, structured JSON payload. Output includes symbol/kind/signature, optional absolute definition filePath + line range + preview, and optional doc block. Preview checks one line above definition start for Unreal reflection macros (UCLASS|UPROPERTY|UFUNCTION|UENUM).",
+                "modelDescription": "Use when you have an absolute file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires absolute filePath and position (line, character, both 1-based). Optional includeDocumentation controls doc payload (default true). Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Success text prefers normalized `/** ... */` docs plus declaration or definition preview. Preview still checks one line above definition start for Unreal reflection macros (UCLASS|UPROPERTY|UFUNCTION|UENUM).",
+                "userDescription": "Resolve the symbol at a file position with code-like text. Structured JSON is optional via `text+structured` mode.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-method)",
                 "inputSchema": {
@@ -223,8 +208,8 @@
                 ],
                 "toolReferenceName": "angelscript_getClassHierarchy",
                 "displayName": "Angelscript Class Hierarchy",
-                "modelDescription": "Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., \"APawn\"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns readable text and, by default, structured JSON payload, including root, supers, derivedByParent, limits, truncated info, and script-class preview text when available. If a script source path cannot be resolved, that preview degrades to source unavailable instead of failing the tool.",
-                "userDescription": "Get compact class hierarchy with script class file path and line range.",
+                "modelDescription": "Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., \"APawn\"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Structured payload includes root, supers, derivedByParent, limits, truncated info, and script-class preview text when available. Success text uses comment-based lineage/derived trees plus source previews or native declaration stubs, and unresolved script sources degrade to `// source unavailable` instead of failing the tool.",
+                "userDescription": "Get class hierarchy with code-like lineage comments and previews. Structured JSON is optional via `text+structured` mode.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-class)",
                 "inputSchema": {
@@ -264,8 +249,8 @@
                 ],
                 "toolReferenceName": "angelscript_findReferences",
                 "displayName": "Angelscript Find References",
-                "modelDescription": "Use when you have a symbol location and need project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires absolute filePath and position (line, character, both 1-based). Optional limit controls the maximum number of returned references (default 30, max 200). Returns readable text and, by default, structured JSON payload with total, returned, limit, truncated, per-file grouping, 1-based range labels, and preview text.",
-                "userDescription": "Find references for the symbol at a given document position.",
+                "modelDescription": "Use when you have a symbol location and need project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires absolute filePath and position (line, character, both 1-based). Optional limit controls the maximum number of returned references (default 30, max 200). Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Structured payload includes total, returned, limit, truncated, per-file grouping, 1-based range labels, and preview text. Success text renders `// <filePath>` + `// range: ...` + preview blocks, with truncation surfaced as a final comment only when needed.",
+                "userDescription": "Find symbol references with file-grouped preview blocks. Structured JSON is optional via `text+structured` mode.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(references)",
                 "inputSchema": {
@@ -372,12 +357,12 @@
                 },
                 "UnrealAngelscript.languageModelTools.outputMode": {
                     "type": "string",
-                    "default": "text+structured",
+                    "default": "text-only",
                     "enum": [
                         "text+structured",
                         "text-only"
                     ],
-                    "description": "Controls whether Language Model Tools return readable text only or readable text plus structured JSON payload."
+                    "description": "Controls whether Language Model Tools return readable text only or readable text plus structured JSON payload. Default is text-only."
                 },
                 "UnrealAngelscript.inlayHints.inlayHintsEnabled": {
                     "type": "boolean",
@@ -1003,10 +988,12 @@
         "compile": "npm run compile:extension && npm run compile:language-server",
         "compile:extension": "cd extension && node esbuild.js",
         "compile:language-server": "cd language-server && node esbuild.js",
+        "clean:dist": "node -e \"require('fs').rmSync('extension/dist',{ recursive: true, force: true }); require('fs').rmSync('language-server/dist',{ recursive: true, force: true });\"",
+        "clean:tsc-out": "node -e \"require('fs').rmSync('extension/out',{ recursive: true, force: true }); require('fs').rmSync('language-server/out',{ recursive: true, force: true });\"",
         "watch": "npm-run-all -p watch:*",
         "watch:extension": "cd extension && node esbuild.js --watch",
         "watch:language-server": "cd language-server && node esbuild.js --watch",
-        "test": "npm run compile && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/*.test.js language-server/out/__tests__/*.test.js",
+        "test": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/*.test.js language-server/out/__tests__/*.test.js",
         "postinstall": "cd extension && npm install && cd ../language-server && npm install && cd ..",
         "pegjs:compile": "cd language-server/pegjs && peggy angelscript.pegjs --allowed-start-rules start,start_global,start_class,start_enum",
         "pegjs:test": "cd language-server/pegjs && peggy angelscript.pegjs --allowed-start-rules start,start_global,start_class,start_enum --trace --test-file test.as -S start"

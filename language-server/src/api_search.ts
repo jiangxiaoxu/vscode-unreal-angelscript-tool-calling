@@ -1,6 +1,6 @@
 import * as typedb from './database';
 
-export type ApiSearchMode = 'smart' | 'exact' | 'regex';
+export type ApiSearchMode = 'smart' | 'plain' | 'regex';
 export type ApiSearchSource = 'native' | 'script' | 'both';
 export type ApiSearchMatchSource = 'native' | 'script';
 export type ApiSearchKind = 'class' | 'struct' | 'enum' | 'method' | 'function' | 'property' | 'globalVariable';
@@ -13,8 +13,9 @@ export type GetAPISearchParams = {
     limit?: number;
     kinds?: ApiSearchKind[];
     source?: ApiSearchSource;
-    scopePrefix?: string;
+    scope?: string;
     includeInheritedFromScope?: boolean;
+    includeDocs?: boolean;
 };
 
 export type GetAPISearchNotice = {
@@ -24,13 +25,13 @@ export type GetAPISearchNotice = {
 
 export type ApiInheritedScopeOutcome =
     | 'applied'
-    | 'ignored_missing_scope_prefix'
+    | 'ignored_missing_scope'
     | 'ignored_scope_not_found'
     | 'ignored_scope_not_class'
     | 'ignored_scope_ambiguous';
 
 export type GetAPISearchScopeLookup = {
-    requestedPrefix: string;
+    requestedScope: string;
     resolvedQualifiedName?: string;
     resolvedKind?: ApiSearchScopeKind;
     ambiguousCandidates?: string[];
@@ -40,7 +41,9 @@ export type GetAPISearchMatch = {
     qualifiedName: string;
     kind: ApiSearchKind;
     signature: string;
+    matchReason?: SearchMatchReason;
     summary?: string;
+    documentation?: string;
     containerQualifiedName?: string;
     source: ApiSearchMatchSource;
     isMixin?: boolean;
@@ -65,14 +68,25 @@ export class ApiSearchValidationError extends Error
     }
 }
 
+export type SearchMatchReason =
+    | 'exact-qualified'
+    | 'exact-short'
+    | 'boundary-ordered'
+    | 'ordered-wildcard'
+    | 'short-ordered'
+    | 'weak-reorder';
+
 type NormalizedSearchParams = {
     query: string;
     mode: ApiSearchMode;
     limit: number;
     kinds: Set<ApiSearchKind>;
     source: ApiSearchSource;
-    scopePrefix?: string;
+    scope?: string;
     includeInheritedFromScope: boolean;
+    includeDocs: boolean;
+    smartQueries?: ParsedSmartQuery[];
+    plainQuery?: ParsedSmartQuery;
 };
 
 type ScopeCandidate = {
@@ -84,12 +98,18 @@ type ScopeCandidate = {
     isClassType: boolean;
 };
 
+type SearchBoundaryKind = 'namespace' | 'member';
+
+type SearchBoundary = {
+    kind: SearchBoundaryKind;
+    start: number;
+    end: number;
+};
+
 type SearchTextVariant = {
     text: string;
     textLower: string;
-    tokens: string[];
-    compact: string;
-    initials: string;
+    boundaries: SearchBoundary[];
 };
 
 type SearchIndexEntry = {
@@ -97,6 +117,7 @@ type SearchIndexEntry = {
     kind: ApiSearchKind;
     signature: string;
     summary?: string;
+    documentation?: string;
     containerQualifiedName?: string;
     source: ApiSearchMatchSource;
     filterSource: ApiSearchSource;
@@ -104,12 +125,8 @@ type SearchIndexEntry = {
     shortName: string;
     shortNameLower: string;
     qualifiedNameLower: string;
-    shortTokens: string[];
-    qualifiedTokens: string[];
-    shortCompact: string;
-    qualifiedCompact: string;
-    shortInitials: string;
-    qualifiedInitials: string;
+    shortText: SearchTextVariant;
+    qualifiedText: SearchTextVariant;
     namespaceQualifiedName: string;
     declaringTypeQualifiedName?: string;
     isMixin: boolean;
@@ -127,6 +144,8 @@ type SearchCandidate = {
     entry: SearchIndexEntry;
     scopeRelationship?: ApiSearchScopeRelationship;
     scopeDistance?: number;
+    matchReason?: SearchMatchReason;
+    matchSort?: SearchMatchSortKey;
 };
 
 type ResolvedScope = {
@@ -149,11 +168,29 @@ type ScopeResolution = {
     inheritedScopeOutcome?: ApiInheritedScopeOutcome;
 };
 
-type NormalizedQuery = {
+type SearchConnector = 'space' | 'namespace' | 'member';
+
+type ParsedSmartQuery = {
     raw: string;
     rawLower: string;
-    tokens: string[];
-    compact: string;
+    segments: string[];
+    connectors: SearchConnector[];
+    hasStrongSeparator: boolean;
+    searchableCharCount: number;
+    requiresCallable: boolean;
+};
+
+type SearchMatchSortKey = {
+    reasonRank: number;
+    start: number;
+    totalGap: number;
+    span: number;
+    viewPriority: number;
+};
+
+type SearchMatchOutcome = {
+    reason: SearchMatchReason;
+    sortKey: SearchMatchSortKey;
 };
 
 const DEFAULT_LIMIT = 20;
@@ -209,12 +246,12 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
     let index = getSearchIndex();
     let candidates = index.entries.map((entry) : SearchCandidate => ({ entry }));
 
-    if (params.includeInheritedFromScope && !params.scopePrefix)
-        inheritedScopeOutcome = 'ignored_missing_scope_prefix';
+    if (params.includeInheritedFromScope && !params.scope)
+        inheritedScopeOutcome = 'ignored_missing_scope';
 
-    if (params.scopePrefix)
+    if (params.scope)
     {
-        let scopeResolution = resolveScope(index, params.scopePrefix, params.includeInheritedFromScope);
+        let scopeResolution = resolveScope(index, params.scope, params.includeInheritedFromScope);
         notices.push(...scopeResolution.notices);
         scopeLookup = scopeResolution.scopeLookup;
         inheritedScopeOutcome = scopeResolution.inheritedScopeOutcome;
@@ -229,7 +266,7 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
 
     candidates = candidates.filter((candidate) => filterCandidate(candidate.entry, params));
 
-    if (params.mode == 'smart' && isTinySmartQuery(params.query))
+    if (params.mode == 'smart' && params.smartQueries && params.smartQueries.every((query) => isTinySmartQuery(query)))
     {
         notices.push({
             code: 'QUERY_TOO_SHORT',
@@ -239,14 +276,14 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
     }
 
     let scoredMatches = rankCandidates(candidates, params);
-    let limitedMatches = scoredMatches.slice(0, params.limit).map((candidate) => buildMatch(candidate));
+    let limitedMatches = scoredMatches.slice(0, params.limit).map((candidate) => buildMatch(candidate, params.includeDocs));
     return finalizeSearchResult(limitedMatches, notices, scopeLookup, inheritedScopeOutcome);
 }
 
 function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
 {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload))
-        throw new ApiSearchValidationError("Invalid params. Provide { query: string, mode?: 'smart' | 'exact' | 'regex', limit?: number, kinds?: ApiSearchKind[], source?: 'native' | 'script' | 'both', scopePrefix?: string, includeInheritedFromScope?: boolean }.");
+        throw new ApiSearchValidationError("Invalid params. Provide { query: string, mode?: 'smart' | 'plain' | 'regex', limit?: number, kinds?: ApiSearchKind[], source?: 'native' | 'script' | 'both', scope?: string, includeInheritedFromScope?: boolean, includeDocs?: boolean }.");
 
     let record = payload as Record<string, unknown>;
     let query = typeof record.query === 'string' ? record.query.trim() : '';
@@ -257,8 +294,11 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
     let limit = normalizeLimit(record.limit);
     let kinds = normalizeKinds(record.kinds);
     let source = normalizeSource(record.source);
-    let scopePrefix = typeof record.scopePrefix === 'string' ? record.scopePrefix.trim() : '';
+    let scope = typeof record.scope === 'string' ? record.scope.trim() : '';
     let includeInheritedFromScope = record.includeInheritedFromScope === true;
+    let includeDocs = record.includeDocs === true;
+    let smartQueries = mode == 'smart' ? parseSmartQueries(query) : undefined;
+    let plainQuery = mode == 'plain' ? parsePlainQuery(query) : undefined;
 
     return {
         query,
@@ -266,23 +306,26 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
         limit,
         kinds,
         source,
-        ...(scopePrefix.length > 0 ? { scopePrefix } : {}),
-        includeInheritedFromScope
+        ...(scope.length > 0 ? { scope } : {}),
+        includeInheritedFromScope,
+        includeDocs,
+        ...(smartQueries ? { smartQueries } : {}),
+        ...(plainQuery ? { plainQuery } : {})
     };
 }
 
 function normalizeSearchMode(value: unknown) : ApiSearchMode
 {
     if (value === undefined)
-        return 'smart';
+        return 'plain';
     if (typeof value !== 'string')
-        throw new ApiSearchValidationError("Invalid params. 'mode' must be 'smart', 'exact', or 'regex'.");
+        throw new ApiSearchValidationError("Invalid params. 'mode' must be 'smart', 'plain', or 'regex'.");
 
     let normalized = value.trim().toLowerCase();
-    if (normalized == 'smart' || normalized == 'exact' || normalized == 'regex')
+    if (normalized == 'smart' || normalized == 'plain' || normalized == 'regex')
         return normalized as ApiSearchMode;
 
-    throw new ApiSearchValidationError("Invalid params. 'mode' must be 'smart', 'exact', or 'regex'.");
+    throw new ApiSearchValidationError("Invalid params. 'mode' must be 'smart', 'plain', or 'regex'.");
 }
 
 function normalizeLimit(value: unknown) : number
@@ -412,13 +455,15 @@ function buildSearchIndex() : SearchIndex
     {
         if (shouldIncludeTypeInSearch(dbType))
         {
+            let documentation = normalizeSearchDocumentation(dbType.documentation);
             let qualifiedTypeName = dbType.getQualifiedTypenameInNamespace(null);
             let kind = getTypeKind(dbType);
             entries.push(createSearchEntry({
                 qualifiedName: qualifiedTypeName,
                 kind,
                 signature: buildTypeSignature(dbType),
-                summary: extractSummary(dbType.documentation),
+                summary: extractSummary(documentation),
+                documentation,
                 containerQualifiedName: dbType.namespace && !dbType.namespace.isRootNamespace()
                     ? dbType.namespace.getQualifiedNamespace()
                     : undefined,
@@ -464,6 +509,7 @@ function buildSearchIndex() : SearchIndex
 
 function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
 {
+    let documentation = normalizeSearchDocumentation(method.findAvailableDocumentation());
     let methodArgs = method.args ? method.args.map((arg) => arg.typename) : [];
     let detailsData: unknown;
     let qualifiedName = '';
@@ -517,7 +563,8 @@ function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
         qualifiedName,
         kind: method.containingType ? 'method' : 'function',
         signature: buildMethodSignature(method),
-        summary: extractSummary(method.findAvailableDocumentation()),
+        summary: extractSummary(documentation),
+        documentation,
         containerQualifiedName,
         source: getDeclaredSource(method.declaredModule),
         filterSource: getDeclaredSource(method.declaredModule),
@@ -533,6 +580,7 @@ function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
 
 function createTypePropertyEntry(property: typedb.DBProperty) : SearchIndexEntry
 {
+    let documentation = normalizeSearchDocumentation(property.documentation);
     let qualifiedContainer = property.containingType.getQualifiedTypenameInNamespace(null);
     let namespaceQualifiedName = property.containingType.namespace && !property.containingType.namespace.isRootNamespace()
         ? property.containingType.namespace.getQualifiedNamespace()
@@ -542,7 +590,8 @@ function createTypePropertyEntry(property: typedb.DBProperty) : SearchIndexEntry
         qualifiedName: `${qualifiedContainer}.${property.name}`,
         kind: 'property',
         signature: property.format(`${qualifiedContainer}.`),
-        summary: extractSummary(property.documentation),
+        summary: extractSummary(documentation),
+        documentation,
         containerQualifiedName: qualifiedContainer,
         source: getDeclaredSource(property.declaredModule),
         filterSource: getDeclaredSource(property.declaredModule),
@@ -555,6 +604,7 @@ function createTypePropertyEntry(property: typedb.DBProperty) : SearchIndexEntry
 
 function createGlobalPropertyEntry(property: typedb.DBProperty) : SearchIndexEntry
 {
+    let documentation = normalizeSearchDocumentation(property.documentation);
     let namespaceQualifiedName = property.namespace && !property.namespace.isRootNamespace()
         ? property.namespace.getQualifiedNamespace()
         : '';
@@ -566,7 +616,8 @@ function createGlobalPropertyEntry(property: typedb.DBProperty) : SearchIndexEnt
         qualifiedName,
         kind: 'globalVariable',
         signature: property.format(namespaceQualifiedName.length > 0 ? `${namespaceQualifiedName}::` : ''),
-        summary: extractSummary(property.documentation),
+        summary: extractSummary(documentation),
+        documentation,
         containerQualifiedName: namespaceQualifiedName.length > 0 ? namespaceQualifiedName : undefined,
         source: getDeclaredSource(property.declaredModule),
         filterSource: getDeclaredSource(property.declaredModule),
@@ -580,6 +631,7 @@ function createSearchEntry(input: {
     kind: ApiSearchKind;
     signature: string;
     summary?: string;
+    documentation?: string;
     containerQualifiedName?: string;
     source: ApiSearchMatchSource;
     filterSource: ApiSearchSource;
@@ -601,6 +653,7 @@ function createSearchEntry(input: {
         kind: input.kind,
         signature: input.signature,
         summary: input.summary,
+        documentation: input.documentation,
         containerQualifiedName: input.containerQualifiedName,
         source: input.source,
         filterSource: input.filterSource,
@@ -608,12 +661,8 @@ function createSearchEntry(input: {
         shortName,
         shortNameLower: shortText.textLower,
         qualifiedNameLower: qualifiedText.textLower,
-        shortTokens: shortText.tokens,
-        qualifiedTokens: qualifiedText.tokens,
-        shortCompact: shortText.compact,
-        qualifiedCompact: qualifiedText.compact,
-        shortInitials: shortText.initials,
-        qualifiedInitials: qualifiedText.initials,
+        shortText,
+        qualifiedText,
         namespaceQualifiedName: input.namespaceQualifiedName,
         declaringTypeQualifiedName: input.declaringTypeQualifiedName,
         isMixin: input.isMixin === true,
@@ -625,12 +674,12 @@ function createSearchEntry(input: {
 
 function resolveScope(
     index: SearchIndex,
-    scopePrefix: string,
+    scopeName: string,
     includeInheritedFromScope: boolean
 ) : ScopeResolution
 {
     let notices: GetAPISearchNotice[] = [];
-    let normalizedScope = scopePrefix.trim();
+    let normalizedScope = scopeName.trim();
     let normalizedScopeLower = normalizedScope.toLowerCase();
 
     let exactQualifiedCandidates = index.scopeCandidates.filter((candidate) => candidate.qualifiedName.toLowerCase() == normalizedScopeLower);
@@ -647,7 +696,7 @@ function resolveScope(
     }
 
     let scopeLookup: GetAPISearchScopeLookup = {
-        requestedPrefix: normalizedScope
+        requestedScope: normalizedScope
     };
 
     if (candidates.length == 0)
@@ -883,9 +932,9 @@ function filterCandidate(entry: SearchIndexEntry, params: NormalizedSearchParams
     return true;
 }
 
-function isTinySmartQuery(query: string) : boolean
+function isTinySmartQuery(smartQuery: ParsedSmartQuery) : boolean
 {
-    return compactSearchText(query).length < QUERY_TOO_SHORT_THRESHOLD;
+    return smartQuery.searchableCharCount < QUERY_TOO_SHORT_THRESHOLD;
 }
 
 function rankCandidates(candidates: SearchCandidate[], params: NormalizedSearchParams) : SearchCandidate[]
@@ -893,35 +942,97 @@ function rankCandidates(candidates: SearchCandidate[], params: NormalizedSearchP
     if (params.mode == 'regex')
     {
         let regex = buildRegex(params.query);
-        return candidates
-            .filter((candidate) => matchesRegex(candidate.entry, regex))
-            .sort((left, right) => compareCandidates(left, right, 0, 0));
+        let scored = new Array<SearchCandidate>();
+        for (let candidate of candidates)
+        {
+            let sortKey = findRegexSortKey(candidate.entry, regex);
+            if (!sortKey)
+                continue;
+
+            scored.push({
+                ...candidate,
+                matchSort: applyScopeBiasToSortKey(sortKey, candidate)
+            });
+        }
+        scored.sort(compareCandidates);
+        return scored;
     }
 
-    let query = createNormalizedQuery(params.query);
-    let scored = new Array<{ candidate: SearchCandidate; score: number }>();
+    if (params.mode == 'plain')
+    {
+        let plainQuery = params.plainQuery;
+        if (!plainQuery)
+            return [];
+
+        let scored = new Array<SearchCandidate>();
+        for (let candidate of candidates)
+        {
+            let match = scorePlainMatch(candidate.entry, plainQuery);
+            if (!match)
+                continue;
+
+            scored.push({
+                ...candidate,
+                matchReason: match.reason,
+                matchSort: applyScopeBiasToSortKey(match.sortKey, candidate)
+            });
+        }
+        scored.sort(compareCandidates);
+        return scored;
+    }
+
+    let smartQueries = params.smartQueries?.filter((query) => !isTinySmartQuery(query)) ?? [];
+    let exactBranchMatches = smartQueries.map((query) =>
+        candidates.some((candidate) =>
+            (!query.requiresCallable || isCallableKind(candidate.entry.kind))
+            && scoreExactMatch(candidate.entry, query) != null
+        )
+    );
+    let scored = new Array<SearchCandidate>();
 
     for (let candidate of candidates)
     {
-        let score = params.mode == 'exact'
-            ? scoreExactMatch(candidate.entry, query)
-            : scoreSmartMatch(candidate.entry, query);
-        if (score == null)
+        let match = scoreSmartMatch(candidate.entry, smartQueries, exactBranchMatches);
+        if (!match)
             continue;
+
         scored.push({
-            candidate,
-            score: score + candidateScopeScoreBias(candidate)
+            ...candidate,
+            matchReason: match.reason,
+            matchSort: applyScopeBiasToSortKey(match.sortKey, candidate)
         });
     }
 
-    scored.sort((left, right) => compareCandidates(left.candidate, right.candidate, left.score, right.score));
-    return scored.map((entry) => entry.candidate);
+    scored.sort(compareCandidates);
+    return scored;
 }
 
-function compareCandidates(left: SearchCandidate, right: SearchCandidate, leftScore: number, rightScore: number) : number
+function compareCandidates(left: SearchCandidate, right: SearchCandidate) : number
 {
-    if (leftScore != rightScore)
-        return rightScore - leftScore;
+    let leftReasonRank = left.matchSort?.reasonRank ?? 0;
+    let rightReasonRank = right.matchSort?.reasonRank ?? 0;
+    if (leftReasonRank != rightReasonRank)
+        return rightReasonRank - leftReasonRank;
+
+    let leftStart = left.matchSort?.start ?? Number.MAX_SAFE_INTEGER;
+    let rightStart = right.matchSort?.start ?? Number.MAX_SAFE_INTEGER;
+    if (leftStart != rightStart)
+        return leftStart - rightStart;
+
+    let leftGap = left.matchSort?.totalGap ?? Number.MAX_SAFE_INTEGER;
+    let rightGap = right.matchSort?.totalGap ?? Number.MAX_SAFE_INTEGER;
+    if (leftGap != rightGap)
+        return leftGap - rightGap;
+
+    let leftSpan = left.matchSort?.span ?? Number.MAX_SAFE_INTEGER;
+    let rightSpan = right.matchSort?.span ?? Number.MAX_SAFE_INTEGER;
+    if (leftSpan != rightSpan)
+        return leftSpan - rightSpan;
+
+    let leftViewPriority = left.matchSort?.viewPriority ?? Number.MAX_SAFE_INTEGER;
+    let rightViewPriority = right.matchSort?.viewPriority ?? Number.MAX_SAFE_INTEGER;
+    if (leftViewPriority != rightViewPriority)
+        return leftViewPriority - rightViewPriority;
 
     let leftKindOrder = kindOrder[left.entry.kind] ?? 999;
     let rightKindOrder = kindOrder[right.entry.kind] ?? 999;
@@ -944,112 +1055,77 @@ function compareCandidates(left: SearchCandidate, right: SearchCandidate, leftSc
     return left.entry.qualifiedName.localeCompare(right.entry.qualifiedName);
 }
 
-function createNormalizedQuery(query: string) : NormalizedQuery
+function isCallableKind(kind: ApiSearchKind) : boolean
 {
-    return {
-        raw: query,
-        rawLower: query.toLowerCase(),
-        tokens: tokenizeSearchText(query),
-        compact: compactSearchText(query)
-    };
+    return kind == 'method' || kind == 'function';
 }
 
-function scoreExactMatch(entry: SearchIndexEntry, query: NormalizedQuery) : number | null
+function scoreExactMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
 {
-    if (entry.shortName == query.raw)
-        return 1600;
     if (entry.qualifiedName == query.raw)
-        return 1580;
-    if (entry.shortNameLower == query.rawLower)
-        return 1560;
+        return createSearchMatchOutcome('exact-qualified', 0, 0, entry.qualifiedName.length, 0);
     if (entry.qualifiedNameLower == query.rawLower)
-        return 1540;
+        return createSearchMatchOutcome('exact-qualified', 0, 0, entry.qualifiedName.length, 0);
+    if (entry.shortName == query.raw)
+        return createSearchMatchOutcome('exact-short', 0, 0, entry.shortName.length, 2);
+    if (entry.shortNameLower == query.rawLower)
+        return createSearchMatchOutcome('exact-short', 0, 0, entry.shortName.length, 2);
 
     for (let alias of entry.qualifiedAliasTexts)
     {
         if (alias.text == query.raw)
-            return 1520;
+            return createSearchMatchOutcome('exact-qualified', 0, 0, alias.text.length, 1);
         if (alias.textLower == query.rawLower)
-            return 1500;
+            return createSearchMatchOutcome('exact-qualified', 0, 0, alias.text.length, 1);
     }
 
     return null;
 }
 
-function scoreSmartMatch(entry: SearchIndexEntry, query: NormalizedQuery) : number | null
+function scoreSmartMatch(
+    entry: SearchIndexEntry,
+    queries: ParsedSmartQuery[],
+    exactBranchMatches: boolean[]
+) : SearchMatchOutcome | null
 {
-    if (query.compact.length == 0)
+    let bestMatch : SearchMatchOutcome | null = null;
+    for (let index = 0; index < queries.length; index += 1)
+        bestMatch = pickBetterMatch(bestMatch, scoreSmartBranch(entry, queries[index], exactBranchMatches[index] === true));
+    return bestMatch;
+}
+
+function scoreSmartBranch(entry: SearchIndexEntry, query: ParsedSmartQuery, exactBranchHasMatch: boolean) : SearchMatchOutcome | null
+{
+    if (query.searchableCharCount == 0 || query.segments.length == 0)
+        return null;
+    if (query.requiresCallable && !isCallableKind(entry.kind))
         return null;
 
-    if (entry.shortName == query.raw)
-        return 1500 + scopeBias(entry);
-    if (entry.qualifiedName == query.raw)
-        return 1480 + scopeBias(entry);
-    if (entry.shortNameLower == query.rawLower)
-        return 1460 + scopeBias(entry);
-    if (entry.qualifiedNameLower == query.rawLower)
-        return 1440 + scopeBias(entry);
-
-    let score = Math.max(
-        scoreCompactMatch(entry.shortCompact, query.compact, 1400),
-        scoreCompactMatch(entry.qualifiedCompact, query.compact, 1360),
-        scoreInitialsMatch(entry.shortInitials, query.compact, 1340),
-        scoreInitialsMatch(entry.qualifiedInitials, query.compact, 1320),
-        scoreTokenMatch(entry.shortTokens, query.tokens, 1280, true, true),
-        scoreTokenMatch(entry.qualifiedTokens, query.tokens, 1240, true, true),
-        scoreTokenMatch(entry.shortTokens, query.tokens, 1180, false, true),
-        scoreTokenMatch(entry.qualifiedTokens, query.tokens, 1140, false, true),
-        scoreTokenMatch(entry.shortTokens, query.tokens, 1080, true, false),
-        scoreTokenMatch(entry.qualifiedTokens, query.tokens, 1040, true, false),
-        scoreTokenMatch(entry.shortTokens, query.tokens, 980, false, false),
-        scoreTokenMatch(entry.qualifiedTokens, query.tokens, 940, false, false),
-        scoreContainsMatch(entry.shortNameLower, query.rawLower, 900),
-        scoreContainsMatch(entry.qualifiedNameLower, query.rawLower, 860)
-    );
-
-    for (let alias of entry.qualifiedAliasTexts)
-    {
-        score = Math.max(
-            score,
-            scoreExactVariant(alias, query, 1420, 1400),
-            scoreCompactMatch(alias.compact, query.compact, 1340),
-            scoreInitialsMatch(alias.initials, query.compact, 1300),
-            scoreTokenMatch(alias.tokens, query.tokens, 1220, true, true),
-            scoreTokenMatch(alias.tokens, query.tokens, 1120, false, true),
-            scoreTokenMatch(alias.tokens, query.tokens, 1020, true, false),
-            scoreTokenMatch(alias.tokens, query.tokens, 920, false, false),
-            scoreContainsMatch(alias.textLower, query.rawLower, 880)
-        );
-    }
-
-    if (score == Number.NEGATIVE_INFINITY)
+    let exactMatch = scoreExactMatch(entry, query);
+    if (exactMatch)
+        return exactMatch;
+    if (exactBranchHasMatch)
         return null;
-    return score + scopeBias(entry);
+
+    return scoreOrderedViewsMatch(entry, query);
 }
 
-function scopeBias(entry: SearchIndexEntry) : number
+function scorePlainMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
 {
-    if (entry.kind == 'class' || entry.kind == 'struct' || entry.kind == 'enum')
-        return 12;
-    if (entry.kind == 'method' || entry.kind == 'function')
-        return 8;
-    return 4;
-}
+    if (query.searchableCharCount == 0 || query.segments.length == 0)
+        return null;
+    if (query.requiresCallable && !isCallableKind(entry.kind))
+        return null;
 
-function scoreExactVariant(variant: SearchTextVariant, query: NormalizedQuery, exactScore: number, caseInsensitiveScore: number) : number
-{
-    if (variant.text == query.raw)
-        return exactScore;
-    if (variant.textLower == query.rawLower)
-        return caseInsensitiveScore;
-    return Number.NEGATIVE_INFINITY;
-}
+    let exactMatch = scoreExactMatch(entry, query);
+    if (exactMatch)
+        return exactMatch;
 
-function matchesRegex(entry: SearchIndexEntry, regex: RegExp) : boolean
-{
-    if (regexTest(regex, entry.shortName) || regexTest(regex, entry.qualifiedName))
-        return true;
-    return entry.qualifiedAliasTexts.some((alias) => regexTest(regex, alias.text));
+    let orderedMatch = scoreOrderedViewsMatch(entry, query);
+    if (orderedMatch)
+        return orderedMatch;
+
+    return scoreWeakReorderViewsMatch(entry, query);
 }
 
 function candidateScopeScoreBias(candidate: SearchCandidate) : number
@@ -1075,118 +1151,380 @@ function getScopeRelationshipOrder(value: ApiSearchScopeRelationship | undefined
     return 3;
 }
 
-function scoreCompactMatch(candidateCompact: string, queryCompact: string, baseScore: number) : number
+function applyScopeBiasToSortKey(sortKey: SearchMatchSortKey, candidate: SearchCandidate) : SearchMatchSortKey
 {
-    if (candidateCompact == queryCompact)
-        return baseScore;
-    if (candidateCompact.startsWith(queryCompact))
-        return baseScore - Math.min(40, candidateCompact.length - queryCompact.length);
-    if (candidateCompact.includes(queryCompact))
-        return baseScore - 80 - candidateCompact.indexOf(queryCompact);
-    return Number.NEGATIVE_INFINITY;
+    let scopeBias = candidateScopeScoreBias(candidate);
+    return {
+        ...sortKey,
+        start: Math.max(0, sortKey.start - scopeBias)
+    };
 }
 
-function scoreInitialsMatch(candidateInitials: string, queryCompact: string, baseScore: number) : number
+function createSearchMatchOutcome(
+    reason: SearchMatchReason,
+    start: number,
+    totalGap: number,
+    span: number,
+    viewPriority: number
+) : SearchMatchOutcome
 {
-    if (queryCompact.length < QUERY_TOO_SHORT_THRESHOLD || candidateInitials.length == 0)
-        return Number.NEGATIVE_INFINITY;
-    if (candidateInitials == queryCompact)
-        return baseScore;
-    if (candidateInitials.startsWith(queryCompact))
-        return baseScore - Math.min(20, candidateInitials.length - queryCompact.length);
-    return Number.NEGATIVE_INFINITY;
+    return {
+        reason,
+        sortKey: {
+            reasonRank: getSearchMatchReasonRank(reason),
+            start,
+            totalGap,
+            span,
+            viewPriority
+        }
+    };
 }
 
-function scoreTokenMatch(
-    candidateTokens: string[],
-    queryTokens: string[],
-    baseScore: number,
-    prefixOnly: boolean,
-    ordered: boolean
-) : number
+function getSearchMatchReasonRank(reason: SearchMatchReason) : number
 {
-    if (queryTokens.length == 0 || candidateTokens.length == 0)
-        return Number.NEGATIVE_INFINITY;
-
-    let matchIndices = ordered
-        ? matchOrderedTokens(candidateTokens, queryTokens, prefixOnly)
-        : matchUnorderedTokens(candidateTokens, queryTokens, prefixOnly);
-    if (!matchIndices)
-        return Number.NEGATIVE_INFINITY;
-
-    let firstIndex = matchIndices[0] ?? 0;
-    let densityPenalty = matchIndices[matchIndices.length - 1] - firstIndex;
-    return baseScore - (firstIndex * 4) - densityPenalty;
+    if (reason == 'exact-qualified')
+        return 5;
+    if (reason == 'exact-short')
+        return 4;
+    if (reason == 'boundary-ordered')
+        return 3;
+    if (reason == 'ordered-wildcard')
+        return 2;
+    if (reason == 'short-ordered')
+        return 1;
+    if (reason == 'weak-reorder')
+        return 0;
+    return 1;
 }
 
-function scoreContainsMatch(candidateText: string, queryText: string, baseScore: number) : number
+function buildStructuredVariantMatch(
+    variant: SearchTextVariant,
+    query: ParsedSmartQuery,
+    viewPriority: number
+) : SearchMatchOutcome | null
 {
-    let index = candidateText.indexOf(queryText);
-    if (index == -1)
-        return Number.NEGATIVE_INFINITY;
-    return baseScore - index;
+    let structuredMatch = findStructuredMatch(variant, query);
+    if (!structuredMatch)
+        return null;
+
+    let reason: SearchMatchReason;
+    if (viewPriority == 2)
+        reason = 'short-ordered';
+    else if (query.hasStrongSeparator)
+        reason = 'boundary-ordered';
+    else
+        reason = 'ordered-wildcard';
+
+    return createSearchMatchOutcome(
+        reason,
+        structuredMatch.start,
+        structuredMatch.totalGap,
+        structuredMatch.end - structuredMatch.start,
+        viewPriority
+    );
 }
 
-function matchOrderedTokens(candidateTokens: string[], queryTokens: string[], prefixOnly: boolean) : number[] | null
+function scoreOrderedViewsMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
 {
-    let matchIndices: number[] = [];
-    let searchIndex = 0;
-    for (let queryToken of queryTokens)
+    let bestMatch = pickBetterMatch(
+        buildStructuredVariantMatch(entry.qualifiedText, query, 0),
+        buildStructuredVariantMatch(entry.shortText, query, 2)
+    );
+    for (let alias of entry.qualifiedAliasTexts)
+        bestMatch = pickBetterMatch(bestMatch, buildStructuredVariantMatch(alias, query, 1));
+    return bestMatch;
+}
+
+function scoreWeakReorderViewsMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
+{
+    if (!canUseWeakReorder(query))
+        return null;
+
+    let bestMatch = pickBetterMatch(
+        buildWeakReorderVariantMatch(entry.qualifiedText, query, 0),
+        buildWeakReorderVariantMatch(entry.shortText, query, 2)
+    );
+    for (let alias of entry.qualifiedAliasTexts)
+        bestMatch = pickBetterMatch(bestMatch, buildWeakReorderVariantMatch(alias, query, 1));
+    return bestMatch;
+}
+
+function canUseWeakReorder(query: ParsedSmartQuery) : boolean
+{
+    return !query.hasStrongSeparator
+        && query.segments.length > 1
+        && query.connectors.every((connector) => connector == 'space');
+}
+
+function buildWeakReorderVariantMatch(
+    variant: SearchTextVariant,
+    query: ParsedSmartQuery,
+    viewPriority: number
+) : SearchMatchOutcome | null
+{
+    let weakReorderMatch = findWeakReorderMatch(variant, query);
+    if (!weakReorderMatch)
+        return null;
+
+    return createSearchMatchOutcome(
+        'weak-reorder',
+        weakReorderMatch.start,
+        weakReorderMatch.totalGap,
+        weakReorderMatch.end - weakReorderMatch.start,
+        viewPriority
+    );
+}
+
+function findWeakReorderMatch(variant: SearchTextVariant, query: ParsedSmartQuery) : StructuredMatchState | null
+{
+    if (!canUseWeakReorder(query))
+        return null;
+
+    let occurrences = new Array<{ start: number; end: number }>();
+    for (let segment of query.segments)
     {
-        let found = -1;
-        for (let index = searchIndex; index < candidateTokens.length; index += 1)
+        let foundIndex = variant.textLower.indexOf(segment);
+        if (foundIndex == -1)
+            return null;
+
+        occurrences.push({
+            start: foundIndex,
+            end: foundIndex + segment.length
+        });
+    }
+
+    occurrences.sort((left, right) =>
+    {
+        if (left.start != right.start)
+            return left.start - right.start;
+        return left.end - right.end;
+    });
+
+    let totalGap = 0;
+    for (let index = 1; index < occurrences.length; index += 1)
+        totalGap += Math.max(0, occurrences[index].start - occurrences[index - 1].end);
+
+    return {
+        start: occurrences[0].start,
+        end: occurrences[occurrences.length - 1].end,
+        totalGap
+    };
+}
+
+function pickBetterMatch(left: SearchMatchOutcome | null, right: SearchMatchOutcome | null) : SearchMatchOutcome | null
+{
+    if (!left)
+        return right;
+    if (!right)
+        return left;
+
+    if (left.sortKey.reasonRank != right.sortKey.reasonRank)
+        return left.sortKey.reasonRank > right.sortKey.reasonRank ? left : right;
+    if (left.sortKey.start != right.sortKey.start)
+        return left.sortKey.start < right.sortKey.start ? left : right;
+    if (left.sortKey.totalGap != right.sortKey.totalGap)
+        return left.sortKey.totalGap < right.sortKey.totalGap ? left : right;
+    if (left.sortKey.span != right.sortKey.span)
+        return left.sortKey.span < right.sortKey.span ? left : right;
+    if (left.sortKey.viewPriority != right.sortKey.viewPriority)
+        return left.sortKey.viewPriority < right.sortKey.viewPriority ? left : right;
+    return left;
+}
+
+function parseSmartQueries(query: string) : ParsedSmartQuery[]
+{
+    let rawBranches = query.split('|');
+    if (rawBranches.length == 0)
+        return [parseSmartQuery(query)];
+
+    let parsedQueries = new Array<ParsedSmartQuery>();
+    for (let branch of rawBranches)
+    {
+        let trimmedBranch = branch.trim();
+        if (trimmedBranch.length == 0)
+            throw new ApiSearchValidationError("Invalid params. 'query' contains an empty smart OR branch.");
+        parsedQueries.push(parseSmartQuery(trimmedBranch));
+    }
+    return parsedQueries;
+}
+
+function parsePlainQuery(query: string) : ParsedSmartQuery
+{
+    return parseSmartQuery(query);
+}
+
+function parseSmartQuery(query: string) : ParsedSmartQuery
+{
+    let raw = query.trim();
+    let requiresCallable = false;
+    if (raw.endsWith('()'))
+    {
+        raw = raw.slice(0, -2).trimEnd();
+        requiresCallable = true;
+    }
+    else if (raw.endsWith('('))
+    {
+        raw = raw.slice(0, -1).trimEnd();
+        requiresCallable = true;
+    }
+
+    let tokens = raw.match(/::|\.|\s+|[^.\s:]+/g) ?? [];
+    let segments: string[] = [];
+    let connectors: SearchConnector[] = [];
+    let pendingConnector: SearchConnector | null = null;
+    let hasStrongSeparator = false;
+
+    for (let token of tokens)
+    {
+        if (token.trim().length == 0)
         {
-            if (tokenMatches(candidateTokens[index], queryToken, prefixOnly))
+            if (segments.length > 0 && pendingConnector == null)
+                pendingConnector = 'space';
+            continue;
+        }
+
+        if (token == '::')
+        {
+            if (segments.length > 0)
             {
-                found = index;
-                break;
+                pendingConnector = 'namespace';
+                hasStrongSeparator = true;
+            }
+            continue;
+        }
+
+        if (token == '.')
+        {
+            if (segments.length > 0)
+            {
+                pendingConnector = 'member';
+                hasStrongSeparator = true;
+            }
+            continue;
+        }
+
+        let normalizedSegment = token.toLowerCase();
+        if (normalizedSegment.length == 0)
+            continue;
+
+        if (segments.length > 0)
+            connectors.push(pendingConnector ?? 'space');
+        segments.push(normalizedSegment);
+        pendingConnector = null;
+    }
+
+    return {
+        raw,
+        rawLower: raw.toLowerCase(),
+        segments,
+        connectors,
+        hasStrongSeparator,
+        searchableCharCount: segments.reduce((total, segment) => total + segment.length, 0),
+        requiresCallable
+    };
+}
+
+type StructuredMatchState = {
+    start: number;
+    end: number;
+    totalGap: number;
+};
+
+function findStructuredMatch(variant: SearchTextVariant, query: ParsedSmartQuery) : StructuredMatchState | null
+{
+    if (query.segments.length == 0)
+        return null;
+
+    return findStructuredMatchFrom(variant, query, 0, 0, null);
+}
+
+function findStructuredMatchFrom(
+    variant: SearchTextVariant,
+    query: ParsedSmartQuery,
+    segmentIndex: number,
+    searchStart: number,
+    previous: StructuredMatchState | null
+) : StructuredMatchState | null
+{
+    let segment = query.segments[segmentIndex];
+    let bestMatch: StructuredMatchState | null = null;
+    let nextStart = searchStart;
+
+    while (nextStart <= variant.textLower.length - segment.length)
+    {
+        let foundIndex = variant.textLower.indexOf(segment, nextStart);
+        if (foundIndex == -1)
+            break;
+
+        if (previous)
+        {
+            let connector = query.connectors[segmentIndex - 1];
+            if (!connectorMatches(variant.boundaries, connector, previous.end, foundIndex))
+            {
+                nextStart = foundIndex + 1;
+                continue;
             }
         }
-        if (found == -1)
-            return null;
 
-        matchIndices.push(found);
-        searchIndex = found + 1;
+        let currentEnd = foundIndex + segment.length;
+        let currentMatch: StructuredMatchState = {
+            start: previous ? previous.start : foundIndex,
+            end: currentEnd,
+            totalGap: previous ? previous.totalGap + Math.max(0, foundIndex - previous.end) : 0
+        };
+
+        let resolved = segmentIndex == query.segments.length - 1
+            ? currentMatch
+            : findStructuredMatchFrom(variant, query, segmentIndex + 1, currentEnd, currentMatch);
+        if (resolved)
+            bestMatch = pickBetterStructuredState(bestMatch, resolved);
+
+        nextStart = foundIndex + 1;
     }
 
-    return matchIndices;
+    return bestMatch;
 }
 
-function matchUnorderedTokens(candidateTokens: string[], queryTokens: string[], prefixOnly: boolean) : number[] | null
+function pickBetterStructuredState(
+    left: StructuredMatchState | null,
+    right: StructuredMatchState | null
+) : StructuredMatchState | null
 {
-    let used = new Set<number>();
-    let matchIndices: number[] = [];
-    for (let queryToken of queryTokens)
-    {
-        let found = -1;
-        for (let index = 0; index < candidateTokens.length; index += 1)
-        {
-            if (used.has(index))
-                continue;
-            if (!tokenMatches(candidateTokens[index], queryToken, prefixOnly))
-                continue;
-            found = index;
-            break;
-        }
-        if (found == -1)
-            return null;
+    if (!left)
+        return right;
+    if (!right)
+        return left;
+    if (left.start != right.start)
+        return left.start < right.start ? left : right;
+    if (left.totalGap != right.totalGap)
+        return left.totalGap < right.totalGap ? left : right;
 
-        used.add(found);
-        matchIndices.push(found);
-    }
-
-    matchIndices.sort((left, right) => left - right);
-    return matchIndices;
+    let leftSpan = left.end - left.start;
+    let rightSpan = right.end - right.start;
+    if (leftSpan != rightSpan)
+        return leftSpan < rightSpan ? left : right;
+    return left;
 }
 
-function tokenMatches(candidateToken: string, queryToken: string, prefixOnly: boolean) : boolean
+function connectorMatches(
+    boundaries: SearchBoundary[],
+    connector: SearchConnector,
+    previousEnd: number,
+    nextStart: number
+) : boolean
 {
-    if (prefixOnly)
-        return candidateToken.startsWith(queryToken);
-    return candidateToken.includes(queryToken);
+    if (connector == 'space')
+        return true;
+
+    let boundaryKind: SearchBoundaryKind = connector == 'namespace' ? 'namespace' : 'member';
+    return boundaries.some((boundary) =>
+        boundary.kind == boundaryKind
+        && boundary.start >= previousEnd
+        && boundary.end <= nextStart
+    );
 }
 
-function buildMatch(candidate: SearchCandidate) : GetAPISearchMatch
+function buildMatch(candidate: SearchCandidate, includeDocs: boolean) : GetAPISearchMatch
 {
     let match: GetAPISearchMatch = {
         qualifiedName: candidate.entry.qualifiedName,
@@ -1195,8 +1533,12 @@ function buildMatch(candidate: SearchCandidate) : GetAPISearchMatch
         source: candidate.entry.source
     };
 
+    if (candidate.matchReason)
+        match.matchReason = candidate.matchReason;
     if (candidate.entry.summary)
         match.summary = candidate.entry.summary;
+    if (includeDocs && candidate.entry.documentation)
+        match.documentation = candidate.entry.documentation;
     if (candidate.entry.containerQualifiedName)
         match.containerQualifiedName = candidate.entry.containerQualifiedName;
     if (candidate.entry.isMixin)
@@ -1410,15 +1752,20 @@ function extractSummary(documentation: string | null | undefined) : string | und
     return summary;
 }
 
+function normalizeSearchDocumentation(documentation: string | null | undefined) : string | undefined
+{
+    if (!documentation)
+        return undefined;
+    let trimmed = documentation.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function createSearchTextVariant(value: string) : SearchTextVariant
 {
-    let tokens = tokenizeSearchText(value);
     return {
         text: value,
         textLower: value.toLowerCase(),
-        tokens,
-        compact: compactSearchText(value),
-        initials: tokensToInitials(tokens)
+        boundaries: collectSearchBoundaries(value)
     };
 }
 
@@ -1459,52 +1806,32 @@ function getShortName(qualifiedName: string, kind: ApiSearchKind) : string
     return qualifiedName;
 }
 
-function tokenizeSearchText(value: string) : string[]
+function collectSearchBoundaries(value: string) : SearchBoundary[]
 {
-    if (!value)
-        return [];
-
-    let normalized = value
-        .replace(/::/g, ' ')
-        .replace(/[._]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    if (normalized.length == 0)
-        return [];
-
-    let segments = normalized.split(' ');
-    let tokens: string[] = [];
-    for (let segment of segments)
+    let boundaries: SearchBoundary[] = [];
+    for (let index = 0; index < value.length; index += 1)
     {
-        let parts = segment.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+/g);
-        if (!parts || parts.length == 0)
+        if (value[index] == ':' && value[index + 1] == ':')
         {
-            let lowered = segment.toLowerCase();
-            if (lowered.length > 0)
-                tokens.push(lowered);
+            boundaries.push({
+                kind: 'namespace',
+                start: index,
+                end: index + 2
+            });
+            index += 1;
             continue;
         }
 
-        for (let part of parts)
+        if (value[index] == '.')
         {
-            let lowered = part.toLowerCase();
-            if (lowered.length > 0)
-                tokens.push(lowered);
+            boundaries.push({
+                kind: 'member',
+                start: index,
+                end: index + 1
+            });
         }
     }
-    return tokens;
-}
-
-function compactSearchText(value: string) : string
-{
-    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function tokensToInitials(tokens: string[]) : string
-{
-    return tokens
-        .map((token) => token.length > 0 ? token[0] : '')
-        .join('');
+    return boundaries;
 }
 
 type ParsedRegex = {
@@ -1512,20 +1839,20 @@ type ParsedRegex = {
     flags: string;
 };
 
+type SearchTextValue = {
+    text: string;
+    viewPriority: number;
+};
+
 function parseRegexPattern(raw: string) : ParsedRegex
 {
-    if (raw.length >= 2 && raw.startsWith('/') && raw.lastIndexOf('/') > 0)
-    {
-        let lastSlash = raw.lastIndexOf('/');
-        return {
-            pattern: raw.substring(1, lastSlash),
-            flags: raw.substring(lastSlash + 1)
-        };
-    }
+    if (!(raw.length >= 2 && raw.startsWith('/') && raw.lastIndexOf('/') > 0))
+        throw new Error("Expected /pattern/flags syntax.");
 
+    let lastSlash = raw.lastIndexOf('/');
     return {
-        pattern: raw,
-        flags: 'i'
+        pattern: raw.substring(1, lastSlash),
+        flags: raw.substring(lastSlash + 1)
     };
 }
 
@@ -1545,9 +1872,96 @@ function buildRegex(rawPattern: string) : RegExp
     }
 }
 
-function regexTest(regex: RegExp, text: string) : boolean
+function getRegexSearchTextValues(entry: SearchIndexEntry) : SearchTextValue[]
+{
+    let result: SearchTextValue[] = [
+        { text: entry.qualifiedName, viewPriority: 0 },
+        { text: entry.shortName, viewPriority: 2 }
+    ];
+
+    for (let alias of entry.qualifiedAliasTexts)
+        result.push({ text: alias.text, viewPriority: 1 });
+
+    if (!isCallableKind(entry.kind))
+        return dedupeSearchTextValues(result);
+
+    result.push(
+        { text: `${entry.qualifiedName}()`, viewPriority: 0 },
+        { text: `${entry.shortName}()`, viewPriority: 2 }
+    );
+    for (let alias of entry.qualifiedAliasTexts)
+        result.push({ text: `${alias.text}()`, viewPriority: 1 });
+
+    return dedupeSearchTextValues(result);
+}
+
+function dedupeSearchTextValues(values: SearchTextValue[]) : SearchTextValue[]
+{
+    let seen = new Set<string>();
+    let result: SearchTextValue[] = [];
+    for (let value of values)
+    {
+        let normalized = value.text.toLowerCase();
+        if (seen.has(normalized))
+            continue;
+
+        seen.add(normalized);
+        result.push(value);
+    }
+    return result;
+}
+
+function findRegexSortKey(entry: SearchIndexEntry, regex: RegExp) : SearchMatchSortKey | null
+{
+    let bestSortKey: SearchMatchSortKey | null = null;
+    for (let value of getRegexSearchTextValues(entry))
+    {
+        let match = regexExec(regex, value.text);
+        if (!match)
+            continue;
+
+        let sortKey: SearchMatchSortKey = {
+            reasonRank: 0,
+            start: match.index,
+            totalGap: 0,
+            span: match.length,
+            viewPriority: value.viewPriority
+        };
+        bestSortKey = pickBetterSortKey(bestSortKey, sortKey);
+    }
+    return bestSortKey;
+}
+
+function pickBetterSortKey(left: SearchMatchSortKey | null, right: SearchMatchSortKey | null) : SearchMatchSortKey | null
+{
+    if (!left)
+        return right;
+    if (!right)
+        return left;
+    if (left.reasonRank != right.reasonRank)
+        return left.reasonRank > right.reasonRank ? left : right;
+    if (left.start != right.start)
+        return left.start < right.start ? left : right;
+    if (left.totalGap != right.totalGap)
+        return left.totalGap < right.totalGap ? left : right;
+    if (left.span != right.span)
+        return left.span < right.span ? left : right;
+    if (left.viewPriority != right.viewPriority)
+        return left.viewPriority < right.viewPriority ? left : right;
+    return left;
+}
+
+function regexExec(regex: RegExp, text: string) : { index: number; length: number } | null
 {
     if (regex.global || regex.sticky)
         regex.lastIndex = 0;
-    return regex.test(text);
+
+    let match = regex.exec(text);
+    if (!match)
+        return null;
+
+    return {
+        index: match.index,
+        length: match[0]?.length ?? 0
+    };
 }

@@ -126,11 +126,15 @@ function setupSearchFixture(): void
 
     const movement = declareNamespace('Gameplay::Movement', 'Game.Modules.Movement');
     movement.documentation = 'Movement APIs.';
+    const characters = declareNamespace('Gameplay::Characters', 'Game.Modules.Characters');
+    characters.documentation = 'Character APIs.';
 
     const tools = declareNamespace('Tools');
     tools.documentation = 'Debug tooling.';
     const toolsMovement = declareNamespace('Tools::Movement');
     toolsMovement.documentation = 'Alternate movement namespace.';
+    const gameplayTags = declareNamespace('GameplayTags');
+    gameplayTags.documentation = 'Gameplay tag constants.';
 
     const hiddenNs = declareNamespace('Gameplay::_Hidden', 'Game.Modules.Hidden');
     hiddenNs.documentation = 'Hidden APIs.';
@@ -155,6 +159,18 @@ function setupSearchFixture(): void
         'float',
         null,
         'Global movement speed.'
+    ));
+    gameplayTags.addSymbol(createProperty(
+        'Status_AI',
+        'FGameplayTag',
+        null,
+        'AI gameplay tag.'
+    ));
+    gameplayTags.addSymbol(createProperty(
+        'Status_Player',
+        'FGameplayTag',
+        null,
+        'Player gameplay tag.'
     ));
 
     tools.addSymbol(createMethod(
@@ -224,6 +240,33 @@ function setupSearchFixture(): void
         documentation: 'Movement state enum.'
     });
 
+    createType(characters, 'UCthuAICharacterExtension', {
+        declaredModule: 'Game.Modules.Characters',
+        documentation: 'Character extension helpers.',
+        methods: [
+            createMethod(
+                'OpenPawnDataAIAsset',
+                'void',
+                'Game.Modules.Characters',
+                [{ typename: 'AActor', name: 'SelectedActor' }],
+                'Opens the selected pawn data asset.'
+            )
+        ],
+        properties: [
+            createProperty(
+                'OpenPawnDataAIAsset',
+                'UDataAsset',
+                'Game.Modules.Characters',
+                'A same-name property used to verify callable-only filtering.'
+            )
+        ]
+    });
+
+    createType(characters, 'UOpenPawnDataAIAsset', {
+        declaredModule: 'Game.Modules.Characters',
+        documentation: 'A same-name type used to verify callable-only filtering.'
+    });
+
     createType(hiddenNs, '_HiddenMovementHelper', {
         declaredModule: 'Game.Modules.Hidden',
         documentation: 'Hidden movement helper.'
@@ -238,40 +281,170 @@ test.beforeEach(() =>
     setupSearchFixture();
 });
 
-test('smart, exact, and regex search modes follow the new name-only contract', () =>
+test('plain, smart, and regex search modes follow the new name-view contract', () =>
 {
+    const plainExactQualified = GetAPISearch({ query: 'Gameplay::Movement::UCameraMovementComponent', mode: 'plain', limit: 10 });
+    assert.equal(plainExactQualified.matches[0]?.qualifiedName, 'Gameplay::Movement::UCameraMovementComponent');
+    assert.equal(plainExactQualified.matches[0]?.matchReason, 'exact-qualified');
+
+    const plainCallableQualified = GetAPISearch({
+        query: 'Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset(',
+        mode: 'plain',
+        limit: 10
+    });
+    assert.deepEqual(plainCallableQualified.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+    assert.equal(plainCallableQualified.matches[0]?.kind, 'method');
+
     const smart = GetAPISearch({ query: 'Camera Movement', mode: 'smart', limit: 10 });
     assert.ok(smart.matches.some((match) => match.qualifiedName === 'Gameplay::Movement::UCameraMovementComponent'));
-
-    const exact = GetAPISearch({ query: 'Gameplay::Movement::UCameraMovementComponent', mode: 'exact', limit: 10 });
-    assert.deepEqual(exact.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::UCameraMovementComponent']);
+    const smartExactQualified = GetAPISearch({ query: 'Gameplay::Movement::UCameraMovementComponent', mode: 'smart', limit: 10 });
+    assert.deepEqual(smartExactQualified.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::UCameraMovementComponent']);
+    assert.equal(smartExactQualified.matches[0]?.matchReason, 'exact-qualified');
 
     const regex = GetAPISearch({ query: '/StartMovement$/', mode: 'regex', kinds: ['method'], limit: 10 });
     assert.deepEqual(regex.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::UMovementDerived.StartMovement']);
+
+    const regexOr = GetAPISearch({ query: '/StartMovement$|TickMovement$/', mode: 'regex', kinds: ['method'], limit: 20 });
+    assert.deepEqual([...regexOr.matches.map((match) => match.qualifiedName)].sort(), [
+        'Gameplay::Movement::UMovementDerived.StartMovement',
+        'Gameplay::Movement::UMovementBase.TickMovement'
+    ].sort());
 
     const regexMixinAlias = GetAPISearch({ query: '/UMovementDerived\\.ApplyDerivedMovement$/', mode: 'regex', kinds: ['function'], limit: 10 });
     assert.deepEqual(regexMixinAlias.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::ApplyDerivedMovement']);
     assert.equal(regexMixinAlias.matches[0].isMixin, true);
 
+    const regexCallableMethod = GetAPISearch({ query: '/UCthuAICharacterExtension\\.OpenPawnDataAIAsset\\(/', mode: 'regex', kinds: ['method'], limit: 10 });
+    assert.deepEqual(regexCallableMethod.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+
+    const regexCallableFunction = GetAPISearch({ query: '/Gameplay::Movement::BuildMovementPath\\(/', mode: 'regex', kinds: ['function'], limit: 10 });
+    assert.deepEqual(regexCallableFunction.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::BuildMovementPath']);
+
     const regexDoesNotMatchSignature = GetAPISearch({ query: '/^void /', mode: 'regex', kinds: ['method'], limit: 10 });
     assert.equal(regexDoesNotMatchSignature.matches.length, 0);
 });
 
-test('smart search supports compact queries, reversed-token fallback, and tiny-query suppression', () =>
+test('plain search supports code-like queries, ordered gaps, weak reorder fallback, and callable-only suffixes', () =>
+{
+    const codeLikeMember = GetAPISearch({ query: 'UCthuAICharacterExtension.OpenPawnDataAIAsset(', mode: 'plain', limit: 10 });
+    assert.deepEqual(codeLikeMember.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+    assert.equal(codeLikeMember.matches[0]?.matchReason, 'boundary-ordered');
+
+    const namespaceFunction = GetAPISearch({ query: 'Gameplay::Movement::BuildMovementPath(', mode: 'plain', limit: 10 });
+    assert.deepEqual(namespaceFunction.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::BuildMovementPath']);
+    assert.equal(namespaceFunction.matches[0]?.kind, 'function');
+
+    const orderedGap = GetAPISearch({ query: 'Status AI', mode: 'plain', limit: 10 });
+    assert.deepEqual(orderedGap.matches.map((match) => match.qualifiedName), ['GameplayTags::Status_AI']);
+    assert.equal(orderedGap.matches[0]?.matchReason, 'ordered-wildcard');
+
+    const weakReorder = GetAPISearch({ query: 'AI Status', mode: 'plain', limit: 10 });
+    assert.equal(weakReorder.matches[0]?.qualifiedName, 'GameplayTags::Status_AI');
+    assert.equal(weakReorder.matches[0]?.matchReason, 'weak-reorder');
+
+    const callableShort = GetAPISearch({ query: 'OpenPawnDataAIAsset(', mode: 'plain', limit: 10 });
+    assert.deepEqual(callableShort.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+
+    const callableShortWithParens = GetAPISearch({ query: 'OpenPawnDataAIAsset()', mode: 'plain', limit: 10 });
+    assert.deepEqual(callableShortWithParens.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+});
+
+test('smart search uses ordered wildcard matching with strict separators', () =>
 {
     const compact = GetAPISearch({ query: 'CameraMovementComponent', mode: 'smart', limit: 10 });
     assert.ok(compact.matches.some((match) => match.qualifiedName === 'Gameplay::Movement::UCameraMovementComponent'));
+    assert.equal(compact.matches[0]?.matchReason, 'ordered-wildcard');
 
-    const reversed = GetAPISearch({ query: 'Movement Camera', mode: 'smart', kinds: ['class'], limit: 10 });
-    assert.deepEqual(reversed.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::UCameraMovementComponent']);
+    const qualifiedPrefix = GetAPISearch({ query: 'gameplayt', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
+    assert.deepEqual(qualifiedPrefix.matches.map((match) => match.qualifiedName), [
+        'GameplayTags::Status_AI',
+        'GameplayTags::Status_Player'
+    ]);
+    assert.equal(qualifiedPrefix.matches[0]?.matchReason, 'ordered-wildcard');
+
+    const qualifiedLongerPrefix = GetAPISearch({ query: 'gameplayta', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
+    assert.deepEqual(qualifiedLongerPrefix.matches.map((match) => match.qualifiedName), [
+        'GameplayTags::Status_AI',
+        'GameplayTags::Status_Player'
+    ]);
+    assert.equal(qualifiedLongerPrefix.matches[0]?.matchReason, 'ordered-wildcard');
 
     const mixinAlias = GetAPISearch({ query: 'UMovementDerived ApplyDerivedMovement', mode: 'smart', kinds: ['function'], limit: 10 });
     assert.deepEqual(mixinAlias.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::ApplyDerivedMovement']);
     assert.equal(mixinAlias.matches[0].isMixin, true);
+    assert.equal(mixinAlias.matches[0].matchReason, 'ordered-wildcard');
+
+    const wildcardGap = GetAPISearch({ query: 'gameplayt AI', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
+    assert.deepEqual(wildcardGap.matches.map((match) => match.qualifiedName), ['GameplayTags::Status_AI']);
+    assert.equal(wildcardGap.matches[0]?.matchReason, 'ordered-wildcard');
+
+    const namespaceBoundary = GetAPISearch({ query: 'gameplayt :: AI', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
+    assert.deepEqual(namespaceBoundary.matches.map((match) => match.qualifiedName), ['GameplayTags::Status_AI']);
+    assert.equal(namespaceBoundary.matches[0]?.matchReason, 'boundary-ordered');
+
+    const splitNamespaceBoundary = GetAPISearch({ query: 'play tag :: AI', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
+    assert.deepEqual(splitNamespaceBoundary.matches.map((match) => match.qualifiedName), ['GameplayTags::Status_AI']);
+    assert.equal(splitNamespaceBoundary.matches[0]?.matchReason, 'boundary-ordered');
+
+    const strictMemberBoundary = GetAPISearch({ query: 'gameplayt . AI', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
+    assert.equal(strictMemberBoundary.matches.length, 0);
+
+    const orderedMemberBoundary = GetAPISearch({ query: 'movement . start', mode: 'smart', kinds: ['method'], limit: 20 });
+    assert.ok(orderedMemberBoundary.matches.length > 0);
+    assert.ok(orderedMemberBoundary.matches.every((match) => match.qualifiedName.includes('.')));
+    assert.ok(orderedMemberBoundary.matches.every((match) => match.matchReason === 'boundary-ordered'));
+
+    const suffixWildcard = GetAPISearch({ query: 'status AI', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
+    assert.deepEqual(suffixWildcard.matches.map((match) => match.qualifiedName), ['GameplayTags::Status_AI']);
+    assert.equal(suffixWildcard.matches[0]?.matchReason, 'ordered-wildcard');
+
+    const smartOr = GetAPISearch({ query: 'GameplayTags :: AI | Status Player', mode: 'smart', limit: 20 });
+    assert.deepEqual(smartOr.matches.map((match) => match.qualifiedName), [
+        'GameplayTags::Status_AI',
+        'GameplayTags::Status_Player'
+    ]);
+
+    const smartOrDeduped = GetAPISearch({ query: 'OpenPawnDataAIAsset( | Cthu Extension DataAIAsset(', mode: 'smart', limit: 20 });
+    assert.deepEqual(smartOrDeduped.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+
+    const smartOrMixedTiny = GetAPISearch({ query: 'U | OpenPawnDataAIAsset(', mode: 'smart', limit: 20 });
+    assert.deepEqual(smartOrMixedTiny.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+    assert.equal(smartOrMixedTiny.notices, undefined);
+
+    const callableShort = GetAPISearch({ query: 'OpenPawnDataAIAsset(', mode: 'smart', limit: 10 });
+    assert.deepEqual(callableShort.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+    assert.equal(callableShort.matches[0]?.kind, 'method');
+
+    const callableShortWithParens = GetAPISearch({ query: 'OpenPawnDataAIAsset()', mode: 'smart', limit: 10 });
+    assert.deepEqual(callableShortWithParens.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+    assert.equal(callableShortWithParens.matches[0]?.kind, 'method');
+
+    const callableMemberBoundary = GetAPISearch({ query: 'Cthu Extension . DataAIAsset(', mode: 'smart', limit: 10 });
+    assert.deepEqual(callableMemberBoundary.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+    assert.equal(callableMemberBoundary.matches[0]?.matchReason, 'boundary-ordered');
+
+    const callableWildcard = GetAPISearch({ query: 'Cthu Extension DataAIAsset(', mode: 'smart', limit: 10 });
+    assert.deepEqual(callableWildcard.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+    assert.equal(callableWildcard.matches[0]?.matchReason, 'ordered-wildcard');
+
+    const callableMethodsOnly = GetAPISearch({ query: 'OpenPawnDataAIAsset(', mode: 'smart', kinds: ['method'], limit: 10 });
+    assert.deepEqual(callableMethodsOnly.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+    assert.equal(callableMethodsOnly.matches[0]?.kind, 'method');
+
+    const callableFunctionsOnly = GetAPISearch({ query: 'BuildMovementPath(', mode: 'smart', kinds: ['function'], limit: 10 });
+    assert.deepEqual(callableFunctionsOnly.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::BuildMovementPath']);
+    assert.equal(callableFunctionsOnly.matches[0]?.kind, 'function');
+
+    const callablePropertiesOnly = GetAPISearch({ query: 'OpenPawnDataAIAsset(', mode: 'smart', kinds: ['property'], limit: 10 });
+    assert.equal(callablePropertiesOnly.matches.length, 0);
 
     const tiny = GetAPISearch({ query: 'U', mode: 'smart', limit: 10 });
     assert.equal(tiny.matches.length, 0);
     assert.equal(tiny.notices?.[0]?.code, 'QUERY_TOO_SHORT');
+
+    const allTinyOr = GetAPISearch({ query: 'U | A', mode: 'smart', limit: 10 });
+    assert.equal(allTinyOr.matches.length, 0);
+    assert.equal(allTinyOr.notices?.[0]?.code, 'QUERY_TOO_SHORT');
 });
 
 test('source and kind filters narrow the search result set', () =>
@@ -292,12 +465,38 @@ test('source and kind filters narrow the search result set', () =>
     assert.ok(!filtered.matches.some((match) => match.qualifiedName === 'Gameplay::Movement::UMovementBase.TickMovement'));
 });
 
+test('common smart searches do not require kind filters', () =>
+{
+    const typeSearch = GetAPISearch({ query: 'CameraMovementComponent', mode: 'smart', limit: 10 });
+    assert.equal(typeSearch.matches[0]?.qualifiedName, 'Gameplay::Movement::UCameraMovementComponent');
+    assert.equal(typeSearch.matches[0]?.kind, 'class');
+
+    const callableSearch = GetAPISearch({ query: 'OpenPawnDataAIAsset(', mode: 'smart', limit: 10 });
+    assert.equal(callableSearch.matches[0]?.qualifiedName, 'Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset');
+    assert.equal(callableSearch.matches[0]?.kind, 'method');
+
+    const globalSearch = GetAPISearch({ query: 'status AI', mode: 'smart', limit: 10 });
+    assert.equal(globalSearch.matches[0]?.qualifiedName, 'GameplayTags::Status_AI');
+    assert.equal(globalSearch.matches[0]?.kind, 'globalVariable');
+});
+
+test('includeDocs enriches search results without changing ordering', () =>
+{
+    const withoutDocs = GetAPISearch({ query: 'OpenPawnDataAIAsset(', mode: 'smart', limit: 10 });
+    const withDocs = GetAPISearch({ query: 'OpenPawnDataAIAsset(', mode: 'smart', limit: 10, includeDocs: true });
+
+    assert.equal(withoutDocs.matches[0]?.qualifiedName, withDocs.matches[0]?.qualifiedName);
+    assert.equal(withoutDocs.matches[0]?.documentation, undefined);
+    assert.equal(withDocs.matches[0]?.documentation, 'Opens the selected pawn data asset.');
+    assert.equal(withDocs.matches[0]?.summary, 'Opens the selected pawn data asset.');
+});
+
 test('namespace scope restricts results to declared descendants', () =>
 {
     const scoped = GetAPISearch({
         query: 'Movement',
         mode: 'smart',
-        scopePrefix: 'Gameplay::Movement',
+        scope: 'Gameplay::Movement',
         limit: 20
     });
 
@@ -314,7 +513,7 @@ test('class scope can expand inherited members and dedupe overridden ancestors',
     const scoped = GetAPISearch({
         query: 'Movement',
         mode: 'smart',
-        scopePrefix: 'Gameplay::Movement::UMovementDerived',
+        scope: 'Gameplay::Movement::UMovementDerived',
         kinds: ['method', 'property'],
         includeInheritedFromScope: true,
         limit: 20
@@ -343,7 +542,7 @@ test('type scope includes applicable mixin functions and preserves function kind
     const scoped = GetAPISearch({
         query: 'Movement',
         mode: 'smart',
-        scopePrefix: 'Gameplay::Movement::UMovementDerived',
+        scope: 'Gameplay::Movement::UMovementDerived',
         kinds: ['function'],
         includeInheritedFromScope: true,
         limit: 20
@@ -374,13 +573,13 @@ test('invalid scope lookup returns notices without throwing', () =>
         limit: 10
     });
 
-    assert.equal(missingScopePrefix.inheritedScopeOutcome, 'ignored_missing_scope_prefix');
+    assert.equal(missingScopePrefix.inheritedScopeOutcome, 'ignored_missing_scope');
     assert.equal(missingScopePrefix.scopeLookup, undefined);
 
     const missing = GetAPISearch({
         query: 'Movement',
         mode: 'smart',
-        scopePrefix: 'Gameplay::Missing',
+        scope: 'Gameplay::Missing',
         includeInheritedFromScope: true,
         limit: 10
     });
@@ -389,13 +588,13 @@ test('invalid scope lookup returns notices without throwing', () =>
     assert.equal(missing.inheritedScopeOutcome, 'ignored_scope_not_found');
     assert.equal(missing.notices, undefined);
     assert.deepEqual(missing.scopeLookup, {
-        requestedPrefix: 'Gameplay::Missing'
+        requestedScope: 'Gameplay::Missing'
     });
 
     const ambiguous = GetAPISearch({
         query: 'Movement',
         mode: 'smart',
-        scopePrefix: 'Movement',
+        scope: 'Movement',
         includeInheritedFromScope: true,
         limit: 10
     });
@@ -408,7 +607,7 @@ test('invalid scope lookup returns notices without throwing', () =>
     const namespaceScope = GetAPISearch({
         query: 'Movement',
         mode: 'smart',
-        scopePrefix: 'Gameplay::Movement',
+        scope: 'Gameplay::Movement',
         includeInheritedFromScope: true,
         limit: 10
     });
@@ -421,7 +620,7 @@ test('invalid scope lookup returns notices without throwing', () =>
     const nonClass = GetAPISearch({
         query: 'Movement',
         mode: 'smart',
-        scopePrefix: 'Gameplay::Movement::EMovementState',
+        scope: 'Gameplay::Movement::EMovementState',
         includeInheritedFromScope: true,
         limit: 10
     });
@@ -436,7 +635,7 @@ test('applied inheritedScopeOutcome does not suppress empty inheritance notice',
     const scoped = GetAPISearch({
         query: 'CameraMovement',
         mode: 'smart',
-        scopePrefix: 'Gameplay::Movement::UCameraMovementComponent',
+        scope: 'Gameplay::Movement::UCameraMovementComponent',
         kinds: ['method'],
         includeInheritedFromScope: true,
         limit: 20
@@ -451,7 +650,7 @@ test('nearest override wins when inherited members share the same override key',
     const scoped = GetAPISearch({
         query: 'ResetMovement',
         mode: 'smart',
-        scopePrefix: 'Gameplay::Movement::UMovementDerived',
+        scope: 'Gameplay::Movement::UMovementDerived',
         kinds: ['method'],
         includeInheritedFromScope: true,
         limit: 20
@@ -480,5 +679,21 @@ test('namespace is no longer an accepted public kind filter', () =>
     assert.throws(
         () => GetAPISearch({ query: 'Movement', mode: 'smart', kinds: ['namespace'], limit: 10 }),
         /Unsupported kind "namespace"/u
+    );
+});
+
+test('smart OR rejects empty branches and public exact mode is removed', () =>
+{
+    assert.throws(
+        () => GetAPISearch({ query: 'Movement || Start', mode: 'smart', limit: 10 }),
+        /empty smart OR branch/u
+    );
+    assert.throws(
+        () => GetAPISearch({ query: 'StartMovement$', mode: 'regex', limit: 10 }),
+        /Expected \/pattern\/flags syntax/u
+    );
+    assert.throws(
+        () => GetAPISearch({ query: 'Movement', mode: 'exact', limit: 10 } as any),
+        /'mode' must be 'smart', 'plain', or 'regex'/u
     );
 });

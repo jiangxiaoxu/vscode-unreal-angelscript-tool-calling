@@ -25,12 +25,13 @@ export type ToolSuccess<TData> = {
 
 export type ToolResult<TData> = ToolSuccess<TData> | ToolFailure;
 
-export type SearchMode = 'smart' | 'exact' | 'regex';
+export type SearchMode = 'smart' | 'plain' | 'regex';
 export type SearchSource = 'native' | 'script' | 'both';
 export type SearchMatchSource = 'native' | 'script';
 export type SearchKind = 'class' | 'struct' | 'enum' | 'method' | 'function' | 'property' | 'globalVariable';
 export type SearchScopeKind = 'namespace' | 'class' | 'struct' | 'enum';
 export type SearchScopeRelationship = 'declared' | 'inherited' | 'mixin';
+export type SearchMatchReason = 'exact-qualified' | 'exact-short' | 'boundary-ordered' | 'ordered-wildcard' | 'short-ordered' | 'weak-reorder';
 
 export type GetAPISearchParams = {
     query: string;
@@ -38,8 +39,9 @@ export type GetAPISearchParams = {
     limit?: number;
     kinds?: SearchKind[];
     source?: SearchSource;
-    scopePrefix?: string;
+    scope?: string;
     includeInheritedFromScope?: boolean;
+    includeDocs?: boolean;
 };
 
 export type GetAPISearchNotice = {
@@ -49,13 +51,13 @@ export type GetAPISearchNotice = {
 
 export type InheritedScopeOutcome =
     | 'applied'
-    | 'ignored_missing_scope_prefix'
+    | 'ignored_missing_scope'
     | 'ignored_scope_not_found'
     | 'ignored_scope_not_class'
     | 'ignored_scope_ambiguous';
 
 export type GetAPISearchScopeLookup = {
-    requestedPrefix: string;
+    requestedScope: string;
     resolvedQualifiedName?: string;
     resolvedKind?: SearchScopeKind;
     ambiguousCandidates?: string[];
@@ -65,7 +67,9 @@ export type GetAPISearchLspMatch = {
     qualifiedName: string;
     kind: SearchKind;
     signature: string;
+    matchReason?: SearchMatchReason;
     summary?: string;
+    documentation?: string;
     containerQualifiedName?: string;
     source: SearchMatchSource;
     isMixin?: boolean;
@@ -90,12 +94,12 @@ export type GetAPISearchToolData = {
     inheritedScopeOutcome?: InheritedScopeOutcome;
     request?: {
         query: string;
-        mode: SearchMode;
+        regex: boolean;
         limit: number;
-        kinds?: SearchKind[];
         source: SearchSource;
-        scopePrefix?: string;
+        scope?: string;
         includeInheritedFromScope: boolean;
+        includeDocs: boolean;
     };
 };
 
@@ -131,6 +135,7 @@ export type GetTypeMembersLspResult = {
         name: string;
         namespace: string;
         qualifiedName: string;
+        description: string;
     };
     members: TypeMemberInfo[];
 } | {
@@ -146,6 +151,7 @@ export type GetTypeMembersToolData = {
         name: string;
         namespace: string;
         qualifiedName: string;
+        description: string;
     };
     members: TypeMemberInfo[];
     request?: {

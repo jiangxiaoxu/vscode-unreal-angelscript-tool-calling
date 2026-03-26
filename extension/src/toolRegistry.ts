@@ -2,13 +2,12 @@ import * as vscode from 'vscode';
 import * as z from 'zod';
 import type { ZodType } from 'zod/v4/classic/schemas';
 import { LanguageClient } from 'vscode-languageclient/node';
-import { AngelscriptSearchParams } from './angelscriptApiSearch';
+import { AngelscriptSearchToolParams } from './angelscriptApiSearch';
 import {
     FindReferencesParams,
     GetTypeHierarchyParams,
     GetTypeMembersParams,
-    ResolveSymbolAtPositionToolParams,
-    SearchKind
+    ResolveSymbolAtPositionToolParams
 } from './apiRequests';
 import {
     runFindReferences,
@@ -35,16 +34,6 @@ type ToolDefinition<TInput> = {
     run: (context: ToolContext, input: TInput | null | undefined) => Promise<unknown>;
 };
 
-const searchKindOptions = [
-    'class',
-    'struct',
-    'enum',
-    'method',
-    'function',
-    'property',
-    'globalVariable'
-] as const satisfies readonly SearchKind[];
-
 function toPayloadObject(result: unknown): Record<string, unknown>
 {
     if (result !== null && typeof result === 'object' && !Array.isArray(result))
@@ -70,26 +59,25 @@ function toPayloadText(toolName: string, payload: Record<string, unknown>): stri
     }
 }
 
-function prepareSearchInvocation(input: AngelscriptSearchParams | null | undefined): string
+function prepareSearchInvocation(input: AngelscriptSearchToolParams | null | undefined): string
 {
     const query = typeof input?.query === "string" ? input.query.trim() : "";
-    const mode = typeof input?.mode === "string" ? input.mode : "smart";
+    const regex = input?.regex === true;
     const limit = typeof input?.limit === "number" ? input.limit : undefined;
     const source = typeof input?.source === "string" ? input.source : "both";
-    const kinds = Array.isArray(input?.kinds) ? input?.kinds.filter((item) => typeof item === "string") : [];
-    const scopePrefix = typeof input?.scopePrefix === "string" ? input.scopePrefix.trim() : "";
+    const scope = typeof input?.scope === "string" ? input.scope.trim() : "";
     const includeInheritedFromScope = input?.includeInheritedFromScope === true ? "true" : "false";
+    const includeDocs = input?.includeDocs === true ? "true" : "false";
 
     const details: string[] = [];
-    details.push(`mode=${mode}`);
+    details.push(`mode=${regex ? "regex" : "plain"}`);
     details.push(`source=${source}`);
     if (typeof limit === "number")
         details.push(`limit=${limit}`);
-    if (kinds && kinds.length > 0)
-        details.push(`kinds=${kinds.join(",")}`);
-    if (scopePrefix)
-        details.push(`scope=${scopePrefix}`);
+    if (scope)
+        details.push(`scope=${scope}`);
     details.push(`inheritScope=${includeInheritedFromScope}`);
+    details.push(`includeDocs=${includeDocs}`);
 
     const queryLabel = query ? `"${query}"` : "<empty>";
     return `Search Angelscript API ${queryLabel} (${details.join(", ")})`;
@@ -97,7 +85,7 @@ function prepareSearchInvocation(input: AngelscriptSearchParams | null | undefin
 
 function normalizeLmToolOutputMode(value: unknown): LmToolOutputMode
 {
-    return value === 'text-only' ? 'text-only' : 'text+structured';
+    return value === 'text+structured' ? 'text+structured' : 'text-only';
 }
 
 function prepareTypeMembersInvocation(input: GetTypeMembersParams | null | undefined): string
@@ -146,18 +134,18 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     {
         name: 'angelscript_searchApi',
         description:
-            'Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires query. Optional controls: mode (smart|exact|regex, default smart), limit (default 20, max 200), kinds (class|struct|enum|method|function|property|globalVariable), source (native|script|both, default both), scopePrefix, includeInheritedFromScope. Function results include namespace/global functions and mixin functions. Regex mode matches short names, canonical qualified names, and mixin member-view aliases only. When includeInheritedFromScope is requested, the top-level result may include inheritedScopeOutcome. Returns readable text and, by default, structured JSON payload.',
+            'Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires query. Default plain search is case-insensitive, favors code-like queries such as `Type.Member` and `Namespace::Func`, supports ordered token gaps, and uses weak token reorder only as a low-priority fallback. A trailing `(` or `()` means callable-only and restricts plain results to `method` and `function`; it does not match argument lists or zero-arg signatures. Optional controls: limit (default 20, max 200), source (native|script|both, default both), scope, includeInheritedFromScope, includeDocs, and regex. `scope` narrows the search domain to a known namespace or containing type before ranking. `includeDocs=true` only enriches returned matches with full documentation and does not affect ranking. When `regex=true`, `query` must use VS Code-style `/pattern/flags` syntax and matches only symbol name views: short names, qualified names, mixin aliases, and callable `...()` views for methods/functions. When includeInheritedFromScope is requested, the top-level result may include inheritedScopeOutcome. Structured matches may include `matchReason`. Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Success text groups matches by owner or namespace and renders declarations with minimal comment metadata.',
         inputSchema: z.object({
-            query: z.string().describe('Search query for Angelscript API symbols.'),
-            mode: z.enum(['smart', 'exact', 'regex']).optional().describe('Search mode. Default is smart.'),
+            query: z.string().describe('Search query for Angelscript API symbols. Plain search is case-insensitive and supports code-like queries such as `Type.Member` and `Namespace::Func`, ordered token gaps such as `Status AI`, and a low-priority weak reorder fallback. A trailing `(` or `()` limits plain results to callable symbols (`method` and `function`) without matching argument lists. When `regex=true`, provide a VS Code-style `/pattern/flags` regex.'),
             limit: z.number().int().min(1).max(200).optional().describe('Maximum number of matches to return. Default is 20.'),
             source: z.enum(['native', 'script', 'both']).optional().describe('Filter results by source. Supported values: native, script, both. Default is both.'),
-            kinds: z.array(z.enum(searchKindOptions)).optional().describe('Filter results by kinds.'),
-            scopePrefix: z.string().optional().describe('Optional namespace or type scope. Namespace scopes filter declared descendants. Type scopes filter declared members, can expand inherited methods and properties, and also surface applicable mixin functions.'),
-            includeInheritedFromScope: z.boolean().optional().describe('Only applies to class/type scopes. When true, expands inherited methods and properties. Default is false.')
+            scope: z.string().optional().describe('Optional known namespace or containing type. Namespace scopes filter declared descendants. Type scopes filter declared members, can expand inherited methods and properties, and also surface applicable mixin functions.'),
+            includeInheritedFromScope: z.boolean().optional().describe('Only applies to class/type scopes. When true, expands inherited methods and properties. Default is false.'),
+            includeDocs: z.boolean().optional().describe('When true, attach full documentation text to returned matches. This enriches results only and does not affect search ranking. Default is false.'),
+            regex: z.boolean().optional().describe('When true, interpret `query` as a VS Code-style `/pattern/flags` regex. Regex search matches only symbol name views, plus callable `...()` views for methods and functions. Default is false.')
         }).strict(),
         prepareInvocation: prepareSearchInvocation,
-        run: async (context, input: AngelscriptSearchParams | null | undefined) =>
+        run: async (context, input: AngelscriptSearchToolParams | null | undefined) =>
         {
             return await runSearchApi(
                 context.client,
@@ -169,7 +157,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_resolveSymbolAtPosition',
-        description: 'Use when you have an absolute file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires absolute filePath and position (line, character, both 1-based). Optional includeDocumentation controls doc payload (default true). Returns readable text and, by default, structured JSON payload. When definition exists, output includes absolute filePath, line range, preview text, and checks one line above definition start for Unreal macros UCLASS/UPROPERTY/UFUNCTION/UENUM.',
+        description: 'Use when you have an absolute file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires absolute filePath and position (line, character, both 1-based). Optional includeDocumentation controls doc payload (default true). Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Success text prefers normalized `/** ... */` docs plus declaration or definition preview, and still checks one line above definition start for Unreal macros UCLASS/UPROPERTY/UFUNCTION/UENUM.',
         inputSchema: z.object({
             filePath: z.string().describe('Absolute path to the file containing the symbol.'),
             position: z.object({
@@ -185,7 +173,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_getTypeMembers',
-        description: 'Use when you need the member list of a specific Angelscript type, including inherited members when requested. Do not use when you need parent/child hierarchy traversal between classes. Requires exact name (optional namespace for disambiguation). Optional switches: includeInherited (default false), includeDocs (default false), and kinds (both|method|property, default both). Returns readable text and, by default, structured JSON payload with type identity and member entries.',
+        description: 'Use when you need the member list of a specific Angelscript type, including inherited members when requested. Do not use when you need parent/child hierarchy traversal between classes. Requires exact name (optional namespace for disambiguation). Optional switches: includeInherited (default false), includeDocs (default false), and kinds (both|method|property, default both). Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Structured payload includes type identity, always-on `type.description`, and member entries whose descriptions are populated only when `includeDocs=true`.',
         inputSchema: z.object({
             name: z.string().describe('Type name to inspect.'),
             namespace: z.string().optional().describe('Optional namespace to disambiguate type name. Use empty string for root namespace.'),
@@ -201,7 +189,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_getClassHierarchy',
-        description: 'Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., "APawn"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns readable text and, by default, structured JSON payload, including root, supers, derivedByParent, limits, truncated info, and script-class preview text when available. If a script source path cannot be resolved, that preview degrades to source unavailable instead of failing the tool.',
+        description: 'Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., "APawn"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Structured payload includes root, supers, derivedByParent, limits, truncated info, and script-class preview text when available. Success text uses comment-based lineage/derived trees plus source previews or native declaration stubs, and unresolved script sources degrade to `// source unavailable` instead of failing the tool.',
         inputSchema: z.object({
             name: z.string().describe('Exact class name to inspect (e.g., "APawn").'),
             maxSuperDepth: z.number().int().optional().describe('Maximum number of supertypes to return. Non-negative integer. Default is 3.'),
@@ -216,7 +204,7 @@ const toolDefinitions: Array<ToolDefinition<any>> = [
     },
     {
         name: 'angelscript_findReferences',
-        description: 'Use when you have a symbol location and need project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires absolute filePath and position (line, character, both 1-based). Optional limit controls the maximum number of returned references (default 30, max 200). Returns readable text and, by default, structured JSON payload with total, returned, limit, truncated, per-file grouping, 1-based range labels, and preview text.',
+        description: 'Use when you have a symbol location and need project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires absolute filePath and position (line, character, both 1-based). Optional limit controls the maximum number of returned references (default 30, max 200). Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Structured payload includes total, returned, limit, truncated, per-file grouping, 1-based range labels, and preview text. Success text renders `// <filePath>` + `// range: ...` + preview blocks, with truncation surfaced as a final comment only when needed.',
         inputSchema: z.object({
             filePath: z.string().describe('Absolute path to the file containing the symbol.'),
             position: z.object({

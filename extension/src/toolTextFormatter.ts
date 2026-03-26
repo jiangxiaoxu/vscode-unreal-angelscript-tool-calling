@@ -14,6 +14,12 @@ type PreviewRenderOptions = {
     matchEndLine?: number | null;
 };
 
+type SearchGroup = {
+    key: string;
+    header?: string;
+    items: UnknownRecord[];
+};
+
 function isRecord(value: unknown): value is UnknownRecord
 {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -116,13 +122,6 @@ function getToolTitle(toolName: string): string
     return toolName;
 }
 
-function formatSearchSourceLabel(source: string): string
-{
-    if (source === 'both')
-        return 'native|script';
-    return source;
-}
-
 function pushValue(lines: string[], key: string, value: unknown): void
 {
     if (value === undefined || value === null)
@@ -130,13 +129,431 @@ function pushValue(lines: string[], key: string, value: unknown): void
     lines.push(`${key}: ${toDisplayValue(value)}`);
 }
 
-function pushTextBlock(lines: string[], heading: string, text: string): void
+function normalizeDocCommentText(text: string): string
 {
-    if (!text.trim())
+    let normalized = text.replace(/\r\n/g, '\n');
+    normalized = normalized.replace(/^```[^\n]*$/gm, '');
+    normalized = normalized.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
+    normalized = normalized.replace(/`([^`]+)`/g, '$1');
+    normalized = normalized.replace(/[ℹ️]/g, '');
+    normalized = normalized.replace(/^[ \t]*>\s?/gm, '');
+    normalized = normalized.replace(/^[ \t]*#{1,6}\s*/gm, '');
+    normalized = normalized.replace(/^[ \t]*[-+*]\s+/gm, '- ');
+    normalized = normalized.replace(/\*\*([^*\n]+)\*\*/g, '$1');
+    normalized = normalized.replace(/__([^_\n]+)__/g, '$1');
+    normalized = normalized.replace(/\*([^*\n]+)\*/g, '$1');
+    normalized = normalized.replace(/_([^_\n]+)_/g, '$1');
+    normalized = normalized.replace(/\n{3,}/g, '\n\n');
+    return normalized.trim();
+}
+
+function pushDocCommentBlock(lines: string[], text: string): void
+{
+    const trimmed = truncateLines(normalizeDocCommentText(text)).trim();
+    if (!trimmed)
         return;
-    lines.push(`${heading}:`);
-    for (const line of truncateLines(text).split(/\r?\n/))
-        lines.push(line);
+    lines.push('/**');
+    for (const line of trimmed.split(/\r?\n/))
+        lines.push(line.length > 0 ? ` * ${line}` : ' *');
+    lines.push(' */');
+}
+
+function appendSeparatedBlock(lines: string[], block: string[]): void
+{
+    if (block.length === 0)
+        return;
+    if (lines.length > 1)
+        lines.push('');
+    lines.push(...block);
+}
+
+function pushComment(lines: string[], text: string): void
+{
+    const trimmed = text.trim();
+    if (!trimmed)
+        return;
+    lines.push(`// ${trimmed}`);
+}
+
+function getQualifiedLeafName(name: string): string
+{
+    const dotIndex = name.lastIndexOf('.');
+    if (dotIndex >= 0)
+        return name.slice(dotIndex + 1);
+    const namespaceIndex = name.lastIndexOf('::');
+    if (namespaceIndex >= 0)
+        return name.slice(namespaceIndex + 2);
+    return name;
+}
+
+function getQualifiedContainerName(name: string): string | null
+{
+    const dotIndex = name.lastIndexOf('.');
+    if (dotIndex >= 0)
+        return name.slice(0, dotIndex);
+    const namespaceIndex = name.lastIndexOf('::');
+    if (namespaceIndex >= 0)
+        return name.slice(0, namespaceIndex);
+    return null;
+}
+
+function getTypeMemberDisplayName(record: UnknownRecord): string | null
+{
+    const isAccessor = asBoolean(record.isAccessor) ?? false;
+    if (isAccessor)
+    {
+        const propertyName = asString(record.propertyName);
+        if (propertyName && propertyName.trim())
+            return propertyName.trim();
+    }
+    const name = asString(record.name);
+    if (name && name.trim())
+        return name.trim();
+    return null;
+}
+
+function escapeRegExp(text: string): string
+{
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripOwnerPrefix(signature: string, owner: string | null, displayName: string | null): string
+{
+    if (!owner || !displayName)
+        return signature;
+    for (const separator of ['.', '::'])
+    {
+        const token = `${owner}${separator}${displayName}`;
+        const matchIndex = signature.lastIndexOf(token);
+        if (matchIndex < 0)
+            continue;
+        return `${signature.slice(0, matchIndex)}${displayName}${signature.slice(matchIndex + token.length)}`;
+    }
+    return signature;
+}
+
+function stripQualifiedDisplayNamePrefix(signature: string, displayName: string | null): string
+{
+    if (!displayName)
+        return signature;
+
+    const escapedName = escapeRegExp(displayName);
+    const patterns = [
+        new RegExp(`\\b[A-Za-z_][A-Za-z0-9_:<>]*\\.${escapedName}\\b`),
+        new RegExp(`\\b[A-Za-z_][A-Za-z0-9_:<>]*::${escapedName}\\b`)
+    ];
+
+    for (const pattern of patterns)
+    {
+        const match = signature.match(pattern);
+        if (!match)
+            continue;
+
+        const matchedText = match[0];
+        const replacement = matchedText.endsWith(`::${displayName}`) ? displayName : displayName;
+        return signature.replace(pattern, replacement);
+    }
+
+    return signature;
+}
+
+function normalizeDeclarationVisibility(declaration: string): string
+{
+    return declaration.replace(/^public\s+/, '').trim();
+}
+
+function ensureDeclarationTerminator(declaration: string, kind?: string | null): string
+{
+    if (kind === 'namespace')
+        return declaration;
+    if (/[;{}]$/.test(declaration))
+        return declaration;
+    return `${declaration};`;
+}
+
+function formatSignatureDeclaration(signature: string, kind?: string | null): string
+{
+    return ensureDeclarationTerminator(normalizeDeclarationVisibility(signature), kind);
+}
+
+function formatTypeMemberDeclaration(record: UnknownRecord): string
+{
+    const rawSignature = (asString(record.signature) ?? '<unknown signature>').trim();
+    const displayName = getTypeMemberDisplayName(record);
+    const declaration = displayName
+        ? stripQualifiedDisplayNamePrefix(stripOwnerPrefix(rawSignature, asString(record.declaredIn), displayName), displayName)
+        : rawSignature;
+    return formatSignatureDeclaration(declaration, asString(record.kind));
+}
+
+function getTypeMemberOriginComment(record: UnknownRecord): string | null
+{
+    const declaredIn = asString(record.declaredIn);
+    if (!declaredIn || !declaredIn.trim())
+        return null;
+
+    if ((asBoolean(record.isMixin) ?? false) === true)
+        return `mixin from ${declaredIn}`;
+    if ((asBoolean(record.isInherited) ?? false) === true)
+        return `inherited from ${declaredIn}`;
+    return null;
+}
+
+function getSearchGroupInfo(record: UnknownRecord): { key: string; header?: string }
+{
+    const kind = asString(record.kind) ?? 'unknown';
+    const qualifiedName = asString(record.qualifiedName) ?? '';
+    if (kind === 'class' || kind === 'struct' || kind === 'enum')
+    {
+        const namespace = getQualifiedContainerName(qualifiedName);
+        return {
+            key: `type:${namespace ?? '<root>'}`,
+            header: namespace ? `namespace ${namespace}` : undefined
+        };
+    }
+
+    const owner = asString(record.containerQualifiedName) ?? getQualifiedContainerName(qualifiedName) ?? '';
+    return {
+        key: `owner:${owner || '<root>'}`,
+        header: owner || undefined
+    };
+}
+
+function formatSearchDeclaration(record: UnknownRecord): string
+{
+    const kind = asString(record.kind);
+    const qualifiedName = asString(record.qualifiedName) ?? '<unknown>';
+    const shortName = getQualifiedLeafName(qualifiedName);
+    if (kind === 'class' || kind === 'struct' || kind === 'enum')
+        return `${kind} ${shortName};`;
+
+    const rawSignature = (asString(record.signature) ?? shortName).trim();
+    const owner = asString(record.containerQualifiedName) ?? getQualifiedContainerName(qualifiedName);
+    return formatSignatureDeclaration(stripQualifiedDisplayNamePrefix(stripOwnerPrefix(rawSignature, owner, shortName), shortName), kind);
+}
+
+function buildSearchMatchMetaComments(record: UnknownRecord, request: UnknownRecord | null): string[]
+{
+    const comments: string[] = [];
+    const matchReason = asString(record.matchReason);
+    if (matchReason && matchReason.trim())
+        comments.push(`match: ${matchReason}`);
+
+    const source = asString(record.source);
+    const requestSource = asString(request?.source) ?? 'both';
+    if (requestSource === 'both' && source === 'native')
+        comments.push('native');
+
+    const scopeRelationship = asString(record.scopeRelationship);
+    const owner = asString(record.containerQualifiedName);
+    if (scopeRelationship === 'mixin')
+        comments.push(owner ? `mixin from ${owner}` : 'mixin');
+    else if (scopeRelationship === 'inherited')
+        comments.push(owner ? `inherited from ${owner}` : 'inherited');
+    else if (scopeRelationship && scopeRelationship !== 'declared')
+        comments.push(scopeRelationship);
+
+    const scopeDistance = asNumber(record.scopeDistance);
+    if (scopeDistance !== null && scopeDistance > 0)
+        comments.push(`scope distance: ${scopeDistance}`);
+    return comments;
+}
+
+function buildSearchGroupBlock(group: SearchGroup, request: UnknownRecord | null): string[]
+{
+    const lines: string[] = [];
+    if (group.header)
+        pushComment(lines, group.header);
+
+    group.items.forEach((item, index) =>
+    {
+        if (index > 0)
+            lines.push('');
+
+        for (const comment of buildSearchMatchMetaComments(item, request))
+            pushComment(lines, comment);
+
+        const documentation = asString(item.documentation);
+        if (documentation && documentation.trim())
+            pushDocCommentBlock(lines, documentation);
+        else
+        {
+            const summary = asString(item.summary);
+            if (summary && summary.trim())
+                pushDocCommentBlock(lines, summary);
+        }
+
+        lines.push(formatSearchDeclaration(item));
+    });
+
+    return lines;
+}
+
+function buildResolveDeclaration(symbol: UnknownRecord): string
+{
+    const signature = (asString(symbol.signature) ?? asString(symbol.name) ?? '<unknown>').trim();
+    return formatSignatureDeclaration(signature, asString(symbol.kind));
+}
+
+function buildResolvePreviewBlock(definition: UnknownRecord): string[]
+{
+    const filePath = asString(definition.filePath) ?? '<unknown>';
+    const startLine = asValidLineNumber(definition.startLine) ?? 1;
+    const endLine = asValidLineNumber(definition.endLine) ?? startLine;
+    const previewLines = renderPreviewBlockLines({
+        startLine,
+        endLine,
+        preview: asString(definition.preview),
+        matchStartLine: asValidLineNumber(definition.matchStartLine),
+        matchEndLine: asValidLineNumber(definition.matchEndLine)
+    });
+
+    const lines: string[] = [];
+    pushComment(lines, `definition: ${filePath}:${startLine}-${endLine}`);
+    if (previewLines.length === 1 && previewLines[0] === SOURCE_UNAVAILABLE_TEXT)
+    {
+        pushComment(lines, 'source unavailable');
+        return lines;
+    }
+    lines.push(...previewLines);
+    return lines;
+}
+
+function buildHierarchyLineage(root: string, supers: string[]): string
+{
+    if (supers.length === 0)
+        return root;
+    return [...supers].reverse().concat(root).join(' <- ');
+}
+
+function buildHierarchyDerivedComments(root: string, derivedByParent: UnknownRecord | null): string[]
+{
+    const lines: string[] = ['// derived:'];
+    if (!root || !derivedByParent)
+    {
+        lines.push('//   <none>');
+        return lines;
+    }
+
+    const visit = (className: string, depth: number): void =>
+    {
+        lines.push(`// ${'  '.repeat(depth)}${className}`);
+        const children = asArray(derivedByParent[className]) ?? [];
+        for (const child of children)
+        {
+            const childName = asString(child) ?? toDisplayValue(child);
+            visit(childName, depth + 1);
+        }
+    };
+
+    const directChildren = asArray(derivedByParent[root]) ?? [];
+    if (directChildren.length === 0)
+    {
+        lines.push('//   <none>');
+        return lines;
+    }
+
+    visit(root, 1);
+    return lines;
+}
+
+function getHierarchyOrder(root: string, supers: string[], derivedByParent: UnknownRecord | null, sourceByClass: UnknownRecord | null): string[]
+{
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+
+    const pushName = (className: string | null): void =>
+    {
+        if (!className || seen.has(className))
+            return;
+        seen.add(className);
+        ordered.push(className);
+    };
+
+    pushName(root);
+    for (const parent of supers)
+        pushName(parent);
+
+    const visitDerived = (className: string): void =>
+    {
+        const children = asArray(derivedByParent?.[className]) ?? [];
+        for (const child of children)
+        {
+            const childName = asString(child) ?? toDisplayValue(child);
+            pushName(childName);
+            visitDerived(childName);
+        }
+    };
+    if (root)
+        visitDerived(root);
+
+    for (const className of Object.keys(sourceByClass ?? {}).sort())
+        pushName(className);
+
+    return ordered;
+}
+
+function buildHierarchySourceBlock(className: string, source: UnknownRecord): string[]
+{
+    const sourceKind = asString(source.source) ?? 'unknown';
+    const lines: string[] = [];
+    if (sourceKind === 'cpp')
+    {
+        pushComment(lines, 'native');
+        lines.push(`class ${className};`);
+        return lines;
+    }
+
+    if (sourceKind === 'as')
+    {
+        const filePath = asString(source.filePath);
+        if (filePath)
+            pushComment(lines, filePath);
+        const startLine = asValidLineNumber(source.startLine) ?? 1;
+        const endLine = asValidLineNumber(source.endLine) ?? startLine;
+        const previewLines = renderPreviewBlockLines({
+            startLine,
+            endLine,
+            preview: asString(source.preview)
+        });
+        if (previewLines.length === 1 && previewLines[0] === SOURCE_UNAVAILABLE_TEXT)
+        {
+            pushComment(lines, 'source unavailable');
+            lines.push(`class ${className};`);
+            return lines;
+        }
+        lines.push(...previewLines);
+        return lines;
+    }
+
+    pushComment(lines, `source: ${sourceKind}`);
+    lines.push(`class ${className};`);
+    return lines;
+}
+
+function buildHierarchyTruncationComment(truncated: UnknownRecord | null): string | null
+{
+    if (!truncated)
+        return null;
+
+    const parts: string[] = [];
+    if ((asBoolean(truncated.supers) ?? false) === true)
+        parts.push('supers=true');
+    if ((asBoolean(truncated.derivedDepth) ?? false) === true)
+        parts.push('derivedDepth=true');
+
+    const breadthByClass = asRecord(truncated.derivedBreadthByClass);
+    if (breadthByClass && Object.keys(breadthByClass).length > 0)
+    {
+        const breadthParts = Object.keys(breadthByClass)
+            .sort()
+            .map((className) => `${className}=${toDisplayValue(breadthByClass[className])}`);
+        parts.push(`derivedBreadthByClass=${breadthParts.join('|')}`);
+    }
+
+    if (parts.length === 0)
+        return null;
+    return `truncated: ${parts.join(', ')}`;
 }
 
 export function formatPreviewLine(lineNumber: number, isMatch: boolean, text: string): string
@@ -219,100 +636,100 @@ function formatSearchApiSuccess(data: UnknownRecord): string
 {
     const lines: string[] = ['Angelscript API search'];
     const request = asRecord(data.request);
-    const query = asString(request?.query) ?? '<empty>';
-    const mode = asString(request?.mode) ?? 'smart';
-    const limit = asNumber(request?.limit);
-    const source = asString(request?.source) ?? 'both';
-    const kinds = asArray(request?.kinds)?.map((item) => asString(item) ?? toDisplayValue(item)).filter(Boolean) as string[] | undefined;
-    const scopePrefix = asString(request?.scopePrefix);
-    const includeInheritedFromScope = asBoolean(request?.includeInheritedFromScope);
+    const scope = asString(request?.scope);
     const matches = asArray(data.matches) ?? [];
     const notices = asArray(data.notices) ?? [];
     const scopeLookup = asRecord(data.scopeLookup);
     const inheritedScopeOutcome = asString(data.inheritedScopeOutcome);
-
-    pushValue(lines, 'query', query);
-    pushValue(lines, 'mode', mode);
-    pushValue(lines, 'limit', limit);
-    pushValue(lines, 'source', formatSearchSourceLabel(source));
-    if (kinds && kinds.length > 0)
-        pushValue(lines, 'kinds', kinds.join('|'));
-    pushValue(lines, 'scopePrefix', scopePrefix);
-    pushValue(lines, 'includeInheritedFromScope', includeInheritedFromScope);
-    pushValue(lines, 'inheritedScopeOutcome', inheritedScopeOutcome);
-    pushValue(lines, 'count', matches.length);
 
     if (scopeLookup)
     {
         const resolvedKind = asString(scopeLookup.resolvedKind);
         const resolvedQualifiedName = asString(scopeLookup.resolvedQualifiedName);
         if (resolvedKind && resolvedQualifiedName)
-            pushValue(lines, 'scopeLookup', `${resolvedKind} ${resolvedQualifiedName}`);
+            pushComment(lines, `scope: ${resolvedKind} ${resolvedQualifiedName}`);
         else
-            pushValue(lines, 'scopeLookup', scopePrefix ? '<unresolved>' : undefined);
+            pushComment(lines, scope ? 'scope: <unresolved>' : '');
+
+        const ambiguousCandidates = asArray(scopeLookup.ambiguousCandidates);
+        if (ambiguousCandidates && ambiguousCandidates.length > 0)
+        {
+            const candidates = ambiguousCandidates.map((item) => asString(item) ?? toDisplayValue(item));
+            pushComment(lines, `scope candidates: ${candidates.join(' | ')}`);
+        }
     }
+
+    if (inheritedScopeOutcome && inheritedScopeOutcome !== 'applied')
+        pushComment(lines, `inherited scope: ${inheritedScopeOutcome}`);
 
     if (notices.length > 0)
     {
-        lines.push('====');
-        lines.push('notices');
         for (const item of notices)
         {
             const record = asRecord(item);
-            lines.push('---');
-            pushValue(lines, 'code', asString(record?.code) ?? 'UNKNOWN');
-            pushValue(lines, 'message', asString(record?.message) ?? 'Unknown notice.');
+            pushComment(
+                lines,
+                `notice [${asString(record?.code) ?? 'UNKNOWN'}]: ${asString(record?.message) ?? 'Unknown notice.'}`
+            );
         }
     }
 
     if (matches.length === 0)
     {
-        lines.push('No matches found.');
+        appendSeparatedBlock(lines, ['// No matches found.']);
         return finalize(lines);
     }
 
     const limited = limitArray(matches);
-    lines.push('====');
-    lines.push('matches');
+    const grouped = new Map<string, SearchGroup>();
     for (const item of limited.items)
     {
         const record = asRecord(item);
-        lines.push('---');
-        pushValue(lines, 'qualifiedName', asString(record?.qualifiedName) ?? '<unknown>');
-        pushValue(lines, 'kind', asString(record?.kind) ?? 'unknown');
-        pushValue(lines, 'source', asString(record?.source) ?? 'unknown');
-        pushValue(lines, 'isMixin', asBoolean(record?.isMixin));
-        pushValue(lines, 'container', asString(record?.containerQualifiedName));
-        pushValue(lines, 'scopeRelationship', asString(record?.scopeRelationship));
-        pushValue(lines, 'scopeDistance', asNumber(record?.scopeDistance));
-        pushValue(lines, 'signature', asString(record?.signature) ?? '<unknown signature>');
-        const summary = asString(record?.summary);
-        if (summary && summary.trim())
-            pushTextBlock(lines, 'summary', summary);
+        if (!record)
+            continue;
+        const groupInfo = getSearchGroupInfo(record);
+        const existing = grouped.get(groupInfo.key);
+        if (existing)
+        {
+            existing.items.push(record);
+            continue;
+        }
+        grouped.set(groupInfo.key, {
+            key: groupInfo.key,
+            header: groupInfo.header,
+            items: [record]
+        });
     }
-    if (limited.omitted > 0)
+
+    let hasRenderedGroup = false;
+    for (const group of grouped.values())
     {
-        lines.push('---');
-        lines.push(`... and ${limited.omitted} more matches`);
+        const block = buildSearchGroupBlock(group, request);
+        if (block.length === 0)
+            continue;
+
+        if (!hasRenderedGroup)
+        {
+            appendSeparatedBlock(lines, block);
+            hasRenderedGroup = true;
+            continue;
+        }
+
+        lines.push('====');
+        lines.push(...block);
+        hasRenderedGroup = true;
     }
+
+    if (limited.omitted > 0)
+        appendSeparatedBlock(lines, [`// ... and ${limited.omitted} more matches`]);
+
     return finalize(lines);
 }
 
 function formatResolveSymbolSuccess(data: UnknownRecord): string
 {
     const lines: string[] = ['Angelscript resolve symbol'];
-    const request = asRecord(data.request);
     const symbol = asRecord(data.symbol);
-
-    pushValue(lines, 'file', asString(request?.filePath));
-    const position = asRecord(request?.position);
-    if (position)
-    {
-        const line = asNumber(position.line);
-        const character = asNumber(position.character);
-        if (line !== null && character !== null)
-            pushValue(lines, 'position', `${line}:${character}`);
-    }
 
     if (!symbol)
     {
@@ -321,41 +738,31 @@ function formatResolveSymbolSuccess(data: UnknownRecord): string
         return finalize(lines);
     }
 
-    pushValue(lines, 'symbol', asString(symbol.name) ?? '<unknown>');
-    pushValue(lines, 'kind', asString(symbol.kind) ?? 'unknown');
-    pushValue(lines, 'signature', asString(symbol.signature) ?? asString(symbol.name) ?? '<unknown>');
-
-    const definition = asRecord(symbol.definition);
-    if (!definition)
-    {
-        pushValue(lines, 'definition', '<none>');
-    }
-    else
-    {
-        const filePath = asString(definition.filePath) ?? '<unknown>';
-        const startLine = asValidLineNumber(definition.startLine) ?? 1;
-        const endLine = asValidLineNumber(definition.endLine) ?? startLine;
-        pushValue(lines, 'definition', `${filePath}:${startLine}-${endLine}`);
-        lines.push('====');
-        lines.push(filePath);
-        const previewLines = renderPreviewBlockLines({
-            startLine,
-            endLine,
-            preview: asString(definition.preview),
-            matchStartLine: asValidLineNumber(definition.matchStartLine),
-            matchEndLine: asValidLineNumber(definition.matchEndLine)
-        });
-        lines.push(...previewLines);
-    }
-
     const doc = asRecord(symbol.doc);
     const docText = asString(doc?.text);
     if (docText && docText.trim())
     {
-        lines.push('---');
-        lines.push('doc');
-        lines.push(...truncateLines(docText).split(/\r?\n/));
+        const docLines: string[] = [];
+        pushDocCommentBlock(docLines, docText);
+        appendSeparatedBlock(lines, docLines);
     }
+
+    const definition = asRecord(symbol.definition);
+    if (definition)
+    {
+        const previewBlock = buildResolvePreviewBlock(definition);
+        const hasSourceUnavailable = previewBlock.some((line) => line === '// source unavailable');
+        if (hasSourceUnavailable)
+        {
+            previewBlock.push(buildResolveDeclaration(symbol));
+            appendSeparatedBlock(lines, previewBlock);
+            return finalize(lines);
+        }
+        appendSeparatedBlock(lines, previewBlock);
+        return finalize(lines);
+    }
+
+    appendSeparatedBlock(lines, [buildResolveDeclaration(symbol)]);
 
     return finalize(lines);
 }
@@ -368,38 +775,50 @@ function formatTypeMembersSuccess(data: UnknownRecord): string
     const typeName = asString(type?.qualifiedName) ?? asString(type?.name) ?? '<unknown>';
 
     pushValue(lines, 'type', typeName);
-    pushValue(lines, 'namespace', asString(type?.namespace) ?? asString(request?.namespace));
     const members = asArray(data.members) ?? [];
-    pushValue(lines, 'count', members.length);
-    pushValue(lines, 'includeInherited', asBoolean(request?.includeInherited) ?? false);
-    pushValue(lines, 'includeDocs', asBoolean(request?.includeDocs) ?? false);
+    const typeDescription = asString(type?.description);
+    lines.push('====');
+
+    if (typeDescription && typeDescription.trim())
+    {
+        pushDocCommentBlock(lines, typeDescription);
+        if (members.length > 0)
+            lines.push('');
+    }
 
     if (members.length === 0)
     {
-        lines.push('No members found.');
+        lines.push('// No members found.');
         return finalize(lines);
     }
 
     const limited = limitArray(members);
-    lines.push('====');
-    lines.push('members');
+    let hasRenderedMember = false;
     for (const member of limited.items)
     {
         const record = asRecord(member);
-        lines.push('---');
-        pushValue(lines, 'kind', asString(record?.kind) ?? 'unknown');
-        pushValue(lines, 'visibility', asString(record?.visibility) ?? 'unknown');
-        pushValue(lines, 'declaredIn', asString(record?.declaredIn) ?? '<unknown>');
-        pushValue(lines, 'inherited', asBoolean(record?.isInherited) ?? false);
-        pushValue(lines, 'signature', asString(record?.signature) ?? '<unknown signature>');
-        const description = asString(record?.description);
+        if (!record)
+            continue;
+
+        if (hasRenderedMember)
+            lines.push('');
+
+        const originComment = getTypeMemberOriginComment(record);
+        if (originComment)
+            lines.push(`// ${originComment}`);
+
+        const description = asString(record.description);
         if (description && description.trim())
-            pushTextBlock(lines, 'description', description);
+            pushDocCommentBlock(lines, description);
+
+        lines.push(formatTypeMemberDeclaration(record));
+        hasRenderedMember = true;
     }
     if (limited.omitted > 0)
     {
-        lines.push('---');
-        lines.push(`... and ${limited.omitted} more members`);
+        if (hasRenderedMember)
+            lines.push('');
+        lines.push(`// ... and ${limited.omitted} more members`);
     }
 
     return finalize(lines);
@@ -408,95 +827,31 @@ function formatTypeMembersSuccess(data: UnknownRecord): string
 function formatClassHierarchySuccess(data: UnknownRecord): string
 {
     const lines: string[] = ['Angelscript class hierarchy'];
-    pushValue(lines, 'root', asString(data.root) ?? '<unknown>');
-
+    const root = asString(data.root) ?? '<unknown>';
     const supers = asArray(data.supers)?.map((item) => asString(item) ?? toDisplayValue(item)) ?? [];
-    pushValue(lines, 'supers', supers.length > 0 ? supers.join(' -> ') : '<none>');
-
-    const limits = asRecord(data.limits);
-    if (limits)
-    {
-        const maxSuperDepth = asNumber(limits.maxSuperDepth);
-        const maxSubDepth = asNumber(limits.maxSubDepth);
-        const maxSubBreadth = asNumber(limits.maxSubBreadth);
-        pushValue(
-            lines,
-            'limits',
-            `super=${maxSuperDepth ?? '?'}, subDepth=${maxSubDepth ?? '?'}, subBreadth=${maxSubBreadth ?? '?'}`
-        );
-    }
-
     const truncated = asRecord(data.truncated);
-    if (truncated)
-    {
-        const truncatedParts = [
-            `supers=${asBoolean(truncated.supers) ?? false}`,
-            `derivedDepth=${asBoolean(truncated.derivedDepth) ?? false}`
-        ];
-        const breadthByClass = asRecord(truncated.derivedBreadthByClass);
-        if (breadthByClass && Object.keys(breadthByClass).length > 0)
-        {
-            const breadthParts = Object.keys(breadthByClass)
-                .sort()
-                .map((className) => `${className}=${toDisplayValue(breadthByClass[className])}`);
-            truncatedParts.push(`derivedBreadthByClass=${breadthParts.join('|')}`);
-        }
-        pushValue(lines, 'truncated', truncatedParts.join(', '));
-    }
-
     const derivedByParent = asRecord(data.derivedByParent);
-    if (derivedByParent && Object.keys(derivedByParent).length > 0)
-    {
-        lines.push('====');
-        lines.push('derivedByParent');
-        const parentNames = limitArray(Object.keys(derivedByParent).sort());
-        for (const parentName of parentNames.items)
-        {
-            const children = asArray(derivedByParent[parentName]) ?? [];
-            const childNames = children.map((item) => asString(item) ?? toDisplayValue(item));
-            lines.push('---');
-            lines.push(`${parentName}: ${childNames.length > 0 ? childNames.join(', ') : '<none>'}`);
-        }
-        if (parentNames.omitted > 0)
-        {
-            lines.push('---');
-            lines.push(`... and ${parentNames.omitted} more parent entries`);
-        }
-    }
+    pushComment(lines, `lineage: ${buildHierarchyLineage(root, supers)}`);
+    appendSeparatedBlock(lines, buildHierarchyDerivedComments(root, derivedByParent));
+
+    const truncationComment = buildHierarchyTruncationComment(truncated);
+    if (truncationComment)
+        appendSeparatedBlock(lines, [`// ${truncationComment}`]);
 
     const sourceByClass = asRecord(data.sourceByClass);
     if (sourceByClass)
     {
-        const classNames = limitArray(Object.keys(sourceByClass).sort());
+        const orderedClassNames = getHierarchyOrder(root, supers, derivedByParent, sourceByClass);
+        const classNames = limitArray(orderedClassNames.filter((className) => isRecord(sourceByClass[className])));
         for (const className of classNames.items)
         {
             const source = asRecord(sourceByClass[className]);
             if (!source)
                 continue;
-
-            const sourceKind = asString(source.source) ?? 'unknown';
-            const filePath = asString(source.filePath) ?? className;
-            lines.push('====');
-            lines.push(sourceKind === 'as' ? filePath : className);
-            pushValue(lines, 'class', className);
-            pushValue(lines, 'source', sourceKind);
-            if (sourceKind !== 'as')
-                continue;
-
-            const startLine = asValidLineNumber(source.startLine) ?? 1;
-            const endLine = asValidLineNumber(source.endLine) ?? startLine;
-            const previewLines = renderPreviewBlockLines({
-                startLine,
-                endLine,
-                preview: asString(source.preview)
-            });
-            lines.push(...previewLines);
+            appendSeparatedBlock(lines, buildHierarchySourceBlock(className, source));
         }
         if (classNames.omitted > 0)
-        {
-            lines.push('====');
-            lines.push(`... and ${classNames.omitted} more class entries`);
-        }
+            appendSeparatedBlock(lines, [`// ... and ${classNames.omitted} more class entries`]);
     }
 
     return finalize(lines);
@@ -525,29 +880,13 @@ function toRangeLabel(range: UnknownRecord | null): string
 function formatFindReferencesSuccess(data: UnknownRecord): string
 {
     const lines: string[] = ['Angelscript references'];
-    const request = asRecord(data.request);
-    pushValue(lines, 'file', asString(request?.filePath));
-    const position = asRecord(request?.position);
-    if (position)
-    {
-        const line = asNumber(position.line);
-        const character = asNumber(position.character);
-        if (line !== null && character !== null)
-            pushValue(lines, 'position', `${line}:${character}`);
-    }
-
     const references = asArray(data.references) ?? [];
-    const total = asNumber(data.total) ?? references.length;
     const returned = asNumber(data.returned) ?? references.length;
     const limit = asNumber(data.limit) ?? returned;
     const truncated = asBoolean(data.truncated) ?? false;
-    pushValue(lines, 'total', total);
-    pushValue(lines, 'returned', returned);
-    pushValue(lines, 'limit', limit);
-    pushValue(lines, 'truncated', truncated);
     if (references.length === 0)
     {
-        lines.push('No references found.');
+        appendSeparatedBlock(lines, ['// No references found.']);
         return finalize(lines);
     }
 
@@ -570,15 +909,17 @@ function formatFindReferencesSuccess(data: UnknownRecord): string
         orderedPaths.push(filePath);
     }
 
+    let hasRenderedFileGroup = false;
     for (const filePath of orderedPaths)
     {
-        lines.push('====');
-        lines.push(filePath);
+        const block: string[] = [];
+        pushComment(block, filePath);
         const entries = grouped.get(filePath) ?? [];
-        for (const entry of entries)
+        entries.forEach((entry, index) =>
         {
-            lines.push('---');
-            pushValue(lines, 'range', toRangeLabel(asRecord(entry.range)));
+            if (index > 0)
+                block.push('');
+            pushComment(block, `range: ${toRangeLabel(asRecord(entry.range))}`);
             const startLine = asValidLineNumber(entry.startLine) ?? 1;
             const endLine = asValidLineNumber(entry.endLine) ?? startLine;
             const previewLines = renderPreviewBlockLines({
@@ -588,19 +929,24 @@ function formatFindReferencesSuccess(data: UnknownRecord): string
                 matchStartLine: startLine,
                 matchEndLine: endLine
             });
-            lines.push(...previewLines);
+            block.push(...previewLines);
+        });
+
+        if (!hasRenderedFileGroup)
+        {
+            appendSeparatedBlock(lines, block);
+            hasRenderedFileGroup = true;
+            continue;
         }
+
+        lines.push('====');
+        lines.push(...block);
+        hasRenderedFileGroup = true;
     }
     if (limited.omitted > 0)
-    {
-        lines.push('====');
-        lines.push(`... and ${limited.omitted} more returned references omitted from text output`);
-    }
+        appendSeparatedBlock(lines, [`// ... and ${limited.omitted} more returned references omitted from text output`]);
     if (truncated)
-    {
-        lines.push('====');
-        lines.push(`Results truncated at limit ${limit}. Refine the symbol location or increase limit to see more references.`);
-    }
+        appendSeparatedBlock(lines, [`// truncated at limit ${limit}. Refine the symbol location or increase limit to see more references.`]);
     return finalize(lines);
 }
 

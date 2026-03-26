@@ -38,6 +38,7 @@ type TypeMembersResult = {
         name: string;
         namespace: string;
         qualifiedName: string;
+        description: string;
     };
     members: TypeMemberInfo[];
 } | {
@@ -934,6 +935,7 @@ export function GetTypeMembers(params: TypeMembersParams) : TypeMembersResult
         ? dbType.namespace.getQualifiedNamespace()
         : "";
     let qualifiedName = dbType.getQualifiedTypenameInNamespace(null);
+    let typeDescription = formatPropertyDocumentationPlain(dbType.documentation);
 
     let members: TypeMemberInfo[] = [];
     let seenMembers = new Set<string>();
@@ -1112,6 +1114,7 @@ export function GetTypeMembers(params: TypeMembersParams) : TypeMembersResult
             name: dbType.name,
             namespace: typeNamespace,
             qualifiedName: qualifiedName,
+            description: typeDescription,
         },
         members: members,
     };

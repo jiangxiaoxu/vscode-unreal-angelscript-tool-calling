@@ -5,12 +5,18 @@ import {
     GetAPISearchRequest,
     GetAPISearchToolData,
     GetAPISearchToolMatch,
-    SearchKind,
-    SearchMode,
     SearchSource
 } from './apiRequests';
 
-export type AngelscriptSearchParams = GetAPISearchParams;
+export type AngelscriptSearchToolParams = {
+    query: string;
+    limit?: number;
+    source?: SearchSource;
+    scope?: string;
+    includeInheritedFromScope?: boolean;
+    includeDocs?: boolean;
+    regex?: boolean;
+};
 
 export class ApiSearchError extends Error
 {
@@ -40,30 +46,6 @@ export function toApiSearchToolFailure(error: unknown): { code: string; message:
 const MAX_LIMIT = 200;
 const DEFAULT_LIMIT = 20;
 
-const kindAliases: Record<string, SearchKind> = {
-    class: 'class',
-    struct: 'struct',
-    enum: 'enum',
-    method: 'method',
-    function: 'function',
-    property: 'property',
-    globalvariable: 'globalVariable'
-};
-
-function normalizeMode(rawMode: unknown): SearchMode
-{
-    if (rawMode === undefined || rawMode === null)
-        return 'smart';
-    if (typeof rawMode !== 'string')
-        throw new ApiSearchError('INVALID_MODE', 'Invalid mode value. Expected "smart", "exact", or "regex".', { receivedMode: rawMode });
-
-    const value = rawMode.trim().toLowerCase();
-    if (value === 'smart' || value === 'exact' || value === 'regex')
-        return value as SearchMode;
-
-    throw new ApiSearchError('INVALID_MODE', `Invalid mode "${rawMode}". Expected "smart", "exact", or "regex".`, { receivedMode: rawMode });
-}
-
 function normalizeSource(rawSource: unknown): SearchSource
 {
     if (rawSource === undefined || rawSource === null)
@@ -89,28 +71,6 @@ function normalizeLimit(rawLimit: unknown): number
     return rawLimit;
 }
 
-function normalizeKinds(rawKinds: unknown): SearchKind[] | undefined
-{
-    if (rawKinds === undefined || rawKinds === null)
-        return undefined;
-    if (!Array.isArray(rawKinds))
-        throw new ApiSearchError('INVALID_KINDS', 'Invalid kinds value. Expected an array of search kinds.', { receivedKinds: rawKinds });
-
-    const kinds = new Array<SearchKind>();
-    for (const rawKind of rawKinds)
-    {
-        if (typeof rawKind !== 'string')
-            throw new ApiSearchError('INVALID_KINDS', 'Invalid kinds value. Each kind must be a string.', { receivedKinds: rawKinds });
-        const normalized = rawKind.trim().toLowerCase();
-        const kind = kindAliases[normalized];
-        if (!kind)
-            throw new ApiSearchError('INVALID_KINDS', `Unsupported kind "${rawKind}".`, { receivedKinds: rawKinds });
-        kinds.push(kind);
-    }
-
-    return kinds.length > 0 ? kinds : undefined;
-}
-
 function stripInternalSearchMatch(match: GetAPISearchLspResult['matches'][number]): GetAPISearchToolMatch
 {
     const { detailsData: _detailsData, ...publicMatch } = match;
@@ -132,29 +92,30 @@ export async function isUnrealConnected(client: LanguageClient): Promise<boolean
 
 export async function buildSearchPayload(
     client: LanguageClient,
-    params: AngelscriptSearchParams
+    params: AngelscriptSearchToolParams
 ): Promise<GetAPISearchToolData>
 {
     const query = typeof params?.query === 'string' ? params.query.trim() : '';
     if (!query)
         throw new ApiSearchError('MISSING_QUERY', 'Missing query. Please provide query.');
 
-    const mode = normalizeMode(params?.mode);
+    const mode = params?.regex === true ? 'regex' : 'plain';
     const limit = normalizeLimit(params?.limit);
     const source = normalizeSource(params?.source);
-    const kinds = normalizeKinds(params?.kinds);
-    const scopePrefix = typeof params?.scopePrefix === 'string' ? params.scopePrefix.trim() : '';
+    const scope = typeof params?.scope === 'string' ? params.scope.trim() : '';
     const includeInheritedFromScope = params?.includeInheritedFromScope === true;
+    const includeDocs = params?.includeDocs === true;
 
-    const result = await client.sendRequest(GetAPISearchRequest, {
+    const request: GetAPISearchParams = {
         query,
         mode,
         limit,
-        ...(kinds ? { kinds } : {}),
         source,
-        ...(scopePrefix ? { scopePrefix } : {}),
-        includeInheritedFromScope
-    }) as GetAPISearchLspResult;
+        ...(scope ? { scope } : {}),
+        includeInheritedFromScope,
+        includeDocs
+    };
+    const result = await client.sendRequest(GetAPISearchRequest, request) as GetAPISearchLspResult;
 
     if (!result || !Array.isArray(result.matches))
         throw new ApiSearchError('INVALID_RESPONSE', 'The language server returned an invalid search payload.');
@@ -166,12 +127,12 @@ export async function buildSearchPayload(
         ...(result.inheritedScopeOutcome ? { inheritedScopeOutcome: result.inheritedScopeOutcome } : {}),
         request: {
             query,
-            mode,
+            regex: mode === 'regex',
             limit,
-            ...(kinds ? { kinds } : {}),
             source,
-            ...(scopePrefix ? { scopePrefix } : {}),
-            includeInheritedFromScope
+            ...(scope ? { scope } : {}),
+            includeInheritedFromScope,
+            includeDocs
         }
     };
 }

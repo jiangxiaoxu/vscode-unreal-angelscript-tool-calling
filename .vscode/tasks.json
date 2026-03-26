@@ -3,6 +3,15 @@
     "tasks": [
         {
             "type": "npm",
+            "script": "clean:dist",
+            "presentation": {
+                "panel": "dedicated",
+                "reveal": "never"
+            },
+            "problemMatcher": []
+        },
+        {
+            "type": "npm",
             "script": "compile",
             "group": "build",
             "presentation": {
@@ -28,6 +37,15 @@
             "problemMatcher": [
                 "$tsc-watch"
             ]
+        },
+        {
+            "label": "clean + compile",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "npm: clean:dist",
+                "npm: compile"
+            ],
+            "problemMatcher": []
         }
     ]
 }

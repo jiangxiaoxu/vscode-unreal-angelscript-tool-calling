@@ -13,17 +13,18 @@
 
 统一公共契约:
 - 当前仓库只实现 VS Code `Language Model Tool`.
-- LM tool 默认返回可读文本 + 结构化 JSON.
-- `UnrealAngelscript.languageModelTools.outputMode` 可切换为 `text-only`.
+- LM tool 始终返回可读文本.
+- 结构化 JSON 仅在 `UnrealAngelscript.languageModelTools.outputMode=text+structured` 时返回.
+- `UnrealAngelscript.languageModelTools.outputMode` 默认值为 `text-only`.
 - 结构化结果继续沿用内部 `{ ok, data/error }` envelope.
 
 统一文本风格:
 - 首行使用稳定标题,例如 `Angelscript API search`.
-- 摘要字段统一为 `key: value`.
-- 主分段使用 `====`.
-- 条目分隔使用 `---`.
+- 成功文本默认采用 code-first 风格,主体优先是声明式文本或源码片段.
+- 文档统一归一化后渲染为 `/** ... */`.
+- owner、origin、range、scope、truncation 等元信息统一使用 `// ...` 注释.
 - 源码预览使用 `lineNumber + ':'/'-' + 4 spaces + source text`.
-- 无结果时输出自然语言结论,例如 `No matches found.`.
+- 无结果时输出代码风格注释,例如 `// No matches found.`.
 - 错误统一输出:
   - 标题
   - `error: ...`
@@ -32,13 +33,40 @@
 - 可选 `details: ...`
 
 ## 各工具文本形态
-| Tool | 头部字段 | 主体分段 | 预览规则 |
+| Tool | 主要文本主体 | 注释元信息 | 预览规则 |
 | --- | --- | --- | --- |
-| `angelscript_searchApi` | `query`,`mode`,`limit`,`source`,`kinds?`,`scopePrefix?`,`includeInheritedFromScope`,`count`,`scopeLookup?` | `==== notices` + `==== matches` | 无源码预览 |
-| `angelscript_resolveSymbolAtPosition` | `file`,`position`,`symbol`,`kind`,`signature`,`definition?` | 定义存在时 `==== <filePath>`; 文档存在时 `---` + `doc` | 宏回溯行用 `-`, 定义行用 `:` |
-| `angelscript_getTypeMembers` | `type`,`namespace?`,`count`,`includeInherited`,`includeDocs` | `==== members` + `---` 每个成员 | 无源码预览 |
-| `angelscript_getClassHierarchy` | `root`,`supers`,`limits`,`truncated` | `==== derivedByParent`; 之后每个 source block 用 `====` | 脚本类预览默认按真实行号输出,当前实现把预览行整体标为 `:` |
-| `angelscript_findReferences` | `file`,`position`,`total`,`returned`,`limit`,`truncated` | 每个文件 `==== <filePath>`; 每条引用 `---` | `range` 文本标签 + 预览行,命中引用行用 `:` |
+| `angelscript_searchApi` | owner/namespace 分组后的类型桩或成员声明 | `// scope: ...`、`// notice [...]`、`// native`、`// mixin from ...`、`// inherited from ...` | 无源码预览 |
+| `angelscript_resolveSymbolAtPosition` | `/** ... */` + 声明,或 `/** ... */` + definition preview | `// definition: <file>:<start>-<end>`、`// source unavailable` | 宏回溯行用 `-`, 定义命中行用 `:` |
+| `angelscript_getTypeMembers` | 目标类型说明 + 成员声明列表 | `// inherited from ...`、`// mixin from ...` | 无源码预览 |
+| `angelscript_getClassHierarchy` | `// lineage: ...`、`// derived:` 树,再接源码预览或声明桩 | `// native`、`// truncated: ...`、`// source unavailable` | 脚本类预览默认按真实行号输出 |
+| `angelscript_findReferences` | 每个文件下的 `// range: ...` + preview | `// <filePath>`、`// truncated at limit ...` | 命中引用行用 `:` |
+
+## `angelscript_searchApi` 查询契约
+面板与 LM tool 已拆分:
+- Angelscript API 面板继续使用 `smart search`.
+- LM tool 默认使用 `plain search`, 对外输入为 `query`、`limit`、`source`、`scope`、`includeInheritedFromScope`、`includeDocs`、`regex`.
+
+plain search 规则:
+- 大小写不敏感.
+- 优先识别 `Type.Member`、`Namespace::Func` 这类代码形态查询.
+- 支持 ordered token gap,例如 `Status AI`.
+- 支持 weak token reorder fallback,但优先级较低.
+- 尾部 `(` 或 `()` 表示 callable-only,只限制到 `method/function`,不匹配完整 signature.
+
+regex search 规则:
+- 仅在 `regex=true` 时启用.
+- `query` 必须使用 `/pattern/flags` 形式.
+- 仅匹配名字视图:
+  - `shortName`
+  - `qualifiedName`
+  - `alias`
+  - callable `shortName()`
+  - callable `qualifiedName()`
+  - callable `alias()`
+
+scope 规则:
+- `scope` 用于在排序前收窄已知 namespace 或 containing type 的搜索域.
+- 对 type scope, `includeInheritedFromScope=true` 会扩展 inherited members 与 mixin member views.
 
 ## 路径与行号规则
 输入路径:
@@ -95,7 +123,7 @@
 
 `extension/src/toolTextFormatter.ts`
 - 纯文本契约核心.
-- 所有 qgrep-style 标题/字段/分段/预览渲染都在这里统一完成.
+- 所有 code-first 标题、声明清洗、注释归一化与预览渲染都在这里统一完成.
 
 `extension/src/toolShared.ts`
 - 仍保留内部 `{ ok, data/error }` 中间结构,仅作为实现细节.
@@ -107,19 +135,19 @@
 
 ## 测试与验收
 测试入口:
-- `npm run test`
+- `npm test`
 
 当前新增测试覆盖:
-- 5 个工具各 1 个成功文本样例.
+- 5 个工具各至少 1 个成功文本样例.
 - 5 个工具各 1 个失败文本样例.
 - 预览行格式/标记规则.
 - LM `text+structured` transport.
 - LM `text-only` transport.
-- language-server search: smart/exact/regex、compact query、scope、inheritance、override dedupe.
+- language-server search: smart/plain/regex、ordered token gap、weak reorder、scope、inheritance、override dedupe.
 
 提交前最低验收:
 - `npm run compile`
-- `npm run test`
+- `npm test`
 
 ## 维护要求
 凡是再次修改 `angelscript_*` 工具公共契约,必须同步更新:
@@ -132,5 +160,5 @@
 高风险回归点:
 - 不要重新引入仓库内 MCP server/runtime 实现.
 - 不要破坏 `text+structured` / `text-only` 配置切换.
-- 不要让 text 格式偏离 `Title + key: value + ==== + ---`.
+- 不要让 success text 退回到旧的 `Title + key: value + ==== + ---` 摘要风格.
 - 不要破坏 `resolve` 的宏回溯上下文行渲染.

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import * as path from 'path';
 import {
-    AngelscriptSearchParams,
+    AngelscriptSearchToolParams,
     buildSearchPayload,
     toApiSearchToolFailure
 } from './angelscriptApiSearch';
@@ -422,7 +422,7 @@ export async function runSearchApi(
     shouldCancel?: () => boolean
 ): Promise<GetAPISearchResult>
 {
-    const raw = input as Partial<AngelscriptSearchParams> | null | undefined;
+    const raw = input as Partial<AngelscriptSearchToolParams> | null | undefined;
     const query = typeof raw?.query === 'string' ? raw.query.trim() : '';
     if (!query)
     {
@@ -436,12 +436,12 @@ export async function runSearchApi(
             ok: true,
             data: await buildSearchPayload(client, {
                 query,
-                mode: raw?.mode,
                 limit: raw?.limit,
-                kinds: Array.isArray(raw?.kinds) ? raw.kinds : undefined,
                 source: raw?.source,
-                scopePrefix: raw?.scopePrefix,
-                includeInheritedFromScope: raw?.includeInheritedFromScope
+                scope: raw?.scope,
+                includeInheritedFromScope: raw?.includeInheritedFromScope,
+                includeDocs: raw?.includeDocs,
+                regex: raw?.regex
             })
         };
     }

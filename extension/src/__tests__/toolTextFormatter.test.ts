@@ -2,7 +2,7 @@ import * as assert from 'node:assert/strict';
 import test = require('node:test');
 import { formatPreviewLine, formatToolText, renderPreviewBlockLines } from '../toolTextFormatter';
 
-test('preview line formatter uses qgrep-style markers and spacing', () =>
+test('preview line formatter uses stable line markers and spacing', () =>
 {
     assert.equal(formatPreviewLine(42, true, 'match text'), '42:    match text');
     assert.equal(formatPreviewLine(43, false, 'context text'), '43-    context text');
@@ -34,22 +34,21 @@ test('preview renderer marks macro backtrack as context and definition lines as 
     );
 });
 
-test('searchApi success is rendered in qgrep-style text', () =>
+test('searchApi success is rendered as grouped code-first text', () =>
 {
     const text = formatToolText('angelscript_searchApi', {
         ok: true,
         data: {
             request: {
                 query: 'MovementComponent',
-                mode: 'smart',
+                regex: false,
                 limit: 20,
                 source: 'both',
-                kinds: ['class', 'method'],
-                scopePrefix: 'Gameplay::Movement',
+                scope: 'Gameplay::Movement',
                 includeInheritedFromScope: true
             },
             scopeLookup: {
-                requestedPrefix: 'Gameplay::Movement',
+                requestedScope: 'Gameplay::Movement',
                 resolvedQualifiedName: 'Gameplay::Movement::UMovementComponent',
                 resolvedKind: 'class'
             },
@@ -64,12 +63,14 @@ test('searchApi success is rendered in qgrep-style text', () =>
                 {
                     qualifiedName: 'Gameplay::Movement::UMovementComponent',
                     kind: 'class',
+                    matchReason: 'exact-qualified',
                     source: 'native',
                     signature: 'class Gameplay::Movement::UMovementComponent'
                 },
                 {
                     qualifiedName: 'Gameplay::Movement::UMovementComponent.StartMovement',
                     kind: 'method',
+                    matchReason: 'boundary-ordered',
                     source: 'script',
                     containerQualifiedName: 'Gameplay::Movement::UMovementComponent',
                     scopeRelationship: 'declared',
@@ -83,70 +84,65 @@ test('searchApi success is rendered in qgrep-style text', () =>
 
     assert.equal(text, [
         'Angelscript API search',
-        'query: MovementComponent',
-        'mode: smart',
-        'limit: 20',
-        'source: native|script',
-        'kinds: class|method',
-        'scopePrefix: Gameplay::Movement',
-        'includeInheritedFromScope: true',
-        'inheritedScopeOutcome: applied',
-        'count: 2',
-        'scopeLookup: class Gameplay::Movement::UMovementComponent',
+        '// scope: class Gameplay::Movement::UMovementComponent',
+        '// notice [SCOPE_INHERITANCE_EMPTY]: Scope "Gameplay::Movement::UMovementComponent" has no inherited members to expand.',
+        '',
+        '// namespace Gameplay::Movement',
+        '// match: exact-qualified',
+        '// native',
+        'class UMovementComponent;',
         '====',
-        'notices',
-        '---',
-        'code: SCOPE_INHERITANCE_EMPTY',
-        'message: Scope "Gameplay::Movement::UMovementComponent" has no inherited members to expand.',
-        '====',
-        'matches',
-        '---',
-        'qualifiedName: Gameplay::Movement::UMovementComponent',
-        'kind: class',
-        'source: native',
-        'signature: class Gameplay::Movement::UMovementComponent',
-        '---',
-        'qualifiedName: Gameplay::Movement::UMovementComponent.StartMovement',
-        'kind: method',
-        'source: script',
-        'container: Gameplay::Movement::UMovementComponent',
-        'scopeRelationship: declared',
-        'scopeDistance: 0',
-        'signature: void Gameplay::Movement::UMovementComponent.StartMovement()',
-        'summary:',
-        'Starts movement on the current actor.'
+        '// Gameplay::Movement::UMovementComponent',
+        '// match: boundary-ordered',
+        '/**',
+        ' * Starts movement on the current actor.',
+        ' */',
+        'void StartMovement();'
     ].join('\n'));
 });
 
-test('searchApi source keeps native and script labels unchanged', () =>
+test('searchApi groups multiple members under the same owner header', () =>
 {
-    const nativeText = formatToolText('angelscript_searchApi', {
+    const text = formatToolText('angelscript_searchApi', {
         ok: true,
         data: {
             request: {
-                query: 'MovementComponent',
-                mode: 'smart',
+                query: 'StartMovement IsMoving',
+                regex: false,
                 limit: 20,
-                source: 'native'
+                source: 'script',
+                scope: 'Gameplay::Movement::UMovementComponent'
             },
-            matches: []
+            matches: [
+                {
+                    qualifiedName: 'Gameplay::Movement::UMovementComponent.StartMovement',
+                    kind: 'method',
+                    matchReason: 'boundary-ordered',
+                    source: 'script',
+                    containerQualifiedName: 'Gameplay::Movement::UMovementComponent',
+                    signature: 'void Gameplay::Movement::UMovementComponent.StartMovement()'
+                },
+                {
+                    qualifiedName: 'Gameplay::Movement::UMovementComponent.IsMoving',
+                    kind: 'method',
+                    matchReason: 'boundary-ordered',
+                    source: 'script',
+                    containerQualifiedName: 'Gameplay::Movement::UMovementComponent',
+                    signature: 'protected bool Gameplay::Movement::UMovementComponent.IsMoving() const'
+                }
+            ]
         }
     });
-    assert.match(nativeText, /source: native/u);
 
-    const scriptText = formatToolText('angelscript_searchApi', {
-        ok: true,
-        data: {
-            request: {
-                query: 'MovementComponent',
-                mode: 'smart',
-                limit: 20,
-                source: 'script'
-            },
-            matches: []
-        }
-    });
-    assert.match(scriptText, /source: script/u);
+    assert.equal(text, [
+        'Angelscript API search',
+        '// Gameplay::Movement::UMovementComponent',
+        '// match: boundary-ordered',
+        'void StartMovement();',
+        '',
+        '// match: boundary-ordered',
+        'protected bool IsMoving() const;'
+    ].join('\n'));
 });
 
 test('searchApi renders mixin metadata in text output', () =>
@@ -156,17 +152,17 @@ test('searchApi renders mixin metadata in text output', () =>
         data: {
             request: {
                 query: 'UMovementDerived ApplyDerivedMovement',
-                mode: 'smart',
+                regex: false,
                 limit: 20,
                 source: 'both',
-                kinds: ['function'],
-                scopePrefix: 'Gameplay::Movement::UMovementDerived',
+                scope: 'Gameplay::Movement::UMovementDerived',
                 includeInheritedFromScope: true
             },
             matches: [
                 {
                     qualifiedName: 'Gameplay::Movement::ApplyDerivedMovement',
                     kind: 'function',
+                    matchReason: 'ordered-wildcard',
                     source: 'script',
                     isMixin: true,
                     containerQualifiedName: 'Gameplay::Movement',
@@ -181,31 +177,78 @@ test('searchApi renders mixin metadata in text output', () =>
 
     assert.equal(text, [
         'Angelscript API search',
-        'query: UMovementDerived ApplyDerivedMovement',
-        'mode: smart',
-        'limit: 20',
-        'source: native|script',
-        'kinds: function',
-        'scopePrefix: Gameplay::Movement::UMovementDerived',
-        'includeInheritedFromScope: true',
-        'count: 1',
-        '====',
-        'matches',
-        '---',
-        'qualifiedName: Gameplay::Movement::ApplyDerivedMovement',
-        'kind: function',
-        'source: script',
-        'isMixin: true',
-        'container: Gameplay::Movement',
-        'scopeRelationship: mixin',
-        'scopeDistance: 0',
-        'signature: void UMovementDerived.ApplyDerivedMovement(float Scale)',
-        'summary:',
-        'Applies derived movement through a mixin.'
+        '// Gameplay::Movement',
+        '// match: ordered-wildcard',
+        '// mixin from Gameplay::Movement',
+        '/**',
+        ' * Applies derived movement through a mixin.',
+        ' */',
+        'void ApplyDerivedMovement(float Scale);'
     ].join('\n'));
 });
 
-test('resolveSymbol success renders request fields and preview block', () =>
+test('searchApi prefers full documentation over summary when includeDocs is enabled', () =>
+{
+    const text = formatToolText('angelscript_searchApi', {
+        ok: true,
+        data: {
+            request: {
+                query: 'OpenPawnDataAIAsset(',
+                regex: false,
+                limit: 20,
+                source: 'both',
+                includeDocs: true
+            },
+            matches: [
+                {
+                    qualifiedName: 'Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset',
+                    kind: 'method',
+                    matchReason: 'exact-qualified',
+                    source: 'script',
+                    containerQualifiedName: 'Gameplay::Characters::UCthuAICharacterExtension',
+                    signature: 'void Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset(AActor SelectedActor)',
+                    summary: 'Short summary that should not be rendered.',
+                    documentation: 'Full documentation line 1.\n\nFull documentation line 2.'
+                }
+            ]
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript API search',
+        '// Gameplay::Characters::UCthuAICharacterExtension',
+        '// match: exact-qualified',
+        '/**',
+        ' * Full documentation line 1.',
+        ' *',
+        ' * Full documentation line 2.',
+        ' */',
+        'void OpenPawnDataAIAsset(AActor SelectedActor);'
+    ].join('\n'));
+});
+
+test('searchApi renders empty results as a code-style comment', () =>
+{
+    const text = formatToolText('angelscript_searchApi', {
+        ok: true,
+        data: {
+            request: {
+                query: 'DefinitelyMissingSymbol',
+                regex: false,
+                limit: 20,
+                source: 'both'
+            },
+            matches: []
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript API search',
+        '// No matches found.'
+    ].join('\n'));
+});
+
+test('resolveSymbol success renders doc comment and preview-first output', () =>
 {
     const text = formatToolText('angelscript_resolveSymbolAtPosition', {
         ok: true,
@@ -246,22 +289,47 @@ test('resolveSymbol success renders request fields and preview block', () =>
 
     assert.equal(text, [
         'Angelscript resolve symbol',
-        'file: G:/Project/Game/Characters/Hero.as',
-        'position: 128:17',
-        'symbol: JumpToTarget',
-        'kind: method',
-        'signature: void JumpToTarget(AActor Target)',
-        'definition: G:/Project/Game/Characters/Hero.as:319-323',
-        '====',
-        'G:/Project/Game/Characters/Hero.as',
+        '/**',
+        ' * Moves the character toward the target actor.',
+        ' */',
+        '',
+        '// definition: G:/Project/Game/Characters/Hero.as:319-323',
         '319-        UFUNCTION(BlueprintCallable)',
         '320:        void JumpToTarget(AActor Target)',
         '321:        {',
         '322:            MoveToActor(Target);',
-        '323:        }',
-        '---',
-        'doc',
-        'Moves the character toward the target actor.'
+        '323:        }'
+    ].join('\n'));
+});
+
+test('resolveSymbol normalizes markdown docs when falling back to declaration text', () =>
+{
+    const text = formatToolText('angelscript_resolveSymbolAtPosition', {
+        ok: true,
+        data: {
+            symbol: {
+                name: 'JumpToTarget',
+                kind: 'method',
+                signature: 'void JumpToTarget(AActor Target)',
+                doc: {
+                    format: 'markdown',
+                    text: '**Moves** the `target` actor.\n\n- Uses pathfinding.\n\n@param Target Actor to move to.'
+                }
+            }
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript resolve symbol',
+        '/**',
+        ' * Moves the target actor.',
+        ' *',
+        ' * - Uses pathfinding.',
+        ' *',
+        ' * @param Target Actor to move to.',
+        ' */',
+        '',
+        'void JumpToTarget(AActor Target);'
     ].join('\n'));
 });
 
@@ -272,7 +340,8 @@ test('getTypeMembers success renders member list blocks', () =>
         data: {
             type: {
                 qualifiedName: 'Gameplay::UMovementComponent',
-                namespace: 'Gameplay'
+                namespace: 'Gameplay',
+                description: 'Movement component overview.'
             },
             request: {
                 includeInherited: true,
@@ -282,17 +351,38 @@ test('getTypeMembers success renders member list blocks', () =>
                 {
                     kind: 'method',
                     visibility: 'public',
+                    name: 'StartMovement',
                     declaredIn: 'UMovementComponent',
                     isInherited: false,
-                    signature: 'void StartMovement()'
+                    signature: 'public void UMovementComponent.StartMovement()'
                 },
                 {
                     kind: 'property',
                     visibility: 'protected',
+                    name: 'MaxSpeed',
                     declaredIn: 'UBaseMovementComponent',
                     isInherited: true,
-                    signature: 'float MaxSpeed',
+                    signature: 'protected float UBaseMovementComponent.MaxSpeed',
                     description: 'Maximum movement speed in units per second.'
+                },
+                {
+                    kind: 'method',
+                    visibility: 'private',
+                    name: 'IsMoving',
+                    declaredIn: 'UMovementComponent',
+                    isInherited: false,
+                    signature: 'private bool UMovementComponent.IsMoving() const'
+                },
+                {
+                    kind: 'method',
+                    visibility: 'public',
+                    name: 'ApplyDerivedMovement',
+                    declaredIn: 'Gameplay::Movement',
+                    declaredInKind: 'namespace',
+                    isInherited: false,
+                    isMixin: true,
+                    signature: 'void UMovementComponent.ApplyDerivedMovement(float Scale)',
+                    description: 'Applies derived movement through a mixin.'
                 }
             ]
         }
@@ -301,30 +391,101 @@ test('getTypeMembers success renders member list blocks', () =>
     assert.equal(text, [
         'Angelscript type members',
         'type: Gameplay::UMovementComponent',
-        'namespace: Gameplay',
-        'count: 2',
-        'includeInherited: true',
-        'includeDocs: true',
         '====',
-        'members',
-        '---',
-        'kind: method',
-        'visibility: public',
-        'declaredIn: UMovementComponent',
-        'inherited: false',
-        'signature: void StartMovement()',
-        '---',
-        'kind: property',
-        'visibility: protected',
-        'declaredIn: UBaseMovementComponent',
-        'inherited: true',
-        'signature: float MaxSpeed',
-        'description:',
-        'Maximum movement speed in units per second.'
+        '/**',
+        ' * Movement component overview.',
+        ' */',
+        '',
+        'void StartMovement();',
+        '',
+        '// inherited from UBaseMovementComponent',
+        '/**',
+        ' * Maximum movement speed in units per second.',
+        ' */',
+        'protected float MaxSpeed;',
+        '',
+        'private bool IsMoving() const;',
+        '',
+        '// mixin from Gameplay::Movement',
+        '/**',
+        ' * Applies derived movement through a mixin.',
+        ' */',
+        'void ApplyDerivedMovement(float Scale);'
     ].join('\n'));
 });
 
-test('getClassHierarchy success renders hierarchy summary and source blocks', () =>
+test('getTypeMembers strips explicit public modifiers from declaration-style text output', () =>
+{
+    const text = formatToolText('angelscript_getTypeMembers', {
+        ok: true,
+        data: {
+            type: {
+                qualifiedName: 'Gameplay::UPlainComponent',
+                namespace: 'Gameplay',
+                description: ''
+            },
+            request: {
+                includeInherited: false,
+                includeDocs: false
+            },
+            members: [
+                {
+                    kind: 'property',
+                    visibility: 'public',
+                    name: 'InternalOffset',
+                    declaredIn: 'UPlainComponent',
+                    isInherited: false,
+                    signature: 'public FVector UPlainComponent.InternalOffset'
+                }
+            ]
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript type members',
+        'type: Gameplay::UPlainComponent',
+        '====',
+        'FVector InternalOffset;'
+    ].join('\n'));
+});
+
+test('getTypeMembers omits an empty target description block and empty member descriptions', () =>
+{
+    const text = formatToolText('angelscript_getTypeMembers', {
+        ok: true,
+        data: {
+            type: {
+                qualifiedName: 'Gameplay::UPlainComponent',
+                namespace: 'Gameplay',
+                description: ''
+            },
+            request: {
+                includeInherited: false,
+                includeDocs: false
+            },
+            members: [
+                {
+                    kind: 'method',
+                    visibility: 'public',
+                    name: 'StartMovement',
+                    declaredIn: 'UPlainComponent',
+                    isInherited: false,
+                    signature: 'void UPlainComponent.StartMovement()',
+                    description: ''
+                }
+            ]
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript type members',
+        'type: Gameplay::UPlainComponent',
+        '====',
+        'void StartMovement();'
+    ].join('\n'));
+});
+
+test('getClassHierarchy success renders lineage comments and source blocks', () =>
 {
     const text = formatToolText('angelscript_getClassHierarchy', {
         ok: true,
@@ -342,10 +503,14 @@ test('getClassHierarchy success renders hierarchy summary and source blocks', ()
                 derivedBreadthByClass: {}
             },
             derivedByParent: {
-                AHazeCharacter: ['AMyHeroCharacter', 'AEnemyCharacter']
+                AMyHeroCharacter: ['AChildCharacter'],
+                AChildCharacter: ['AGrandChildCharacter']
             },
             sourceByClass: {
                 AActor: {
+                    source: 'cpp'
+                },
+                AChildCharacter: {
                     source: 'cpp'
                 },
                 AMyHeroCharacter: {
@@ -366,30 +531,68 @@ test('getClassHierarchy success renders hierarchy summary and source blocks', ()
 
     assert.equal(text, [
         'Angelscript class hierarchy',
-        'root: AMyHeroCharacter',
-        'supers: AHazeCharacter -> APawn -> AActor',
-        'limits: super=3, subDepth=2, subBreadth=10',
-        'truncated: supers=false, derivedDepth=false',
-        '====',
-        'derivedByParent',
-        '---',
-        'AHazeCharacter: AMyHeroCharacter, AEnemyCharacter',
-        '====',
-        'AActor',
-        'class: AActor',
-        'source: cpp',
-        '====',
-        'G:/Project/Game/Characters/MyHeroCharacter.as',
-        'class: AMyHeroCharacter',
-        'source: as',
+        '// lineage: AActor <- APawn <- AHazeCharacter <- AMyHeroCharacter',
+        '',
+        '// derived:',
+        '//   AMyHeroCharacter',
+        '//     AChildCharacter',
+        '//       AGrandChildCharacter',
+        '',
+        '// G:/Project/Game/Characters/MyHeroCharacter.as',
         '12:        class AMyHeroCharacter : AHazeCharacter',
         '13:        {',
         '14:            UPROPERTY()',
-        '15:            float MaxSpeed = 600.0f;'
+        '15:            float MaxSpeed = 600.0f;',
+        '',
+        '// native',
+        'class AActor;',
+        '',
+        '// native',
+        'class AChildCharacter;'
     ].join('\n'));
 });
 
-test('findReferences success renders per-file blocks and ranges', () =>
+test('getClassHierarchy renders truncation comments only when hierarchy is clipped', () =>
+{
+    const text = formatToolText('angelscript_getClassHierarchy', {
+        ok: true,
+        data: {
+            root: 'AMyHeroCharacter',
+            supers: ['AHazeCharacter'],
+            truncated: {
+                supers: true,
+                derivedDepth: true,
+                derivedBreadthByClass: {
+                    AMyHeroCharacter: 5
+                }
+            },
+            derivedByParent: {
+                AMyHeroCharacter: ['AChildCharacter']
+            },
+            sourceByClass: {
+                AMyHeroCharacter: {
+                    source: 'cpp'
+                }
+            }
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript class hierarchy',
+        '// lineage: AHazeCharacter <- AMyHeroCharacter',
+        '',
+        '// derived:',
+        '//   AMyHeroCharacter',
+        '//     AChildCharacter',
+        '',
+        '// truncated: supers=true, derivedDepth=true, derivedBreadthByClass=AMyHeroCharacter=5',
+        '',
+        '// native',
+        'class AMyHeroCharacter;'
+    ].join('\n'));
+});
+
+test('findReferences success renders file comments and preview blocks', () =>
 {
     const text = formatToolText('angelscript_findReferences', {
         ok: true,
@@ -433,22 +636,66 @@ test('findReferences success renders per-file blocks and ranges', () =>
 
     assert.equal(text, [
         'Angelscript references',
-        'file: G:/Project/Game/Characters/Hero.as',
-        'position: 128:17',
-        'total: 2',
-        'returned: 2',
-        'limit: 30',
-        'truncated: false',
-        '====',
-        'G:/Project/Game/Characters/Hero.as',
-        '---',
-        'range: 128:5-128:17',
+        '// G:/Project/Game/Characters/Hero.as',
+        '// range: 128:5-128:17',
         '128:        JumpToTarget(TargetActor);',
         '====',
-        'G:/Project/Game/Abilities/JumpAbility.as',
-        '---',
-        'range: 45:10-45:22',
+        '// G:/Project/Game/Abilities/JumpAbility.as',
+        '// range: 45:10-45:22',
         '45:        Hero.JumpToTarget(TargetActor);'
+    ].join('\n'));
+});
+
+test('findReferences keeps multiple references in the same file grouped without separators', () =>
+{
+    const text = formatToolText('angelscript_findReferences', {
+        ok: true,
+        data: {
+            total: 2,
+            returned: 2,
+            limit: 30,
+            truncated: false,
+            request: {
+                filePath: 'G:/Project/Game/Characters/Hero.as',
+                position: {
+                    line: 128,
+                    character: 17
+                },
+                limit: 30
+            },
+            references: [
+                {
+                    filePath: 'G:/Project/Game/Characters/Hero.as',
+                    startLine: 128,
+                    endLine: 128,
+                    range: {
+                        start: { line: 128, character: 5 },
+                        end: { line: 128, character: 17 }
+                    },
+                    preview: '    JumpToTarget(TargetActor);'
+                },
+                {
+                    filePath: 'G:/Project/Game/Characters/Hero.as',
+                    startLine: 140,
+                    endLine: 140,
+                    range: {
+                        start: { line: 140, character: 9 },
+                        end: { line: 140, character: 21 }
+                    },
+                    preview: '    Owner.JumpToTarget(TargetActor);'
+                }
+            ]
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript references',
+        '// G:/Project/Game/Characters/Hero.as',
+        '// range: 128:5-128:17',
+        '128:        JumpToTarget(TargetActor);',
+        '',
+        '// range: 140:9-140:21',
+        '140:        Owner.JumpToTarget(TargetActor);'
     ].join('\n'));
 });
 
@@ -496,24 +743,42 @@ test('findReferences renders truncation metadata and notice', () =>
 
     assert.equal(text, [
         'Angelscript references',
-        'file: G:/Project/Game/Characters/Hero.as',
-        'position: 128:17',
-        'total: 35',
-        'returned: 2',
-        'limit: 2',
-        'truncated: true',
-        '====',
-        'G:/Project/Game/Characters/Hero.as',
-        '---',
-        'range: 128:5-128:17',
+        '// G:/Project/Game/Characters/Hero.as',
+        '// range: 128:5-128:17',
         '128:        JumpToTarget(TargetActor);',
         '====',
-        'G:/Project/Game/Abilities/JumpAbility.as',
-        '---',
-        'range: 45:10-45:22',
+        '// G:/Project/Game/Abilities/JumpAbility.as',
+        '// range: 45:10-45:22',
         '45:        Hero.JumpToTarget(TargetActor);',
-        '====',
-        'Results truncated at limit 2. Refine the symbol location or increase limit to see more references.'
+        '',
+        '// truncated at limit 2. Refine the symbol location or increase limit to see more references.'
+    ].join('\n'));
+});
+
+test('findReferences renders empty results as a code-style comment', () =>
+{
+    const text = formatToolText('angelscript_findReferences', {
+        ok: true,
+        data: {
+            total: 0,
+            returned: 0,
+            limit: 30,
+            truncated: false,
+            request: {
+                filePath: 'G:/Project/Game/Characters/Hero.as',
+                position: {
+                    line: 128,
+                    character: 17
+                },
+                limit: 30
+            },
+            references: []
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript references',
+        '// No references found.'
     ].join('\n'));
 });
 
@@ -548,15 +813,13 @@ test('getClassHierarchy degrades unresolved script preview without failing text 
 
     assert.equal(text, [
         'Angelscript class hierarchy',
-        'root: AMyHeroCharacter',
-        'supers: <none>',
-        'limits: super=3, subDepth=2, subBreadth=10',
-        'truncated: supers=false, derivedDepth=false',
-        '====',
-        'AMyHeroCharacter',
-        'class: AMyHeroCharacter',
-        'source: as',
-        '<source unavailable>'
+        '// lineage: AMyHeroCharacter',
+        '',
+        '// derived:',
+        '//   <none>',
+        '',
+        '// source unavailable',
+        'class AMyHeroCharacter;'
     ].join('\n'));
 });
 

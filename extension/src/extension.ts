@@ -395,8 +395,11 @@ class ASApiSearchProvider implements vscode.WebviewViewProvider
             id="search"
             type="text"
             style="width: 100%; display: block; padding: 5px; font-size: 130%; background: inherit; border: 1px solid gray; color: inherit;"
-            placeholder="Search Angelscript API"
+            placeholder="Search Angelscript API (smart)"
         />
+        <div style="margin-top: 6px; opacity: 0.75; font-size: 90%;">
+            Smart search: <code>::</code> namespace, <code>.</code> member, <code>(</code> callable
+        </div>
 
         <script>
         let vscode = acquireVsCodeApi();
