@@ -115,6 +115,7 @@ type SearchTextVariant = {
 type SearchIndexEntry = {
     qualifiedName: string;
     kind: ApiSearchKind;
+    isCallable: boolean;
     signature: string;
     summary?: string;
     documentation?: string;
@@ -461,6 +462,7 @@ function buildSearchIndex() : SearchIndex
             entries.push(createSearchEntry({
                 qualifiedName: qualifiedTypeName,
                 kind,
+                isCallable: false,
                 signature: buildTypeSignature(dbType),
                 summary: extractSummary(documentation),
                 documentation,
@@ -511,6 +513,7 @@ function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
 {
     let documentation = normalizeSearchDocumentation(method.findAvailableDocumentation());
     let methodArgs = method.args ? method.args.map((arg) => arg.typename) : [];
+    let isCallable = method.isProperty !== true && method.isCallable !== false;
     let detailsData: unknown;
     let qualifiedName = '';
     let containerQualifiedName: string | undefined = undefined;
@@ -562,6 +565,7 @@ function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
     return createSearchEntry({
         qualifiedName,
         kind: method.containingType ? 'method' : 'function',
+        isCallable,
         signature: buildMethodSignature(method),
         summary: extractSummary(documentation),
         documentation,
@@ -589,6 +593,7 @@ function createTypePropertyEntry(property: typedb.DBProperty) : SearchIndexEntry
     return createSearchEntry({
         qualifiedName: `${qualifiedContainer}.${property.name}`,
         kind: 'property',
+        isCallable: false,
         signature: property.format(`${qualifiedContainer}.`),
         summary: extractSummary(documentation),
         documentation,
@@ -615,6 +620,7 @@ function createGlobalPropertyEntry(property: typedb.DBProperty) : SearchIndexEnt
     return createSearchEntry({
         qualifiedName,
         kind: 'globalVariable',
+        isCallable: false,
         signature: property.format(namespaceQualifiedName.length > 0 ? `${namespaceQualifiedName}::` : ''),
         summary: extractSummary(documentation),
         documentation,
@@ -629,6 +635,7 @@ function createGlobalPropertyEntry(property: typedb.DBProperty) : SearchIndexEnt
 function createSearchEntry(input: {
     qualifiedName: string;
     kind: ApiSearchKind;
+    isCallable: boolean;
     signature: string;
     summary?: string;
     documentation?: string;
@@ -651,6 +658,7 @@ function createSearchEntry(input: {
     return {
         qualifiedName: input.qualifiedName,
         kind: input.kind,
+        isCallable: input.isCallable,
         signature: input.signature,
         summary: input.summary,
         documentation: input.documentation,
@@ -694,6 +702,7 @@ function resolveScope(
         let prefixCandidates = index.scopeCandidates.filter((candidate) => candidate.qualifiedName.toLowerCase().startsWith(normalizedScopeLower));
         candidates = prefixCandidates;
     }
+    candidates = dedupeScopeCandidates(candidates);
 
     let scopeLookup: GetAPISearchScopeLookup = {
         requestedScope: normalizedScope
@@ -984,7 +993,7 @@ function rankCandidates(candidates: SearchCandidate[], params: NormalizedSearchP
     let smartQueries = params.smartQueries?.filter((query) => !isTinySmartQuery(query)) ?? [];
     let exactBranchMatches = smartQueries.map((query) =>
         candidates.some((candidate) =>
-            (!query.requiresCallable || isCallableKind(candidate.entry.kind))
+            (!query.requiresCallable || isEntryCallable(candidate.entry))
             && scoreExactMatch(candidate.entry, query) != null
         )
     );
@@ -1055,9 +1064,9 @@ function compareCandidates(left: SearchCandidate, right: SearchCandidate) : numb
     return left.entry.qualifiedName.localeCompare(right.entry.qualifiedName);
 }
 
-function isCallableKind(kind: ApiSearchKind) : boolean
+function isEntryCallable(entry: SearchIndexEntry) : boolean
 {
-    return kind == 'method' || kind == 'function';
+    return entry.isCallable;
 }
 
 function scoreExactMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
@@ -1098,7 +1107,7 @@ function scoreSmartBranch(entry: SearchIndexEntry, query: ParsedSmartQuery, exac
 {
     if (query.searchableCharCount == 0 || query.segments.length == 0)
         return null;
-    if (query.requiresCallable && !isCallableKind(entry.kind))
+    if (query.requiresCallable && !isEntryCallable(entry))
         return null;
 
     let exactMatch = scoreExactMatch(entry, query);
@@ -1114,7 +1123,7 @@ function scorePlainMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : Sea
 {
     if (query.searchableCharCount == 0 || query.segments.length == 0)
         return null;
-    if (query.requiresCallable && !isCallableKind(entry.kind))
+    if (query.requiresCallable && !isEntryCallable(entry))
         return null;
 
     let exactMatch = scoreExactMatch(entry, query);
@@ -1882,7 +1891,7 @@ function getRegexSearchTextValues(entry: SearchIndexEntry) : SearchTextValue[]
     for (let alias of entry.qualifiedAliasTexts)
         result.push({ text: alias.text, viewPriority: 1 });
 
-    if (!isCallableKind(entry.kind))
+    if (!isEntryCallable(entry))
         return dedupeSearchTextValues(result);
 
     result.push(
@@ -1893,6 +1902,26 @@ function getRegexSearchTextValues(entry: SearchIndexEntry) : SearchTextValue[]
         result.push({ text: `${alias.text}()`, viewPriority: 1 });
 
     return dedupeSearchTextValues(result);
+}
+
+function dedupeScopeCandidates(candidates: ScopeCandidate[]) : ScopeCandidate[]
+{
+    if (candidates.length <= 1)
+        return candidates;
+
+    let deduped: ScopeCandidate[] = [];
+    let seen = new Set<string>();
+    for (let candidate of candidates)
+    {
+        let key = `${candidate.kind}|${candidate.qualifiedName}`;
+        if (seen.has(key))
+            continue;
+
+        seen.add(key);
+        deduped.push(candidate);
+    }
+
+    return deduped;
 }
 
 function dedupeSearchTextValues(values: SearchTextValue[]) : SearchTextValue[]

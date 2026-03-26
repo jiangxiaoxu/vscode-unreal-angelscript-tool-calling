@@ -240,6 +240,24 @@ function setupSearchFixture(): void
         documentation: 'Movement state enum.'
     });
 
+    const cthuAccessor = createMethod(
+        'GetCthuASC',
+        'UCthuAbilitySystemComponent',
+        'Game.Modules.Characters',
+        [],
+        'A property-like accessor imported as a method.'
+    );
+    cthuAccessor.isProperty = true;
+
+    const openEditorOnlyPanel = createMethod(
+        'OpenEditorOnlyPanel',
+        'void',
+        'Game.Modules.Characters',
+        [],
+        'A method that should not be treated as callable by search.'
+    );
+    openEditorOnlyPanel.isCallable = false;
+
     createType(characters, 'UCthuAICharacterExtension', {
         declaredModule: 'Game.Modules.Characters',
         documentation: 'Character extension helpers.',
@@ -265,6 +283,15 @@ function setupSearchFixture(): void
     createType(characters, 'UOpenPawnDataAIAsset', {
         declaredModule: 'Game.Modules.Characters',
         documentation: 'A same-name type used to verify callable-only filtering.'
+    });
+
+    createType(characters, 'UCthuAbilityTask_Ticker', {
+        declaredModule: 'Game.Modules.Characters',
+        documentation: 'Accessor regression fixture.',
+        methods: [
+            cthuAccessor,
+            openEditorOnlyPanel
+        ]
     });
 
     createType(hiddenNs, '_HiddenMovementHelper', {
@@ -347,6 +374,36 @@ test('plain search supports code-like queries, ordered gaps, weak reorder fallba
 
     const callableShortWithParens = GetAPISearch({ query: 'OpenPawnDataAIAsset()', mode: 'plain', limit: 10 });
     assert.deepEqual(callableShortWithParens.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+});
+
+test('callable-only excludes property-like accessors and non-callable methods across search modes', () =>
+{
+    const accessorPlain = GetAPISearch({ query: 'GetCthuASC', mode: 'plain', limit: 10 });
+    assert.deepEqual(accessorPlain.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAbilityTask_Ticker.GetCthuASC']);
+
+    const accessorPlainCallable = GetAPISearch({ query: 'GetCthuASC()', mode: 'plain', limit: 10 });
+    assert.equal(accessorPlainCallable.matches.length, 0);
+
+    const accessorSmartCallable = GetAPISearch({ query: 'GetCthuASC()', mode: 'smart', limit: 10 });
+    assert.equal(accessorSmartCallable.matches.length, 0);
+
+    const accessorRegex = GetAPISearch({ query: '/GetCthuASC$/', mode: 'regex', kinds: ['method'], limit: 10 });
+    assert.deepEqual(accessorRegex.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAbilityTask_Ticker.GetCthuASC']);
+
+    const accessorRegexCallable = GetAPISearch({ query: '/GetCthuASC\\(/', mode: 'regex', kinds: ['method'], limit: 10 });
+    assert.equal(accessorRegexCallable.matches.length, 0);
+
+    const nonCallablePlain = GetAPISearch({ query: 'OpenEditorOnlyPanel', mode: 'plain', limit: 10 });
+    assert.deepEqual(nonCallablePlain.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAbilityTask_Ticker.OpenEditorOnlyPanel']);
+
+    const nonCallablePlainCallable = GetAPISearch({ query: 'OpenEditorOnlyPanel()', mode: 'plain', limit: 10 });
+    assert.equal(nonCallablePlainCallable.matches.length, 0);
+
+    const nonCallableSmartCallable = GetAPISearch({ query: 'OpenEditorOnlyPanel()', mode: 'smart', limit: 10 });
+    assert.equal(nonCallableSmartCallable.matches.length, 0);
+
+    const nonCallableRegexCallable = GetAPISearch({ query: '/OpenEditorOnlyPanel\\(/', mode: 'regex', kinds: ['method'], limit: 10 });
+    assert.equal(nonCallableRegexCallable.matches.length, 0);
 });
 
 test('smart search uses ordered wildcard matching with strict separators', () =>
@@ -628,6 +685,38 @@ test('invalid scope lookup returns notices without throwing', () =>
     assert.equal(nonClass.scopeLookup?.resolvedKind, 'enum');
     assert.equal(nonClass.inheritedScopeOutcome, 'ignored_scope_not_class');
     assert.equal(nonClass.notices, undefined);
+});
+
+test('scope lookup dedupes identical qualified-name candidates before ambiguity checks', () =>
+{
+    createType(declareNamespace('Gameplay::Characters', 'Game.Modules.Characters'), 'UCthuBattleSet', {
+        declaredModule: 'Game.Modules.Characters',
+        methods: [
+            createMethod('GetOwnedGameplayTags', 'void', 'Game.Modules.Characters', [], 'Regression scope hit.')
+        ]
+    });
+    createType(declareNamespace('Gameplay::Characters', 'Game.Modules.Characters'), 'UCthuBattleSet', {
+        declaredModule: 'Game.Modules.Characters',
+        documentation: 'Duplicate scope candidate.'
+    });
+
+    OnDirtyTypeCaches();
+    InvalidateAPISearchCache();
+
+    const scoped = GetAPISearch({
+        query: 'GetOwnedGameplayTags',
+        mode: 'plain',
+        scope: 'Gameplay::Characters::UCthuBattleSet',
+        limit: 20
+    });
+
+    assert.deepEqual(scoped.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuBattleSet.GetOwnedGameplayTags']);
+    assert.deepEqual(scoped.scopeLookup, {
+        requestedScope: 'Gameplay::Characters::UCthuBattleSet',
+        resolvedQualifiedName: 'Gameplay::Characters::UCthuBattleSet',
+        resolvedKind: 'class'
+    });
+    assert.equal(scoped.inheritedScopeOutcome, undefined);
 });
 
 test('applied inheritedScopeOutcome does not suppress empty inheritance notice', () =>
