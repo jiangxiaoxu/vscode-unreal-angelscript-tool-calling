@@ -719,6 +719,56 @@ test('scope lookup dedupes identical qualified-name candidates before ambiguity 
     assert.equal(scoped.inheritedScopeOutcome, undefined);
 });
 
+test('scope collision defaults to type and supports explicit namespace suffix', () =>
+{
+    const collisionNamespace = declareNamespace('UCthuBattleSet', 'Game.Modules.Characters');
+    collisionNamespace.addSymbol(createMethod(
+        'GetManaAttr',
+        'FGameplayAttribute',
+        'Game.Modules.Characters',
+        [],
+        'Namespace accessor.'
+    ));
+
+    createType(GetRootNamespace(), 'UCthuBattleSet', {
+        declaredModule: 'Game.Modules.Characters',
+        methods: [
+            createMethod('GetOwnedGameplayTags', 'void', 'Game.Modules.Characters', [], 'Type member.')
+        ]
+    });
+
+    OnDirtyTypeCaches();
+    InvalidateAPISearchCache();
+
+    const defaultScoped = GetAPISearch({
+        query: 'GetOwnedGameplayTags',
+        mode: 'plain',
+        scope: 'UCthuBattleSet',
+        limit: 20
+    });
+
+    assert.deepEqual(defaultScoped.matches.map((match) => match.qualifiedName), ['UCthuBattleSet.GetOwnedGameplayTags']);
+    assert.deepEqual(defaultScoped.scopeLookup, {
+        requestedScope: 'UCthuBattleSet',
+        resolvedQualifiedName: 'UCthuBattleSet',
+        resolvedKind: 'class'
+    });
+
+    const namespaceScoped = GetAPISearch({
+        query: 'GetManaAttr',
+        mode: 'plain',
+        scope: 'UCthuBattleSet::',
+        limit: 20
+    });
+
+    assert.deepEqual(namespaceScoped.matches.map((match) => match.qualifiedName), ['UCthuBattleSet::GetManaAttr']);
+    assert.deepEqual(namespaceScoped.scopeLookup, {
+        requestedScope: 'UCthuBattleSet::',
+        resolvedQualifiedName: 'UCthuBattleSet',
+        resolvedKind: 'namespace'
+    });
+});
+
 test('applied inheritedScopeOutcome does not suppress empty inheritance notice', () =>
 {
     const scoped = GetAPISearch({

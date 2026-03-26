@@ -169,6 +169,8 @@ type ScopeResolution = {
     inheritedScopeOutcome?: ApiInheritedScopeOutcome;
 };
 
+type ScopeSelectorPreference = 'any' | 'namespace';
+
 type SearchConnector = 'space' | 'namespace' | 'member';
 
 type ParsedSmartQuery = {
@@ -687,7 +689,8 @@ function resolveScope(
 ) : ScopeResolution
 {
     let notices: GetAPISearchNotice[] = [];
-    let normalizedScope = scopeName.trim();
+    let selector = parseScopeSelector(scopeName);
+    let normalizedScope = selector.lookupScope;
     let normalizedScopeLower = normalizedScope.toLowerCase();
 
     let exactQualifiedCandidates = index.scopeCandidates.filter((candidate) => candidate.qualifiedName.toLowerCase() == normalizedScopeLower);
@@ -702,10 +705,12 @@ function resolveScope(
         let prefixCandidates = index.scopeCandidates.filter((candidate) => candidate.qualifiedName.toLowerCase().startsWith(normalizedScopeLower));
         candidates = prefixCandidates;
     }
+    candidates = applyScopeSelectorPreference(candidates, selector.preference);
     candidates = dedupeScopeCandidates(candidates);
+    candidates = disambiguateScopeCandidates(candidates, selector.preference);
 
     let scopeLookup: GetAPISearchScopeLookup = {
-        requestedScope: normalizedScope
+        requestedScope: selector.requestedScope
     };
 
     if (candidates.length == 0)
@@ -766,6 +771,53 @@ function resolveScope(
             ? (candidate.isClassType ? 'applied' : 'ignored_scope_not_class')
             : undefined
     };
+}
+
+function parseScopeSelector(scopeName: string) : { requestedScope: string; lookupScope: string; preference: ScopeSelectorPreference }
+{
+    let requestedScope = scopeName.trim();
+    if (requestedScope.endsWith('::'))
+    {
+        let lookupScope = requestedScope.slice(0, -2).trimEnd();
+        if (lookupScope.length > 0)
+        {
+            return {
+                requestedScope,
+                lookupScope,
+                preference: 'namespace'
+            };
+        }
+    }
+
+    return {
+        requestedScope,
+        lookupScope: requestedScope,
+        preference: 'any'
+    };
+}
+
+function applyScopeSelectorPreference(candidates: ScopeCandidate[], preference: ScopeSelectorPreference) : ScopeCandidate[]
+{
+    if (preference != 'namespace')
+        return candidates;
+
+    return candidates.filter((candidate) => candidate.kind == 'namespace');
+}
+
+function disambiguateScopeCandidates(candidates: ScopeCandidate[], preference: ScopeSelectorPreference) : ScopeCandidate[]
+{
+    if (preference != 'any' || candidates.length <= 1)
+        return candidates;
+
+    let qualifiedNames = new Set(candidates.map((candidate) => candidate.qualifiedName.toLowerCase()));
+    if (qualifiedNames.size != 1)
+        return candidates;
+
+    let typeCandidates = candidates.filter((candidate) => candidate.kind != 'namespace');
+    if (typeCandidates.length == 1)
+        return typeCandidates;
+
+    return candidates;
 }
 
 function applyNamespaceScope(candidates: SearchCandidate[], namespaceQualifiedName: string) : SearchCandidate[]
