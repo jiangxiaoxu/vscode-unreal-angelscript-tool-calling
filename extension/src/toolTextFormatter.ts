@@ -356,6 +356,16 @@ function buildSearchMatchMetaComments(record: UnknownRecord, request: UnknownRec
     const scopeDistance = asNumber(record.scopeDistance);
     if (scopeDistance !== null && scopeDistance > 0)
         comments.push(`scope distance: ${scopeDistance}`);
+
+    const matchedBy = asString(record.matchedBy);
+    const matchedByQualifiedName = asString(record.matchedByQualifiedName);
+    if (matchedBy === 'member')
+        comments.push(`matched by member: ${matchedByQualifiedName ?? 'member hit'}`);
+    else if (matchedBy === 'mixin')
+        comments.push(`matched by mixin: ${matchedByQualifiedName ?? 'mixin hit'}`);
+    else if (matchedBy === 'self' && matchedByQualifiedName && matchedByQualifiedName !== asString(record.qualifiedName))
+        comments.push(`matched by self: ${matchedByQualifiedName}`);
+
     return comments;
 }
 

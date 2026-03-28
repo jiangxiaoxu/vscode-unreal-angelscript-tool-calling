@@ -308,6 +308,55 @@ async function buildFindReferencesItems(references: ResolvedReferenceLocation[])
     return items;
 }
 
+function isSuperAliasReferenceAtPosition(lineText: string, startCharacter: number): boolean
+{
+    if (startCharacter < 0)
+        return false;
+    const safeStartCharacter = Math.min(startCharacter, lineText.length);
+    return /\bSuper\s*::\s*$/u.test(lineText.slice(0, safeStartCharacter));
+}
+
+async function shouldFilterSuperAliasReference(
+    location: LspLocation,
+    fileLinesCache: Map<string, Promise<string[] | null>>
+): Promise<boolean>
+{
+    if (!location.uri.startsWith('file://'))
+        return false;
+
+    const absolutePath = fileUriToAbsolutePath(location.uri);
+    if (!absolutePath)
+        return false;
+
+    const fileLines = await getFileLinesCached(absolutePath, fileLinesCache);
+    if (!fileLines)
+        return false;
+
+    const startLine = location.range.start.line;
+    if (!Number.isInteger(startLine) || startLine < 0 || startLine >= fileLines.length)
+        return false;
+
+    return isSuperAliasReferenceAtPosition(
+        fileLines[startLine] ?? '',
+        location.range.start.character
+    );
+}
+
+async function filterSuperAliasReferences(locations: LspLocation[]): Promise<LspLocation[]>
+{
+    const fileLinesCache = new Map<string, Promise<string[] | null>>();
+    const filtered: LspLocation[] = [];
+
+    for (const location of locations)
+    {
+        if (await shouldFilterSuperAliasReference(location, fileLinesCache))
+            continue;
+        filtered.push(location);
+    }
+
+    return filtered;
+}
+
 function makeError(code: string, message: string, details?: Record<string, unknown>): ToolFailure
 {
     return {
@@ -441,11 +490,13 @@ export async function runSearchApi(
             data: await buildSearchPayload(client, {
                 query,
                 limit: raw?.limit,
+                kinds: raw?.kinds,
                 source: raw?.source,
                 scope: raw?.scope,
                 ...(hasExplicitIncludeInheritedFromScope ? { includeInheritedFromScope: raw.includeInheritedFromScope } : {}),
                 includeDocs: raw?.includeDocs,
-                mode: raw?.mode
+                mode: raw?.mode,
+                symbolLevel: raw?.symbolLevel
             })
         };
     }
@@ -723,7 +774,8 @@ export async function runFindReferences(
             return makeError('NotReady', 'References are not available yet. Please wait for script parsing to finish and try again.');
         }
 
-        const limitedReferences = applyResultLimit(result, normalizedLimit.value);
+        const filteredResults = await filterSuperAliasReferences(result);
+        const limitedReferences = applyResultLimit(filteredResults, normalizedLimit.value);
         const references: ResolvedReferenceLocation[] = [];
         for (const location of limitedReferences.items)
         {

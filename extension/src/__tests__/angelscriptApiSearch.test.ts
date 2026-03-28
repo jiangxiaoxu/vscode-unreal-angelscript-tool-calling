@@ -66,7 +66,8 @@ test('buildSearchPayload omits inherited-scope flag for auto mode and records ap
         limit: 20,
         source: 'both',
         scope: 'Gameplay::Movement::UMovementDerived',
-        includeDocs: false
+        includeDocs: false,
+        symbolLevel: 'all'
     });
     assert.deepEqual(data.request, {
         query: 'Movement',
@@ -76,7 +77,8 @@ test('buildSearchPayload omits inherited-scope flag for auto mode and records ap
         scope: 'Gameplay::Movement::UMovementDerived',
         includeInheritedFromScopeMode: 'auto',
         includeInheritedFromScope: true,
-        includeDocs: false
+        includeDocs: false,
+        symbolLevel: 'all'
     });
     assert.equal(data.matches[0]?.scopeRelationship, 'inherited');
 });
@@ -111,7 +113,8 @@ test('buildSearchPayload preserves explicit false and reports explicit mode meta
         source: 'both',
         scope: 'Gameplay::Movement::UMovementDerived',
         includeInheritedFromScope: false,
-        includeDocs: false
+        includeDocs: false,
+        symbolLevel: 'all'
     });
     assert.deepEqual(data.request, {
         query: 'Movement',
@@ -121,7 +124,8 @@ test('buildSearchPayload preserves explicit false and reports explicit mode meta
         scope: 'Gameplay::Movement::UMovementDerived',
         includeInheritedFromScopeMode: 'explicit',
         includeInheritedFromScope: false,
-        includeDocs: false
+        includeDocs: false,
+        symbolLevel: 'all'
     });
 });
 
@@ -168,7 +172,8 @@ test('buildSearchPayload keeps auto mode false for namespace scopes without igno
         scope: 'Gameplay::Movement',
         includeInheritedFromScopeMode: 'auto',
         includeInheritedFromScope: false,
-        includeDocs: false
+        includeDocs: false,
+        symbolLevel: 'all'
     });
 });
 
@@ -193,7 +198,8 @@ test('buildSearchPayload forwards explicit regex mode and echoes it in request m
         mode: 'regex',
         limit: 20,
         source: 'both',
-        includeDocs: false
+        includeDocs: false,
+        symbolLevel: 'all'
     });
     assert.deepEqual(data.request, {
         query: '/Movement$/',
@@ -202,8 +208,62 @@ test('buildSearchPayload forwards explicit regex mode and echoes it in request m
         source: 'both',
         includeInheritedFromScopeMode: 'auto',
         includeInheritedFromScope: false,
-        includeDocs: false
+        includeDocs: false,
+        symbolLevel: 'all'
     });
+});
+
+test('buildSearchPayload forwards explicit symbolLevel and kinds', async () =>
+{
+    const calls: Array<unknown> = [];
+    const client = {
+        sendRequest: async (_method: unknown, payload: unknown) =>
+        {
+            calls.push(payload);
+            return createSearchResult({
+                matches: [
+                    {
+                        qualifiedName: 'Gameplay::Movement::UMovementBase',
+                        kind: 'class',
+                        signature: 'class Gameplay::Movement::UMovementBase',
+                        source: 'script',
+                        matchedBy: 'member',
+                        matchedByQualifiedName: 'Gameplay::Movement::UMovementBase.TickMovement',
+                        matchedByKind: 'method'
+                    }
+                ]
+            });
+        }
+    } as any;
+
+    const data = await buildSearchPayload(client, {
+        query: 'TickMovement',
+        kinds: ['class'],
+        symbolLevel: 'type'
+    });
+
+    assert.deepEqual(calls[0], {
+        query: 'TickMovement',
+        mode: 'smart',
+        limit: 20,
+        kinds: ['class'],
+        source: 'both',
+        includeDocs: false,
+        symbolLevel: 'type'
+    });
+    assert.deepEqual(data.request, {
+        query: 'TickMovement',
+        mode: 'smart',
+        limit: 20,
+        kinds: ['class'],
+        source: 'both',
+        includeInheritedFromScopeMode: 'auto',
+        includeInheritedFromScope: false,
+        includeDocs: false,
+        symbolLevel: 'type'
+    });
+    assert.equal(data.matches[0]?.matchedBy, 'member');
+    assert.equal(data.matches[0]?.matchedByQualifiedName, 'Gameplay::Movement::UMovementBase.TickMovement');
 });
 
 test('buildSearchPayload rejects removed plain mode', async () =>

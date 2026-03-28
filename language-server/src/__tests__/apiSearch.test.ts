@@ -609,6 +609,82 @@ test('common smart searches do not require kind filters', () =>
     assert.equal(globalSearch.matches[0]?.kind, 'globalVariable');
 });
 
+test('symbolLevel type keeps direct type hits and removes projected duplicates', () =>
+{
+    const typeOnly = GetAPISearch({
+        query: 'UMovementDerived',
+        mode: 'smart',
+        symbolLevel: 'type',
+        limit: 10
+    });
+
+    assert.deepEqual(typeOnly.matches.map((match) => match.qualifiedName), [
+        'Gameplay::Movement::UMovementDerived'
+    ]);
+    assert.equal(typeOnly.matches[0]?.kind, 'class');
+    assert.equal(typeOnly.matches[0]?.matchedBy, 'self');
+    assert.equal(typeOnly.matches[0]?.matchedByQualifiedName, 'Gameplay::Movement::UMovementDerived');
+    assert.equal(typeOnly.matches[0]?.matchedByKind, 'class');
+});
+
+test('symbolLevel type projects member hits to owner types with matchedBy metadata', () =>
+{
+    const projected = GetAPISearch({
+        query: 'MaxSpeed',
+        mode: 'smart',
+        symbolLevel: 'type',
+        limit: 10
+    });
+
+    assert.deepEqual(projected.matches.map((match) => match.qualifiedName), [
+        'Gameplay::Movement::UMovementBase'
+    ]);
+    assert.equal(projected.matches[0]?.kind, 'class');
+    assert.equal(projected.matches[0]?.matchedBy, 'member');
+    assert.equal(projected.matches[0]?.matchedByQualifiedName, 'Gameplay::Movement::UMovementBase.MaxSpeed');
+    assert.equal(projected.matches[0]?.matchedByKind, 'property');
+});
+
+test('symbolLevel type projects mixin hits to target owner types', () =>
+{
+    const projected = GetAPISearch({
+        query: 'BoostMovement',
+        mode: 'smart',
+        symbolLevel: 'type',
+        limit: 10
+    });
+
+    assert.deepEqual(projected.matches.map((match) => match.qualifiedName), [
+        'Gameplay::Movement::UMovementBase'
+    ]);
+    assert.equal(projected.matches[0]?.kind, 'class');
+    assert.equal(projected.matches[0]?.matchedBy, 'mixin');
+    assert.equal(projected.matches[0]?.matchedByQualifiedName, 'Gameplay::Movement::BoostMovement');
+    assert.equal(projected.matches[0]?.matchedByKind, 'function');
+});
+
+test('symbolLevel type rejects non-type kinds and keeps default all behavior unchanged', () =>
+{
+    assert.throws(
+        () => GetAPISearch({
+            query: 'BoostMovement',
+            mode: 'smart',
+            symbolLevel: 'type',
+            kinds: ['function'],
+            limit: 10
+        }),
+        /'kinds' only supports class, struct, or enum/u
+    );
+
+    const allSymbols = GetAPISearch({
+        query: 'BoostMovement',
+        mode: 'smart',
+        limit: 10
+    });
+    assert.equal(allSymbols.matches[0]?.qualifiedName, 'Gameplay::Movement::BoostMovement');
+    assert.equal(allSymbols.matches[0]?.kind, 'function');
+});
+
 test('includeDocs enriches search results without changing ordering', () =>
 {
     const withoutDocs = GetAPISearch({ query: 'OpenPawnDataAIAsset(', mode: 'smart', limit: 10 });

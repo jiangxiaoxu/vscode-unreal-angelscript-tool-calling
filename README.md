@@ -72,7 +72,7 @@ Exposed tools:
 - `angelscript_findReferences`
 
 Tool notes:
-- `angelscript_searchApi`: Requires `query`. Default `mode` is `smart`; use `regex` only with `/pattern/flags`. `scope` narrows a known namespace or type before ranking, `includeInheritedFromScope` only changes class scopes, and `includeDocs=true` adds docs without changing ranking.
+- `angelscript_searchApi`: Requires `query`. Default `mode` is `smart`; use `regex` only with `/pattern/flags`. `kinds` is a hard filter. `symbolLevel=type` still lets members or mixins match, but only returns owner `class|struct|enum` results. `scope` narrows a known namespace or type before ranking, `includeInheritedFromScope` only changes class scopes, and `includeDocs=true` adds docs without changing ranking.
 - `angelscript_resolveSymbolAtPosition`: Requires absolute `filePath` plus 1-based `position`. `includeDocumentation` defaults to `true`.
 - `angelscript_getTypeMembers`: Requires exact `name`; `namespace` only disambiguates collisions. `type.description` is always returned, while member docs need `includeDocs=true`.
 - `angelscript_getClassHierarchy`: Requires exact class `name`. `maxSuperDepth`, `maxSubDepth`, and `maxSubBreadth` bound the returned tree and default to `3/2/10`.
@@ -164,7 +164,7 @@ https://angelscript.hazelight.se
 - `angelscript_findReferences`
 
 工具说明:
-- `angelscript_searchApi`: 需要 `query`. `mode` 默认是 `smart`, 只有明确提供 `/pattern/flags` 时才使用 `regex`. `scope` 会在排序前收窄已知 namespace 或 type, `includeInheritedFromScope` 只改变 class scope, `includeDocs=true` 只补全文档而不改变排序.
+- `angelscript_searchApi`: 需要 `query`. `mode` 默认是 `smart`, 只有明确提供 `/pattern/flags` 时才使用 `regex`. `kinds` 是硬过滤. `symbolLevel=type` 允许成员或 mixin 参与命中, 但最终只返回 owner `class|struct|enum`. `scope` 会在排序前收窄已知 namespace 或 type, `includeInheritedFromScope` 只改变 class scope, `includeDocs=true` 只补全文档而不改变排序.
 - `angelscript_resolveSymbolAtPosition`: 需要绝对路径 `filePath` 和 1-based 的 `position`. `includeDocumentation` 默认是 `true`.
 - `angelscript_getTypeMembers`: 需要精确 `name`; `namespace` 只用于消除重名歧义. `type.description` 始终返回, 成员文档需要 `includeDocs=true`.
 - `angelscript_getClassHierarchy`: 需要精确 class `name`. `maxSuperDepth`, `maxSubDepth` 和 `maxSubBreadth` 用来裁剪返回层级, 默认值是 `3/2/10`.

@@ -94,6 +94,30 @@ test('real-symbol smart search supports ASCII semicolon leaf termination', () =>
     assert.deepEqual(terminated.matches.map((match) => match.qualifiedName), ['GameplayTags::GameplayCue']);
 });
 
+test('real-symbol symbolLevel type keeps direct type hits and projects member hits to owners', () =>
+{
+    const directType = GetAPISearch({
+        query: 'AActor',
+        mode: 'smart',
+        symbolLevel: 'type',
+        limit: 10
+    });
+    assert.equal(directType.matches[0]?.qualifiedName, 'AActor');
+    assert.equal(directType.matches[0]?.matchedBy, 'self');
+    assert.equal(directType.matches[0]?.matchedByKind, 'class');
+
+    const memberProjection = GetAPISearch({
+        query: 'GetActorNameOrLabel(',
+        mode: 'smart',
+        symbolLevel: 'type',
+        limit: 10
+    });
+    assert.equal(memberProjection.matches[0]?.qualifiedName, 'AActor');
+    assert.equal(memberProjection.matches[0]?.matchedBy, 'member');
+    assert.equal(memberProjection.matches[0]?.matchedByQualifiedName, 'AActor.GetActorNameOrLabel');
+    assert.equal(memberProjection.matches[0]?.matchedByKind, 'method');
+});
+
 for (const testCase of fixture.cases)
 {
     test(`real-symbol search: ${testCase.id}`, () =>

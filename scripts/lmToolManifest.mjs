@@ -61,6 +61,14 @@ export const lmToolManifest = [
                     maximum: 200,
                     default: 20
                 },
+                kinds: {
+                    type: 'array',
+                    description: 'Hard-filter returned symbol kinds. In `symbolLevel=type`, only `class`, `struct`, or `enum` are allowed; member and mixin hits can still contribute owner-type matches.',
+                    items: {
+                        type: 'string',
+                        enum: ['class', 'struct', 'enum', 'method', 'function', 'property', 'globalVariable']
+                    }
+                },
                 source: {
                     type: 'string',
                     description: 'Limit results to `native`, `script`, or `both`. Defaults to `both`.',
@@ -78,17 +86,23 @@ export const lmToolManifest = [
                     type: 'boolean',
                     description: 'Attach full documentation text to returned matches. This enriches results only and does not affect ranking. Defaults to false.',
                     default: false
+                },
+                symbolLevel: {
+                    type: 'string',
+                    description: 'Result projection level. `all` returns matched symbols as-is. `type` still allows member or mixin matches, but only returns their owner `class`, `struct`, or `enum` with additive `matchedBy*` metadata.',
+                    enum: ['all', 'type'],
+                    default: 'all'
                 }
             },
             required: ['query']
         },
         readmeSummary: {
-            en: 'Requires `query`. Default `mode` is `smart`; use `regex` only with `/pattern/flags`. `scope` narrows a known namespace or type before ranking, `includeInheritedFromScope` only changes class scopes, and `includeDocs=true` adds docs without changing ranking.',
-            zh: '需要 `query`. `mode` 默认是 `smart`, 只有明确提供 `/pattern/flags` 时才使用 `regex`. `scope` 会在排序前收窄已知 namespace 或 type, `includeInheritedFromScope` 只改变 class scope, `includeDocs=true` 只补全文档而不改变排序.'
+            en: 'Requires `query`. Default `mode` is `smart`; use `regex` only with `/pattern/flags`. `kinds` is a hard filter. `symbolLevel=type` still lets members or mixins match, but only returns owner `class|struct|enum` results. `scope` narrows a known namespace or type before ranking, `includeInheritedFromScope` only changes class scopes, and `includeDocs=true` adds docs without changing ranking.',
+            zh: '需要 `query`. `mode` 默认是 `smart`, 只有明确提供 `/pattern/flags` 时才使用 `regex`. `kinds` 是硬过滤. `symbolLevel=type` 允许成员或 mixin 参与命中, 但最终只返回 owner `class|struct|enum`. `scope` 会在排序前收窄已知 namespace 或 type, `includeInheritedFromScope` 只改变 class scope, `includeDocs=true` 只补全文档而不改变排序.'
         },
         report: {
             boundaryZh: '在不知道精确符号名时用于发现 API symbol. 不用于已有文件位置的 symbol resolve.',
-            inputsZh: '`query` 必填; `mode` 取 `smart|regex`; `scope` 预先收窄 namespace/type; `includeInheritedFromScope` 只影响 class scope; `includeDocs` 只补全文档.',
+            inputsZh: '`query` 必填; `mode` 取 `smart|regex`; `kinds` 是硬过滤; `symbolLevel=type` 允许成员命中但只返回 owner type; `scope` 预先收窄 namespace/type; `includeInheritedFromScope` 只影响 class scope; `includeDocs` 只补全文档.',
             textBodyZh: '按 scope, owner 或 namespace 分组后的类型桩或成员声明',
             textMetaZh: '`// scope: ...`, `// notice [...]`, `// native`, `// mixin from ...`, `// inherited from ...`',
             previewRuleZh: '无源码预览'

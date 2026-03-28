@@ -66,6 +66,10 @@ function prepareSearchInvocation(input: AngelscriptSearchToolParams | null | und
         ? (input.includeInheritedFromScope ? "true" : "false")
         : "auto";
     const includeDocs = input?.includeDocs === true ? "true" : "false";
+    const symbolLevel = input?.symbolLevel === "type" ? "type" : "all";
+    const kinds = Array.isArray(input?.kinds) && input.kinds.length > 0
+        ? input.kinds.join("|")
+        : "";
 
     const details: string[] = [];
     details.push(`mode=${mode}`);
@@ -74,8 +78,11 @@ function prepareSearchInvocation(input: AngelscriptSearchToolParams | null | und
         details.push(`limit=${limit}`);
     if (scope)
         details.push(`scope=${scope}`);
+    if (kinds)
+        details.push(`kinds=${kinds}`);
     details.push(`inheritScope=${includeInheritedFromScope}`);
     details.push(`includeDocs=${includeDocs}`);
+    details.push(`symbolLevel=${symbolLevel}`);
 
     const queryLabel = query ? `"${query}"` : "<empty>";
     return `Search Angelscript API ${queryLabel} (${details.join(", ")})`;

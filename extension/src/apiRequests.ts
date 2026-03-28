@@ -34,6 +34,8 @@ export type SearchScopeKind = 'namespace' | 'class' | 'struct' | 'enum';
 export type SearchScopeRelationship = 'declared' | 'inherited' | 'mixin';
 export type SearchMatchReason = 'exact-qualified' | 'exact-short' | 'boundary-ordered' | 'ordered-wildcard' | 'short-ordered';
 export type SearchIncludeInheritedFromScopeMode = 'auto' | 'explicit';
+export type SearchSymbolLevel = 'all' | 'type';
+export type SearchMatchedBy = 'self' | 'member' | 'mixin';
 
 export type GetAPISearchParams = {
     query: string;
@@ -44,6 +46,7 @@ export type GetAPISearchParams = {
     scope?: string;
     includeInheritedFromScope?: boolean;
     includeDocs?: boolean;
+    symbolLevel?: SearchSymbolLevel;
 };
 
 export type GetAPISearchNotice = {
@@ -83,6 +86,9 @@ export type GetAPISearchLspMatch = {
     isMixin?: boolean;
     scopeRelationship?: SearchScopeRelationship;
     scopeDistance?: number;
+    matchedBy?: SearchMatchedBy;
+    matchedByQualifiedName?: string;
+    matchedByKind?: SearchKind;
     detailsData?: unknown;
 };
 
@@ -129,10 +135,12 @@ export type GetAPISearchToolData = {
         mode: SearchMode;
         limit: number;
         source: SearchSource;
+        kinds?: SearchKind[];
         scope?: string;
         includeInheritedFromScopeMode: SearchIncludeInheritedFromScopeMode;
         includeInheritedFromScope: boolean;
         includeDocs: boolean;
+        symbolLevel: SearchSymbolLevel;
     };
 };
 

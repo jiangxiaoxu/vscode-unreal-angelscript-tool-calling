@@ -73,6 +73,22 @@
                             "maximum": 200,
                             "default": 20
                         },
+                        "kinds": {
+                            "type": "array",
+                            "description": "Hard-filter returned symbol kinds. In `symbolLevel=type`, only `class`, `struct`, or `enum` are allowed; member and mixin hits can still contribute owner-type matches.",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "class",
+                                    "struct",
+                                    "enum",
+                                    "method",
+                                    "function",
+                                    "property",
+                                    "globalVariable"
+                                ]
+                            }
+                        },
                         "source": {
                             "type": "string",
                             "description": "Limit results to `native`, `script`, or `both`. Defaults to `both`.",
@@ -94,6 +110,15 @@
                             "type": "boolean",
                             "description": "Attach full documentation text to returned matches. This enriches results only and does not affect ranking. Defaults to false.",
                             "default": false
+                        },
+                        "symbolLevel": {
+                            "type": "string",
+                            "description": "Result projection level. `all` returns matched symbols as-is. `type` still allows member or mixin matches, but only returns their owner `class`, `struct`, or `enum` with additive `matchedBy*` metadata.",
+                            "enum": [
+                                "all",
+                                "type"
+                            ],
+                            "default": "all"
                         }
                     },
                     "required": [
@@ -996,7 +1021,7 @@
         "watch": "npm-run-all -p watch:*",
         "watch:extension": "cd extension && node esbuild.js --watch",
         "watch:language-server": "cd language-server && node esbuild.js --watch",
-        "test:fork-boundary": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/lmToolContractSync.test.js extension/out/__tests__/toolContractUtils.test.js extension/out/__tests__/toolResultTransport.test.js extension/out/__tests__/toolTextFormatter.test.js language-server/out/__tests__/apiSearch.test.js language-server/out/__tests__/apiSearch.realSymbols.test.js language-server/out/__tests__/getTypeMembers.test.js language-server/out/__tests__/symbolResolve.test.js language-server/out/__tests__/workspaceLayout.test.js",
+        "test:fork-boundary": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/lmToolContractSync.test.js extension/out/__tests__/toolContractUtils.test.js extension/out/__tests__/toolResultTransport.test.js extension/out/__tests__/toolShared.findReferences.test.js extension/out/__tests__/toolTextFormatter.test.js language-server/out/__tests__/apiSearch.test.js language-server/out/__tests__/apiSearch.realSymbols.test.js language-server/out/__tests__/getTypeMembers.test.js language-server/out/__tests__/symbolResolve.test.js language-server/out/__tests__/workspaceLayout.test.js",
         "test": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/*.test.js language-server/out/__tests__/*.test.js",
         "upstream:divergence:log": "git log --oneline upstream/master..HEAD",
         "upstream:divergence:stat": "git diff --stat upstream/master..HEAD",

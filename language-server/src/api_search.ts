@@ -6,6 +6,8 @@ export type ApiSearchMatchSource = 'native' | 'script';
 export type ApiSearchKind = 'class' | 'struct' | 'enum' | 'method' | 'function' | 'property' | 'globalVariable';
 export type ApiSearchScopeKind = 'namespace' | 'class' | 'struct' | 'enum';
 export type ApiSearchScopeRelationship = 'declared' | 'inherited' | 'mixin';
+export type ApiSearchSymbolLevel = 'all' | 'type';
+export type ApiSearchMatchedBy = 'self' | 'member' | 'mixin';
 
 export type GetAPISearchParams = {
     query: string;
@@ -16,6 +18,7 @@ export type GetAPISearchParams = {
     scope?: string;
     includeInheritedFromScope?: boolean;
     includeDocs?: boolean;
+    symbolLevel?: ApiSearchSymbolLevel;
 };
 
 export type GetAPISearchNotice = {
@@ -55,6 +58,9 @@ export type GetAPISearchMatch = {
     isMixin?: boolean;
     scopeRelationship?: ApiSearchScopeRelationship;
     scopeDistance?: number;
+    matchedBy?: ApiSearchMatchedBy;
+    matchedByQualifiedName?: string;
+    matchedByKind?: ApiSearchKind;
     detailsData?: unknown;
 };
 
@@ -97,16 +103,19 @@ export type SearchMatchReason =
     | 'short-ordered';
 
 type ScopeInheritanceMode = 'auto' | 'on' | 'off';
+type ApiSearchTypeKind = Extract<ApiSearchKind, 'class' | 'struct' | 'enum'>;
 
 type NormalizedSearchParams = {
     query: string;
     mode: ApiSearchMode;
     limit: number;
-    kinds: Set<ApiSearchKind>;
+    searchKinds: Set<ApiSearchKind>;
     source: ApiSearchSource;
     scope?: string;
     includeInheritedFromScopeMode: ScopeInheritanceMode;
     includeDocs: boolean;
+    symbolLevel: ApiSearchSymbolLevel;
+    typeResultKinds?: Set<ApiSearchTypeKind>;
     smartQueries?: ParsedSmartQuery[];
 };
 
@@ -160,6 +169,7 @@ type SearchIndexEntry = {
 type SearchIndex = {
     entries: SearchIndexEntry[];
     scopeCandidates: ScopeCandidate[];
+    typeEntriesByQualifiedName: Map<string, SearchIndexEntry>;
 };
 
 type SearchCandidate = {
@@ -168,6 +178,10 @@ type SearchCandidate = {
     scopeDistance?: number;
     matchReason?: SearchMatchReason;
     matchSort?: SearchMatchSortKey;
+    matchedBy?: ApiSearchMatchedBy;
+    matchedByQualifiedName?: string;
+    matchedByKind?: ApiSearchKind;
+    projectedRank?: number;
 };
 
 type ResolvedScope = {
@@ -248,6 +262,11 @@ const allKinds = new Set<ApiSearchKind>([
     'function',
     'property',
     'globalVariable'
+]);
+const typeOnlyKinds = new Set<ApiSearchTypeKind>([
+    'class',
+    'struct',
+    'enum'
 ]);
 
 const kindOrder: Record<ApiSearchKind, number> = {
@@ -337,7 +356,7 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
             candidates = applyResolvedScope(candidates, resolvedScopes[0], notices);
 
         candidates = candidates.filter((candidate) => filterCandidate(candidate.entry, params));
-        let scoredMatches = rankCandidates(candidates, params);
+        let scoredMatches = rankAndProjectCandidates(candidates, params, index);
         let limitedMatches = scoredMatches.slice(0, params.limit).map((candidate) => buildMatch(candidate, params.includeDocs));
         return finalizeSearchResult(limitedMatches, notices, {
             scopeLookup,
@@ -346,7 +365,7 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
         });
     }
 
-    let rankedScopeGroups = buildRankedScopeGroups(baseCandidates, resolvedScopes, notices, params);
+    let rankedScopeGroups = buildRankedScopeGroups(baseCandidates, resolvedScopes, notices, params, index);
     let limitedScopeGroups = limitMergedScopeGroups(rankedScopeGroups, params.limit);
     scopeGroups = buildScopeGroupsFromLimitedGroups(limitedScopeGroups, resolvedScopes, params.includeDocs);
     let matches = scopeGroups.flatMap((group) => group.matches);
@@ -362,7 +381,7 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
 function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
 {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload))
-        throw new ApiSearchValidationError("Invalid params. Provide { query: string, mode?: 'smart' | 'regex', limit?: number, kinds?: ApiSearchKind[], source?: 'native' | 'script' | 'both', scope?: string, includeInheritedFromScope?: boolean, includeDocs?: boolean }.");
+        throw new ApiSearchValidationError("Invalid params. Provide { query: string, mode?: 'smart' | 'regex', limit?: number, kinds?: ApiSearchKind[], source?: 'native' | 'script' | 'both', scope?: string, includeInheritedFromScope?: boolean, includeDocs?: boolean, symbolLevel?: 'all' | 'type' }.");
 
     let record = payload as Record<string, unknown>;
     let query = typeof record.query === 'string' ? record.query.trim() : '';
@@ -371,7 +390,8 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
 
     let mode = normalizeSearchMode(record.mode);
     let limit = normalizeLimit(record.limit);
-    let kinds = normalizeKinds(record.kinds);
+    let symbolLevel = normalizeSymbolLevel(record.symbolLevel);
+    let kinds = normalizeKinds(record.kinds, symbolLevel);
     let source = normalizeSource(record.source);
     let scope = typeof record.scope === 'string' ? record.scope.trim() : '';
     let includeInheritedFromScopeMode = normalizeScopeInheritanceMode(record);
@@ -382,11 +402,13 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
         query,
         mode,
         limit,
-        kinds,
+        searchKinds: kinds.searchKinds,
         source,
         ...(scope.length > 0 ? { scope } : {}),
         includeInheritedFromScopeMode,
         includeDocs,
+        symbolLevel,
+        ...(kinds.typeResultKinds ? { typeResultKinds: kinds.typeResultKinds } : {}),
         ...(smartQueries ? { smartQueries } : {})
     };
 }
@@ -412,6 +434,20 @@ function normalizeSearchMode(value: unknown) : ApiSearchMode
     throw new ApiSearchValidationError("Invalid params. 'mode' must be 'smart' or 'regex'.");
 }
 
+function normalizeSymbolLevel(value: unknown) : ApiSearchSymbolLevel
+{
+    if (value === undefined)
+        return 'all';
+    if (typeof value !== 'string')
+        throw new ApiSearchValidationError("Invalid params. 'symbolLevel' must be 'all' or 'type'.");
+
+    let normalized = value.trim().toLowerCase();
+    if (normalized == 'all' || normalized == 'type')
+        return normalized as ApiSearchSymbolLevel;
+
+    throw new ApiSearchValidationError("Invalid params. 'symbolLevel' must be 'all' or 'type'.");
+}
+
 function normalizeLimit(value: unknown) : number
 {
     if (value === undefined)
@@ -423,10 +459,48 @@ function normalizeLimit(value: unknown) : number
     return value;
 }
 
-function normalizeKinds(value: unknown) : Set<ApiSearchKind>
+function normalizeKinds(
+    value: unknown,
+    symbolLevel: ApiSearchSymbolLevel
+) : { searchKinds: Set<ApiSearchKind>; typeResultKinds?: Set<ApiSearchTypeKind> }
 {
+    if (symbolLevel == 'type')
+    {
+        if (value === undefined)
+        {
+            return {
+                searchKinds: new Set(allKinds),
+                typeResultKinds: new Set(typeOnlyKinds)
+            };
+        }
+        if (!Array.isArray(value))
+            throw new ApiSearchValidationError("Invalid params. 'kinds' must be an array.");
+
+        let typeKinds = new Set<ApiSearchTypeKind>();
+        for (let item of value)
+        {
+            if (typeof item !== 'string')
+                throw new ApiSearchValidationError("Invalid params. 'kinds' entries must be strings.");
+
+            let normalized = item.trim().toLowerCase();
+            let kind = kindAliases[normalized];
+            if (!kind)
+                throw new ApiSearchValidationError(`Invalid params. Unsupported kind "${item}".`);
+            if (kind != 'class' && kind != 'struct' && kind != 'enum')
+                throw new ApiSearchValidationError(`Invalid params. 'kinds' only supports class, struct, or enum when 'symbolLevel' is 'type'. Unsupported kind "${item}".`);
+            typeKinds.add(kind as ApiSearchTypeKind);
+        }
+
+        return {
+            searchKinds: new Set(allKinds),
+            typeResultKinds: typeKinds.size == 0 ? new Set(typeOnlyKinds) : typeKinds
+        };
+    }
+
     if (value === undefined)
-        return new Set(allKinds);
+        return {
+            searchKinds: new Set(allKinds)
+        };
     if (!Array.isArray(value))
         throw new ApiSearchValidationError("Invalid params. 'kinds' must be an array.");
 
@@ -443,7 +517,9 @@ function normalizeKinds(value: unknown) : Set<ApiSearchKind>
         kinds.add(kind);
     }
 
-    return kinds.size == 0 ? new Set(allKinds) : kinds;
+    return {
+        searchKinds: kinds.size == 0 ? new Set(allKinds) : kinds
+    };
 }
 
 function normalizeSource(value: unknown) : ApiSearchSource
@@ -514,6 +590,7 @@ function buildSearchIndex() : SearchIndex
 {
     let entries: SearchIndexEntry[] = [];
     let scopeCandidates: ScopeCandidate[] = [];
+    let typeEntriesByQualifiedName = new Map<string, SearchIndexEntry>();
 
     let visitNamespace = function (namespace: typedb.DBNamespace)
     {
@@ -560,7 +637,7 @@ function buildSearchIndex() : SearchIndex
             let documentation = normalizeSearchDocumentation(dbType.documentation);
             let qualifiedTypeName = dbType.getQualifiedTypenameInNamespace(null);
             let kind = getTypeKind(dbType);
-            entries.push(createSearchEntry({
+            let typeEntry = createSearchEntry({
                 qualifiedName: qualifiedTypeName,
                 kind,
                 isCallable: false,
@@ -578,7 +655,9 @@ function buildSearchIndex() : SearchIndex
                 namespaceQualifiedName: dbType.namespace && !dbType.namespace.isRootNamespace()
                     ? dbType.namespace.getQualifiedNamespace()
                     : ''
-            }));
+            });
+            entries.push(typeEntry);
+            typeEntriesByQualifiedName.set(qualifiedTypeName, typeEntry);
             scopeCandidates.push({
                 kind,
                 qualifiedName: qualifiedTypeName,
@@ -606,7 +685,8 @@ function buildSearchIndex() : SearchIndex
     visitNamespace(typedb.GetRootNamespace());
     return {
         entries,
-        scopeCandidates
+        scopeCandidates,
+        typeEntriesByQualifiedName
     };
 }
 
@@ -1087,7 +1167,8 @@ function buildRankedScopeGroups(
     baseCandidates: SearchCandidate[],
     scopes: ResolvedScope[],
     notices: GetAPISearchNotice[],
-    params: NormalizedSearchParams
+    params: NormalizedSearchParams,
+    index: SearchIndex
 ) : RankedScopeGroup[]
 {
     let rankedGroups: RankedScopeGroup[] = [];
@@ -1097,7 +1178,7 @@ function buildRankedScopeGroups(
             .filter((candidate) => filterCandidate(candidate.entry, params));
         rankedGroups.push({
             scope,
-            candidates: rankCandidates(scopedCandidates, params)
+            candidates: rankAndProjectCandidates(scopedCandidates, params, index)
         });
     }
     return rankedGroups;
@@ -1263,7 +1344,7 @@ function resolveDirectSuperType(dbType: typedb.DBType) : typedb.DBType | null
 
 function filterCandidate(entry: SearchIndexEntry, params: NormalizedSearchParams) : boolean
 {
-    if (!params.kinds.has(entry.kind))
+    if (!params.searchKinds.has(entry.kind))
         return false;
     if (params.source != 'both' && entry.filterSource != 'both' && entry.filterSource != params.source)
         return false;
@@ -1314,6 +1395,165 @@ function rankCandidates(candidates: SearchCandidate[], params: NormalizedSearchP
 
     scored.sort(compareCandidates);
     return scored;
+}
+
+function rankAndProjectCandidates(
+    candidates: SearchCandidate[],
+    params: NormalizedSearchParams,
+    index: SearchIndex
+) : SearchCandidate[]
+{
+    let rankedCandidates = rankCandidates(candidates, params);
+    if (params.symbolLevel != 'type')
+        return rankedCandidates;
+    return projectToTypeLevelCandidates(rankedCandidates, params, index);
+}
+
+function projectToTypeLevelCandidates(
+    candidates: SearchCandidate[],
+    params: NormalizedSearchParams,
+    index: SearchIndex
+) : SearchCandidate[]
+{
+    let bestCandidateByType = new Map<string, SearchCandidate>();
+
+    for (let projectedRank = 0; projectedRank < candidates.length; projectedRank += 1)
+    {
+        let projectedCandidate = projectCandidateToTypeLevel(candidates[projectedRank], params, index, projectedRank);
+        if (!projectedCandidate)
+            continue;
+
+        let key = projectedCandidate.entry.qualifiedName;
+        let existing = bestCandidateByType.get(key);
+        if (!existing || shouldReplaceProjectedTypeCandidate(existing, projectedCandidate))
+            bestCandidateByType.set(key, projectedCandidate);
+    }
+
+    let projectedCandidates = Array.from(bestCandidateByType.values());
+    projectedCandidates.sort(compareProjectedTypeCandidates);
+    return projectedCandidates;
+}
+
+function projectCandidateToTypeLevel(
+    candidate: SearchCandidate,
+    params: NormalizedSearchParams,
+    index: SearchIndex,
+    projectedRank: number
+) : SearchCandidate | null
+{
+    let projection = resolveTypeLevelProjection(candidate.entry, params, index);
+    if (!projection)
+        return null;
+
+    return {
+        entry: projection.typeEntry,
+        scopeRelationship: candidate.scopeRelationship,
+        scopeDistance: candidate.scopeDistance,
+        matchReason: candidate.matchReason,
+        matchSort: candidate.matchSort,
+        matchedBy: projection.matchedBy,
+        matchedByQualifiedName: projection.matchedByQualifiedName,
+        matchedByKind: projection.matchedByKind,
+        projectedRank
+    };
+}
+
+function resolveTypeLevelProjection(
+    entry: SearchIndexEntry,
+    params: NormalizedSearchParams,
+    index: SearchIndex
+) : {
+    typeEntry: SearchIndexEntry;
+    matchedBy: ApiSearchMatchedBy;
+    matchedByQualifiedName: string;
+    matchedByKind: ApiSearchKind;
+} | null
+{
+    if (isTypeSearchKind(entry.kind))
+    {
+        if (!shouldIncludeProjectedTypeKind(entry.kind, params))
+            return null;
+
+        return {
+            typeEntry: entry,
+            matchedBy: 'self',
+            matchedByQualifiedName: entry.qualifiedName,
+            matchedByKind: entry.kind
+        };
+    }
+
+    if (entry.kind == 'method' || entry.kind == 'property')
+    {
+        if (!entry.declaringTypeQualifiedName)
+            return null;
+
+        let typeEntry = index.typeEntriesByQualifiedName.get(entry.declaringTypeQualifiedName);
+        if (!typeEntry || !shouldIncludeProjectedTypeKind(typeEntry.kind, params))
+            return null;
+
+        return {
+            typeEntry,
+            matchedBy: 'member',
+            matchedByQualifiedName: entry.qualifiedName,
+            matchedByKind: entry.kind
+        };
+    }
+
+    if (entry.isMixin && entry.mixinTargetQualifiedName)
+    {
+        let typeEntry = index.typeEntriesByQualifiedName.get(entry.mixinTargetQualifiedName);
+        if (!typeEntry || !shouldIncludeProjectedTypeKind(typeEntry.kind, params))
+            return null;
+
+        return {
+            typeEntry,
+            matchedBy: 'mixin',
+            matchedByQualifiedName: entry.qualifiedName,
+            matchedByKind: entry.kind
+        };
+    }
+
+    return null;
+}
+
+function shouldIncludeProjectedTypeKind(kind: ApiSearchKind, params: NormalizedSearchParams) : boolean
+{
+    if (!isTypeSearchKind(kind))
+        return false;
+    if (!params.typeResultKinds)
+        return true;
+    return params.typeResultKinds.has(kind);
+}
+
+function isTypeSearchKind(kind: ApiSearchKind) : kind is ApiSearchTypeKind
+{
+    return kind == 'class' || kind == 'struct' || kind == 'enum';
+}
+
+function shouldReplaceProjectedTypeCandidate(
+    existing: SearchCandidate,
+    incoming: SearchCandidate
+) : boolean
+{
+    let existingIsSelf = existing.matchedBy == 'self';
+    let incomingIsSelf = incoming.matchedBy == 'self';
+    if (existingIsSelf != incomingIsSelf)
+        return incomingIsSelf;
+    return compareProjectedTypeCandidates(incoming, existing) < 0;
+}
+
+function compareProjectedTypeCandidates(left: SearchCandidate, right: SearchCandidate) : number
+{
+    let compared = compareCandidates(left, right);
+    if (compared != 0)
+        return compared;
+
+    let leftProjectedRank = left.projectedRank ?? Number.MAX_SAFE_INTEGER;
+    let rightProjectedRank = right.projectedRank ?? Number.MAX_SAFE_INTEGER;
+    if (leftProjectedRank != rightProjectedRank)
+        return leftProjectedRank - rightProjectedRank;
+
+    return 0;
 }
 
 function compareCandidates(left: SearchCandidate, right: SearchCandidate) : number
@@ -1865,6 +2105,12 @@ function buildMatch(candidate: SearchCandidate, includeDocs: boolean) : GetAPISe
         match.scopeRelationship = candidate.scopeRelationship;
     if (typeof candidate.scopeDistance === 'number')
         match.scopeDistance = candidate.scopeDistance;
+    if (candidate.matchedBy)
+        match.matchedBy = candidate.matchedBy;
+    if (candidate.matchedByQualifiedName)
+        match.matchedByQualifiedName = candidate.matchedByQualifiedName;
+    if (candidate.matchedByKind)
+        match.matchedByKind = candidate.matchedByKind;
     if (candidate.entry.detailsData !== undefined)
         match.detailsData = candidate.entry.detailsData;
 

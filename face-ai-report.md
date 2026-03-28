@@ -31,7 +31,7 @@
 各工具公共契约摘要:
 | Tool | 选择边界 | 关键输入 |
 | --- | --- | --- |
-| `angelscript_searchApi` | 在不知道精确符号名时用于发现 API symbol. 不用于已有文件位置的 symbol resolve. | `query` 必填; `mode` 取 `smart|regex`; `scope` 预先收窄 namespace/type; `includeInheritedFromScope` 只影响 class scope; `includeDocs` 只补全文档. |
+| `angelscript_searchApi` | 在不知道精确符号名时用于发现 API symbol. 不用于已有文件位置的 symbol resolve. | `query` 必填; `mode` 取 `smart|regex`; `kinds` 是硬过滤; `symbolLevel=type` 允许成员命中但只返回 owner type; `scope` 预先收窄 namespace/type; `includeInheritedFromScope` 只影响 class scope; `includeDocs` 只补全文档. |
 | `angelscript_resolveSymbolAtPosition` | 在已有绝对路径和光标位置时用于识别当前位置 symbol, signature, doc 和 definition. 不用于项目级 references 搜索. | `filePath` 必须是绝对路径; `position.line` 和 `position.character` 都是 1-based; `includeDocumentation` 默认 `true`. |
 | `angelscript_getTypeMembers` | 在只需要单个 Angelscript type 的成员列表时使用. 不用于父子类层级遍历. | `name` 必填; `namespace` 只做消歧; `includeInherited` 默认 `false`; `includeDocs` 只控制成员文档; `kinds` 过滤 `both\|method\|property`. |
 | `angelscript_getClassHierarchy` | 在需要父链或子类扩展时使用. 不用于单个 type 的成员查询. | `name` 必填; `maxSuperDepth`, `maxSubDepth`, `maxSubBreadth` 都是非负整数限制, 默认 `3/2/10`. |

@@ -6,19 +6,23 @@ import {
     GetAPISearchToolScopeGroup,
     GetAPISearchToolData,
     GetAPISearchToolMatch,
+    SearchKind,
     SearchIncludeInheritedFromScopeMode,
     SearchMode,
-    SearchSource
+    SearchSource,
+    SearchSymbolLevel
 } from './apiRequests';
 
 export type AngelscriptSearchToolParams = {
     query: string;
     mode?: SearchMode;
     limit?: number;
+    kinds?: SearchKind[];
     source?: SearchSource;
     scope?: string;
     includeInheritedFromScope?: boolean;
     includeDocs?: boolean;
+    symbolLevel?: SearchSymbolLevel;
 };
 
 export class ApiSearchError extends Error
@@ -96,6 +100,20 @@ function normalizeMode(rawMode: unknown): SearchMode
     throw new ApiSearchError('INVALID_MODE', `Invalid mode "${rawMode}". Expected "smart" or "regex".`, { receivedMode: rawMode });
 }
 
+function normalizeSymbolLevel(rawSymbolLevel: unknown): SearchSymbolLevel
+{
+    if (rawSymbolLevel === undefined || rawSymbolLevel === null)
+        return 'all';
+    if (typeof rawSymbolLevel !== 'string')
+        throw new ApiSearchError('INVALID_SYMBOL_LEVEL', 'Invalid symbolLevel value. Expected "all" or "type".', { receivedSymbolLevel: rawSymbolLevel });
+
+    const value = rawSymbolLevel.trim().toLowerCase();
+    if (value === 'all' || value === 'type')
+        return value as SearchSymbolLevel;
+
+    throw new ApiSearchError('INVALID_SYMBOL_LEVEL', `Invalid symbolLevel "${rawSymbolLevel}". Expected "all" or "type".`, { receivedSymbolLevel: rawSymbolLevel });
+}
+
 function stripInternalSearchMatch(match: GetAPISearchLspResult['matches'][number]): GetAPISearchToolMatch
 {
     const { detailsData: _detailsData, ...publicMatch } = match;
@@ -137,18 +155,22 @@ export async function buildSearchPayload(
     const mode = normalizeMode(params?.mode);
     const limit = normalizeLimit(params?.limit);
     const source = normalizeSource(params?.source);
+    const kinds = Array.isArray(params?.kinds) ? params.kinds : undefined;
     const scope = typeof params?.scope === 'string' ? params.scope.trim() : '';
     const hasExplicitInheritanceMode = hasExplicitIncludeInheritedFromScope(params);
     const includeDocs = params?.includeDocs === true;
+    const symbolLevel = normalizeSymbolLevel(params?.symbolLevel);
     const includeInheritedFromScopeMode: SearchIncludeInheritedFromScopeMode = hasExplicitInheritanceMode ? 'explicit' : 'auto';
     const request: GetAPISearchParams = {
         query,
         mode,
         limit,
+        ...(kinds && kinds.length > 0 ? { kinds } : {}),
         source,
         ...(scope ? { scope } : {}),
         ...(hasExplicitInheritanceMode ? { includeInheritedFromScope: params.includeInheritedFromScope } : {}),
-        includeDocs
+        includeDocs,
+        symbolLevel
     };
     const result = await client.sendRequest(GetAPISearchRequest, request) as GetAPISearchLspResult;
 
@@ -171,10 +193,12 @@ export async function buildSearchPayload(
             mode,
             limit,
             source,
+            ...(kinds && kinds.length > 0 ? { kinds } : {}),
             ...(scope ? { scope } : {}),
             includeInheritedFromScopeMode,
             includeInheritedFromScope: resolvedIncludeInheritedFromScope,
-            includeDocs
+            includeDocs,
+            symbolLevel
         }
     };
 }

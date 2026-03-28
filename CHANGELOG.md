@@ -21,8 +21,10 @@ Maintenance rule:
 - `Angelscript API` views now use `when: unrealAngelscript.apiPanelEnabled`; the activity entry stays hidden until the extension is actually activated.
 - `angelscript_resolveSymbolAtPosition` and `angelscript_findReferences` now require absolute `filePath` input, and LM tool outputs now normalize `filePath` to absolute-path form only.
 - `angelscript_findReferences` now accepts optional `limit` (default `30`, max `200`) and returns `total`, `returned`, `limit`, and `truncated` in structured output while surfacing truncation notices in text output.
+- `angelscript_findReferences` now filters obvious `Super::` alias references before applying `limit`, so alias hits no longer consume result slots by default.
 - `angelscript_getClassHierarchy` now degrades unresolved script preview paths to `<source unavailable>` instead of failing the entire tool with `InvalidParams`.
 - `angelscript_searchApi` now splits its search contract by caller: the Angelscript API panel keeps smart search, while the LM tool uses `query` plus optional `mode`, `limit`, `source`, `scope`, `includeInheritedFromScope`, and `includeDocs`.
+- `angelscript_searchApi` now supports `symbolLevel='type'`, which still lets members and mixins contribute matches but projects results down to owner `class|struct|enum` symbols with additive `matchedBy*` metadata; `kinds` remains the hard filter.
 - `angelscript_searchApi` now returns `matches`, optional `notices`, optional `scopeLookup`, and tool-layer `request`.
 - Search execution moved into a dedicated language-server index with smart/regex matching, ordered token-gap search, namespace/type scoping, inherited member expansion, and nearest-override dedupe.
 - The API panel search path now consumes the new `angelscript/getAPISearch` result directly instead of applying client-side pagination, regex, and secondary sorting.
@@ -56,8 +58,10 @@ Maintenance rule:
 - `Angelscript API` 视图新增 `when: unrealAngelscript.apiPanelEnabled`, 扩展未激活时隐藏对应 activity 入口, 激活后再显示.
 - `angelscript_resolveSymbolAtPosition` 与 `angelscript_findReferences` 现在要求传入绝对路径 `filePath`,LM tool 输出中的 `filePath` 也统一规范为绝对路径格式.
 - `angelscript_findReferences` 现在支持可选 `limit` 参数(默认 `30`,最大 `200`),结构化输出新增 `total`、`returned`、`limit`、`truncated`,文本输出会明确提示结果是否被截断.
+- `angelscript_findReferences` 现在会在应用 `limit` 之前先过滤明显的 `Super::` 别名引用,默认不再让这类别名占用结果配额.
 - `angelscript_getClassHierarchy` 现在在脚本类预览路径无法解析时会降级为 `<source unavailable>`,而不是让整个工具以 `InvalidParams` 失败.
 - `angelscript_searchApi` 现在按调用方拆分搜索契约: Angelscript API 面板继续使用 smart search, LM tool 改为使用 `query` 和可选 `mode`、`limit`、`source`、`scope`、`includeInheritedFromScope`、`includeDocs`.
+- `angelscript_searchApi` 现在支持 `symbolLevel='type'`: 允许成员和 mixin 参与命中,但最终会把结果投影为 owner `class|struct|enum`,并附带 additive 的 `matchedBy*` 元信息; `kinds` 仍保持硬过滤语义.
 - `angelscript_searchApi` 现在返回 `matches`、可选 `notices`、可选 `scopeLookup`,并在 tool 层附加 `request`.
 - 搜索执行已下沉到独立的 language-server 索引,支持 smart/regex、ordered token gap 搜索、namespace/type scope、继承成员扩展与最近 override 去重.
 - API 面板搜索路径现在直接消费新的 `angelscript/getAPISearch` 结果,不再在 extension 侧做分页、正则和二次排序.

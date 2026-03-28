@@ -243,6 +243,42 @@ test('searchApi renders mixin metadata in text output', () =>
     ].join('\n'));
 });
 
+test('searchApi renders type-level projection metadata in text output', () =>
+{
+    const text = formatToolText('angelscript_searchApi', {
+        ok: true,
+        data: {
+            request: {
+                query: 'TickMovement',
+                mode: 'smart',
+                limit: 20,
+                source: 'both',
+                symbolLevel: 'type'
+            },
+            matches: [
+                {
+                    qualifiedName: 'Gameplay::Movement::UMovementBase',
+                    kind: 'class',
+                    matchReason: 'ordered-wildcard',
+                    source: 'script',
+                    signature: 'class Gameplay::Movement::UMovementBase',
+                    matchedBy: 'member',
+                    matchedByQualifiedName: 'Gameplay::Movement::UMovementBase.TickMovement',
+                    matchedByKind: 'method'
+                }
+            ]
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript API search',
+        '// namespace Gameplay::Movement',
+        '// match: ordered-wildcard',
+        '// matched by member: Gameplay::Movement::UMovementBase.TickMovement',
+        'class UMovementBase;'
+    ].join('\n'));
+});
+
 test('searchApi prefers full documentation over summary when includeDocs is enabled', () =>
 {
     const text = formatToolText('angelscript_searchApi', {
