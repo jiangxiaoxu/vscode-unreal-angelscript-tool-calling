@@ -413,6 +413,49 @@ test('smart and regex search modes follow the new name-view contract', () =>
     assert.equal(regexDoesNotMatchSignature.matches.length, 0);
 });
 
+test('regex queries stay equivalent to literal or qualified search for class, method, property, and function samples', () =>
+{
+    const classSmart = GetAPISearch({ query: 'UMovementDerived', mode: 'smart', kinds: ['class'], source: 'script', limit: 10 });
+    const classRegex = GetAPISearch({ query: '/UMovementDerived$/', mode: 'regex', kinds: ['class'], source: 'script', limit: 10 });
+    assert.deepEqual(classRegex.matches.map((match) => match.qualifiedName), classSmart.matches.map((match) => match.qualifiedName));
+
+    const methodSmart = GetAPISearch({
+        query: 'Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset(',
+        mode: 'smart',
+        kinds: ['method'],
+        source: 'script',
+        limit: 10
+    });
+    const methodRegex = GetAPISearch({
+        query: '/UCthuAICharacterExtension\\.OpenPawnDataAIAsset\\(/',
+        mode: 'regex',
+        kinds: ['method'],
+        source: 'script',
+        limit: 10
+    });
+    assert.deepEqual(methodRegex.matches.map((match) => match.qualifiedName), methodSmart.matches.map((match) => match.qualifiedName));
+
+    const propertySmart = GetAPISearch({ query: 'GlobalMovementSpeed', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
+    const propertyRegex = GetAPISearch({ query: '/GlobalMovementSpeed$/', mode: 'regex', kinds: ['globalVariable'], limit: 10 });
+    assert.deepEqual(propertyRegex.matches.map((match) => match.qualifiedName), propertySmart.matches.map((match) => match.qualifiedName));
+
+    const functionSmart = GetAPISearch({
+        query: 'Gameplay::Movement::BuildMovementPath(',
+        mode: 'smart',
+        kinds: ['function'],
+        source: 'script',
+        limit: 10
+    });
+    const functionRegex = GetAPISearch({
+        query: '/Gameplay::Movement::BuildMovementPath\\(/',
+        mode: 'regex',
+        kinds: ['function'],
+        source: 'script',
+        limit: 10
+    });
+    assert.deepEqual(functionRegex.matches.map((match) => match.qualifiedName), functionSmart.matches.map((match) => match.qualifiedName));
+});
+
 test('smart search supports code-like queries, ordered gaps, and callable-only suffixes', () =>
 {
     const codeLikeMember = GetAPISearch({ query: 'UCthuAICharacterExtension.OpenPawnDataAIAsset(', mode: 'smart', limit: 10 });
