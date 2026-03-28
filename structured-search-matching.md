@@ -56,13 +56,16 @@ Recommended match reasons:
 - `ordered-wildcard`
 - `short-ordered`
 
+For smart search, exact and fuzzy matches share one ranked pool. Exact short-name hits should not suppress other qualified-name matches from the same query branch.
+
 Recommended sort order inside one result set:
 
-1. Higher-priority match reason
-2. Earlier first match position
-3. Smaller total gap between matched fragments
-4. Smaller total span
-5. Preferred view priority
+1. Exact canonical qualified-name matches
+2. Earlier match position in the canonical qualified name
+3. Smaller total gap in the canonical qualified name
+4. Smaller canonical qualified-name span
+5. Higher-priority match reason as a secondary tie-break
+6. Preferred view priority
 
 ## Examples
 

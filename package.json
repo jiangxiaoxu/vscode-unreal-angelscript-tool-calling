@@ -992,7 +992,7 @@
         "watch": "npm-run-all -p watch:*",
         "watch:extension": "cd extension && node esbuild.js --watch",
         "watch:language-server": "cd language-server && node esbuild.js --watch",
-        "test:fork-boundary": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/toolContractUtils.test.js extension/out/__tests__/toolResultTransport.test.js extension/out/__tests__/toolTextFormatter.test.js language-server/out/__tests__/apiSearch.test.js language-server/out/__tests__/getTypeMembers.test.js language-server/out/__tests__/symbolResolve.test.js language-server/out/__tests__/workspaceLayout.test.js",
+        "test:fork-boundary": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/toolContractUtils.test.js extension/out/__tests__/toolResultTransport.test.js extension/out/__tests__/toolTextFormatter.test.js language-server/out/__tests__/apiSearch.test.js language-server/out/__tests__/apiSearch.realSymbols.test.js language-server/out/__tests__/getTypeMembers.test.js language-server/out/__tests__/symbolResolve.test.js language-server/out/__tests__/workspaceLayout.test.js",
         "test": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/*.test.js language-server/out/__tests__/*.test.js",
         "upstream:divergence:log": "git log --oneline upstream/master..HEAD",
         "upstream:divergence:stat": "git diff --stat upstream/master..HEAD",

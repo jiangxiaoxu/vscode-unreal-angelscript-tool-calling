@@ -347,7 +347,7 @@ export class DBMethod implements DBSymbol
         if ('isProperty' in input)
             this.isProperty = input['isProperty'];
         else
-            this.isProperty = true;
+            this.isProperty = false;
 
         if ('protected' in input)
             this.isProtected = input['protected'];

@@ -221,6 +221,11 @@ type ParsedSmartQuery = {
 
 type SearchMatchSortKey = {
     reasonRank: number;
+    qualifiedPriorityEnabled: number;
+    exactQualifiedPriority: number;
+    qualifiedStart: number;
+    qualifiedTotalGap: number;
+    qualifiedSpan: number;
     start: number;
     totalGap: number;
     span: number;
@@ -1318,17 +1323,11 @@ function rankCandidates(candidates: SearchCandidate[], params: NormalizedSearchP
     }
 
     let smartQueries = params.smartQueries?.filter((query) => !isTinySmartQuery(query)) ?? [];
-    let exactBranchMatches = smartQueries.map((query) =>
-        candidates.some((candidate) =>
-            (!query.requiresCallable || isEntryCallable(candidate.entry))
-            && scoreExactMatch(candidate.entry, query) != null
-        )
-    );
     let scored = new Array<SearchCandidate>();
 
     for (let candidate of candidates)
     {
-        let match = scoreSmartMatch(candidate.entry, smartQueries, exactBranchMatches);
+        let match = scoreSmartMatch(candidate.entry, smartQueries);
         if (!match)
             continue;
 
@@ -1345,6 +1344,37 @@ function rankCandidates(candidates: SearchCandidate[], params: NormalizedSearchP
 
 function compareCandidates(left: SearchCandidate, right: SearchCandidate) : number
 {
+    let leftExactQualifiedPriority = left.matchSort?.exactQualifiedPriority ?? 0;
+    let rightExactQualifiedPriority = right.matchSort?.exactQualifiedPriority ?? 0;
+    if (leftExactQualifiedPriority != rightExactQualifiedPriority)
+        return rightExactQualifiedPriority - leftExactQualifiedPriority;
+
+    let leftQualifiedPriorityEnabled = left.matchSort?.qualifiedPriorityEnabled ?? 0;
+    let rightQualifiedPriorityEnabled = right.matchSort?.qualifiedPriorityEnabled ?? 0;
+    if (leftQualifiedPriorityEnabled != rightQualifiedPriorityEnabled)
+        return rightQualifiedPriorityEnabled - leftQualifiedPriorityEnabled;
+
+    if (leftQualifiedPriorityEnabled != 0 && rightQualifiedPriorityEnabled != 0)
+    {
+        let leftQualifiedStart = left.matchSort?.qualifiedStart ?? Number.MAX_SAFE_INTEGER;
+        let rightQualifiedStart = right.matchSort?.qualifiedStart ?? Number.MAX_SAFE_INTEGER;
+        if (leftQualifiedStart != rightQualifiedStart)
+            return leftQualifiedStart - rightQualifiedStart;
+
+        let leftQualifiedGap = left.matchSort?.qualifiedTotalGap ?? Number.MAX_SAFE_INTEGER;
+        let rightQualifiedGap = right.matchSort?.qualifiedTotalGap ?? Number.MAX_SAFE_INTEGER;
+        if (leftQualifiedGap != rightQualifiedGap)
+            return leftQualifiedGap - rightQualifiedGap;
+
+        let leftQualifiedSpan = left.matchSort?.qualifiedSpan ?? Number.MAX_SAFE_INTEGER;
+        let rightQualifiedSpan = right.matchSort?.qualifiedSpan ?? Number.MAX_SAFE_INTEGER;
+        if (leftQualifiedSpan != rightQualifiedSpan)
+            return leftQualifiedSpan - rightQualifiedSpan;
+
+        if (left.entry.qualifiedName.length != right.entry.qualifiedName.length)
+            return left.entry.qualifiedName.length - right.entry.qualifiedName.length;
+    }
+
     let leftReasonRank = left.matchSort?.reasonRank ?? 0;
     let rightReasonRank = right.matchSort?.reasonRank ?? 0;
     if (leftReasonRank != rightReasonRank)
@@ -1420,30 +1450,27 @@ function scoreExactMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : Sea
 
 function scoreSmartMatch(
     entry: SearchIndexEntry,
-    queries: ParsedSmartQuery[],
-    exactBranchMatches: boolean[]
+    queries: ParsedSmartQuery[]
 ) : SearchMatchOutcome | null
 {
     let bestMatch : SearchMatchOutcome | null = null;
     for (let index = 0; index < queries.length; index += 1)
-        bestMatch = pickBetterMatch(bestMatch, scoreSmartBranch(entry, queries[index], exactBranchMatches[index] === true));
+        bestMatch = pickBetterMatch(bestMatch, scoreSmartBranch(entry, queries[index]));
     return bestMatch;
 }
 
-function scoreSmartBranch(entry: SearchIndexEntry, query: ParsedSmartQuery, exactBranchHasMatch: boolean) : SearchMatchOutcome | null
+function scoreSmartBranch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
 {
     if (query.searchableCharCount == 0 || query.segments.length == 0)
         return null;
     if (query.requiresCallable && !isEntryCallable(entry))
         return null;
 
-    let exactMatch = scoreExactMatch(entry, query);
+    let exactMatch = scoreSmartExactMatch(entry, query);
     if (exactMatch)
         return exactMatch;
-    if (exactBranchHasMatch)
-        return null;
 
-    return scoreOrderedViewsMatch(entry, query);
+    return scoreSmartOrderedViewsMatch(entry, query);
 }
 
 function scorePlainMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
@@ -1508,10 +1535,34 @@ function createSearchMatchOutcome(
         reason,
         sortKey: {
             reasonRank: getSearchMatchReasonRank(reason),
+            qualifiedPriorityEnabled: 0,
+            exactQualifiedPriority: 0,
+            qualifiedStart: Number.MAX_SAFE_INTEGER,
+            qualifiedTotalGap: Number.MAX_SAFE_INTEGER,
+            qualifiedSpan: Number.MAX_SAFE_INTEGER,
             start,
             totalGap,
             span,
             viewPriority
+        }
+    };
+}
+
+function applyQualifiedPriorityToOutcome(
+    outcome: SearchMatchOutcome,
+    qualifiedMatch: StructuredMatchState | null,
+    exactQualifiedPriority: boolean
+) : SearchMatchOutcome
+{
+    return {
+        reason: outcome.reason,
+        sortKey: {
+            ...outcome.sortKey,
+            qualifiedPriorityEnabled: 1,
+            exactQualifiedPriority: exactQualifiedPriority ? 1 : 0,
+            qualifiedStart: qualifiedMatch ? qualifiedMatch.start : Number.MAX_SAFE_INTEGER,
+            qualifiedTotalGap: qualifiedMatch ? qualifiedMatch.totalGap : Number.MAX_SAFE_INTEGER,
+            qualifiedSpan: qualifiedMatch ? qualifiedMatch.end - qualifiedMatch.start : Number.MAX_SAFE_INTEGER
         }
     };
 }
@@ -1758,6 +1809,59 @@ function parseSmartQuery(query: string) : ParsedSmartQuery
         searchableCharCount: segments.reduce((total, segment) => total + segment.length, 0),
         requiresCallable
     };
+}
+
+function scoreSmartExactMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
+{
+    let qualifiedStructuredMatch = findStructuredMatch(entry.qualifiedText, query);
+
+    if (entry.qualifiedName == query.raw || entry.qualifiedNameLower == query.rawLower)
+    {
+        return applyQualifiedPriorityToOutcome(
+            createSearchMatchOutcome('exact-qualified', 0, 0, entry.qualifiedName.length, 0),
+            qualifiedStructuredMatch,
+            true
+        );
+    }
+
+    if (entry.shortName == query.raw || entry.shortNameLower == query.rawLower)
+    {
+        return applyQualifiedPriorityToOutcome(
+            createSearchMatchOutcome('exact-short', 0, 0, entry.shortName.length, 2),
+            qualifiedStructuredMatch,
+            false
+        );
+    }
+
+    for (let alias of entry.qualifiedAliasTexts)
+    {
+        if (alias.text == query.raw || alias.textLower == query.rawLower)
+        {
+            return applyQualifiedPriorityToOutcome(
+                createSearchMatchOutcome('exact-qualified', 0, 0, alias.text.length, 1),
+                qualifiedStructuredMatch,
+                false
+            );
+        }
+    }
+
+    return null;
+}
+
+function scoreSmartOrderedViewsMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
+{
+    let qualifiedStructuredMatch = findStructuredMatch(entry.qualifiedText, query);
+    let bestMatch = pickBetterMatch(
+        buildStructuredVariantMatch(entry.qualifiedText, query, 0),
+        buildStructuredVariantMatch(entry.shortText, query, 2)
+    );
+    for (let alias of entry.qualifiedAliasTexts)
+        bestMatch = pickBetterMatch(bestMatch, buildStructuredVariantMatch(alias, query, 1));
+
+    if (!bestMatch)
+        return null;
+
+    return applyQualifiedPriorityToOutcome(bestMatch, qualifiedStructuredMatch, false);
 }
 
 type StructuredMatchState = {
@@ -2278,6 +2382,11 @@ function findRegexSortKey(entry: SearchIndexEntry, regex: RegExp) : SearchMatchS
 
         let sortKey: SearchMatchSortKey = {
             reasonRank: 0,
+            qualifiedPriorityEnabled: 0,
+            exactQualifiedPriority: 0,
+            qualifiedStart: Number.MAX_SAFE_INTEGER,
+            qualifiedTotalGap: Number.MAX_SAFE_INTEGER,
+            qualifiedSpan: Number.MAX_SAFE_INTEGER,
             start: match.index,
             totalGap: 0,
             span: match.length,

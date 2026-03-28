@@ -172,6 +172,12 @@ function setupSearchFixture(): void
         null,
         'Player gameplay tag.'
     ));
+    gameplayTags.addSymbol(createProperty(
+        'Gameplay',
+        'FGameplayTag',
+        null,
+        'Gameplay root tag.'
+    ));
 
     tools.addSymbol(createMethod(
         'MovementDebugger',
@@ -187,6 +193,20 @@ function setupSearchFixture(): void
         [],
         'Trace movement state.'
     ));
+
+    createType(GetRootNamespace(), 'EAILockSource', {
+        isEnum: true,
+        properties: [
+            createProperty('Gameplay', 'uint8', null, 'Gameplay lock source.')
+        ]
+    });
+
+    createType(GetRootNamespace(), 'EVoiceBlockReasons', {
+        isEnum: true,
+        properties: [
+            createProperty('Gameplay', 'uint8', null, 'Gameplay voice block reason.')
+        ]
+    });
 
     createType(movement, 'UCameraMovementComponent', {
         documentation: 'Camera movement component.',
@@ -325,7 +345,7 @@ test('plain, smart, and regex search modes follow the new name-view contract', (
     const smart = GetAPISearch({ query: 'Camera Movement', mode: 'smart', limit: 10 });
     assert.ok(smart.matches.some((match) => match.qualifiedName === 'Gameplay::Movement::UCameraMovementComponent'));
     const smartExactQualified = GetAPISearch({ query: 'Gameplay::Movement::UCameraMovementComponent', mode: 'smart', limit: 10 });
-    assert.deepEqual(smartExactQualified.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::UCameraMovementComponent']);
+    assert.equal(smartExactQualified.matches[0]?.qualifiedName, 'Gameplay::Movement::UCameraMovementComponent');
     assert.equal(smartExactQualified.matches[0]?.matchReason, 'exact-qualified');
 
     const regex = GetAPISearch({ query: '/StartMovement$/', mode: 'regex', kinds: ['method'], limit: 10 });
@@ -414,6 +434,7 @@ test('smart search uses ordered wildcard matching with strict separators', () =>
 
     const qualifiedPrefix = GetAPISearch({ query: 'gameplayt', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
     assert.deepEqual(qualifiedPrefix.matches.map((match) => match.qualifiedName), [
+        'GameplayTags::Gameplay',
         'GameplayTags::Status_AI',
         'GameplayTags::Status_Player'
     ]);
@@ -421,10 +442,25 @@ test('smart search uses ordered wildcard matching with strict separators', () =>
 
     const qualifiedLongerPrefix = GetAPISearch({ query: 'gameplayta', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
     assert.deepEqual(qualifiedLongerPrefix.matches.map((match) => match.qualifiedName), [
+        'GameplayTags::Gameplay',
         'GameplayTags::Status_AI',
         'GameplayTags::Status_Player'
     ]);
     assert.equal(qualifiedLongerPrefix.matches[0]?.matchReason, 'ordered-wildcard');
+
+    const qualifiedNameFirst = GetAPISearch({ query: 'gameplay', mode: 'smart', limit: 10 });
+    assert.deepEqual(qualifiedNameFirst.matches.slice(0, 3).map((match) => match.qualifiedName), [
+        'GameplayTags::Gameplay',
+        'GameplayTags::Status_AI',
+        'GameplayTags::Status_Player'
+    ]);
+
+    const qualifiedNameFirstSubstring = GetAPISearch({ query: 'ameplay', mode: 'smart', limit: 10 });
+    assert.deepEqual(qualifiedNameFirstSubstring.matches.slice(0, 3).map((match) => match.qualifiedName), [
+        'GameplayTags::Gameplay',
+        'GameplayTags::Status_AI',
+        'GameplayTags::Status_Player'
+    ]);
 
     const mixinAlias = GetAPISearch({ query: 'UMovementDerived ApplyDerivedMovement', mode: 'smart', kinds: ['function'], limit: 10 });
     assert.deepEqual(mixinAlias.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::ApplyDerivedMovement']);

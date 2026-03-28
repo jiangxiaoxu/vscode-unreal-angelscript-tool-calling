@@ -1,0 +1,2473 @@
+{
+  "version": 1,
+  "sourceCachePathMasked": "G:/UE_Folder/<project>/<game>/Script/.vscode/angelscript/unreal-cache.json",
+  "sourceCacheVersion": 1,
+  "sourceCacheCreatedAt": "2026-03-24T11:53:11.071Z",
+  "selectionVersion": 1,
+  "metadata": {
+    "bucketEntries": {
+      "gameplay": [
+        "__AbilitySystem",
+        "__GameplayTags",
+        "FGameplayTag",
+        "FGameplayTagContainer",
+        "UAbilitySystemComponent",
+        "UGameplayAbility",
+        "UGameplayEffect",
+        "UGameplayTask",
+        "UGameplayTask_WaitDelay"
+      ],
+      "ai": [
+        "__AIHelper",
+        "__EAILockSource",
+        "AAIController"
+      ],
+      "camera": [
+        "__CameraPose",
+        "__CameraVariableTable",
+        "ACameraRig_Rail",
+        "UCameraComponent"
+      ],
+      "movement": [
+        "UCharacterMovementComponent",
+        "UMovementComponent",
+        "UNavMovementComponent"
+      ],
+      "control": [
+        "AActor",
+        "FInputDebugKeyBinding",
+        "UWidget"
+      ]
+    },
+    "selectedEntries": [
+      "__GameplayTags",
+      "__AbilitySystem",
+      "__AIHelper",
+      "__CameraPose",
+      "__CameraVariableTable",
+      "__EAILockSource",
+      "UAbilitySystemComponent",
+      "UGameplayAbility",
+      "UGameplayEffect",
+      "UGameplayTask",
+      "UGameplayTask_WaitDelay",
+      "AAIController",
+      "UMovementComponent",
+      "UCharacterMovementComponent",
+      "UNavMovementComponent",
+      "ACameraRig_Rail",
+      "UCameraComponent",
+      "FGameplayTag",
+      "FGameplayTagContainer",
+      "UWidget",
+      "AActor",
+      "FInputDebugKeyBinding"
+    ],
+    "caseCount": 168
+  },
+  "debugDatabaseChunks": [
+    {
+      "__GameplayTags": {
+        "properties": {
+          "GameplayCue": [
+            "const FGameplayTag",
+            "GameplayCue Test Tag used for Unit Tests"
+          ],
+          "GameplayCue_Test": [
+            "const FGameplayTag",
+            "GameplayCue Test Tag used for Unit Tests"
+          ],
+          "Settings_Movement": [
+            "const FGameplayTag",
+            "启用飞行模式"
+          ],
+          "FeatureName_AIPawnData": [
+            "const FGameplayTag",
+            "AI 系统初始化完毕"
+          ],
+          "Status": [
+            "const FGameplayTag",
+            "推迟单位的死亡销毁逻辑(可以死亡但是要推迟销毁流程),直至tag移除."
+          ],
+          "Status_StunGauge": [
+            "const FGameplayTag",
+            "设置例外HeavyAttack"
+          ]
+        }
+      }
+    },
+    {
+      "__AbilitySystem": {
+        "methods": [
+          {
+            "name": "AddGameplayTags",
+            "return": "bool",
+            "doc": "Manually adds a set of tags to a given actor",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "Actor",
+                "type": "AActor"
+              },
+              {
+                "name": "GameplayTags",
+                "type": "FGameplayTagContainer"
+              },
+              {
+                "name": "ReplicationRule",
+                "default": "EGameplayTagReplicationState :: None",
+                "type": "EGameplayTagReplicationState"
+              }
+            ]
+          },
+          {
+            "name": "BindEventWrapperToGameplayTagChanged",
+            "return": "FGameplayTagChangedEventWrapperSpecHandle",
+            "doc": "Binds to changes in the given Tag on the given ASC's owned tags.\nCache off the returned handle and call one of the 'Unbind'...'EventWrapper' fns and pass in the handle when you are finished with the binding.\n@param Tag                               FGameplayTag to listen for changes on\n@param BindingObject                     UObject owning the Event (usually self)\n@param GameplayTagChangedEventWrapperDelegate Tag Changed Event to trigger\n@param bExecuteImmediatelyIfTagApplied   If true, the bound event will immediately execute if we already have the tag.\n@param TagListeningPolicy                Whether we are listening for any tag change or just applied/removed.\n@return                                  FGameplayTagChangedEventWrapperSpecHandle Handle by which this binding request can be unbound.",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "AbilitySystemComponent",
+                "type": "UAbilitySystemComponent"
+              },
+              {
+                "name": "Tag",
+                "type": "FGameplayTag"
+              },
+              {
+                "name": "GameplayTagChangedEventWrapperDelegate",
+                "default": "FOnGameplayTagChangedEventWrapperSignature ( )",
+                "type": "FOnGameplayTagChangedEventWrapperSignature"
+              },
+              {
+                "name": "bExecuteImmediatelyIfTagApplied",
+                "default": "true",
+                "type": "bool"
+              },
+              {
+                "name": "TagListeningPolicy",
+                "default": "EGameplayTagEventType :: NewOrRemoved",
+                "type": "EGameplayTagEventType"
+              }
+            ]
+          },
+          {
+            "name": "DoesGameplayCueMeetTagRequirements",
+            "return": "bool",
+            "doc": "Returns true if the aggregated source and target tags from the effect spec meets the tag requirements",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "Parameters",
+                "type": "FGameplayCueParameters"
+              },
+              {
+                "name": "SourceTagReqs",
+                "type": "FGameplayTagRequirements"
+              },
+              {
+                "name": "TargetTagReqs",
+                "type": "FGameplayTagRequirements"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "__AIHelper": {
+        "methods": [
+          {
+            "name": "GetAIController",
+            "return": "AAIController",
+            "doc": "The way it works exactly is if the actor passed in is a pawn, then the function retrieves\n    pawn's controller cast to AIController. Otherwise the function returns actor cast to AIController.",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "ControlledActor",
+                "type": "AActor"
+              }
+            ]
+          },
+          {
+            "name": "IsValidAILocation",
+            "return": "bool",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "Location",
+                "type": "FVector"
+              }
+            ]
+          },
+          {
+            "name": "SpawnAIFromClass",
+            "return": "APawn",
+            "doc": "Spawns AI agent of a given class. The PawnClass needs to have AIController\nset for the function to spawn a controller as well.\n@param BehaviorTree if set, and the function has successfully spawned\n     and AI controller, this BehaviorTree asset will be assigned to the AI\n     controller, and run.\n@param Owner lets you spawn the AI in a sublevel rather than in the\n     persistent level (which is the default behavior).",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "PawnClass",
+                "type": "TSubclassOf<APawn>"
+              },
+              {
+                "name": "BehaviorTree",
+                "type": "UBehaviorTree"
+              },
+              {
+                "name": "Location",
+                "type": "FVector"
+              },
+              {
+                "name": "Rotation",
+                "default": "FRotator ( )",
+                "type": "FRotator"
+              },
+              {
+                "name": "bNoCollisionFail",
+                "default": "false",
+                "type": "bool"
+              },
+              {
+                "name": "Owner",
+                "default": "nullptr",
+                "type": "AActor"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "__CameraPose": {
+        "methods": [
+          {
+            "name": "GetAimDir",
+            "return": "FVector",
+            "doc": "Gets the facing direction of the camera pose.",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "CameraPose",
+                "type": "FBlueprintCameraPose"
+              }
+            ]
+          },
+          {
+            "name": "GetTransform",
+            "return": "FTransform",
+            "doc": "Gets the transform matrix of the camera pose.",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "CameraPose",
+                "type": "FBlueprintCameraPose"
+              }
+            ]
+          },
+          {
+            "name": "MakeCameraPoseFromCameraComponent",
+            "return": "FBlueprintCameraPose",
+            "doc": "Creates a new camera pose given a camera component.",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "CameraComponent",
+                "type": "const UCameraComponent"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "__CameraVariableTable": {
+        "methods": [
+          {
+            "name": "GetFloatCameraVariable",
+            "return": "float32",
+            "doc": "Gets a camera variable's value from the given table.",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "CameraData",
+                "type": "FBlueprintCameraEvaluationDataRef"
+              },
+              {
+                "name": "Variable",
+                "type": "UFloatCameraVariable"
+              }
+            ]
+          },
+          {
+            "name": "SetVector3CameraVariable",
+            "return": "void",
+            "doc": "Sets a camera variable's value in the given table.",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "CameraData",
+                "type": "FBlueprintCameraEvaluationDataRef"
+              },
+              {
+                "name": "Variable",
+                "type": "UVector3dCameraVariable"
+              },
+              {
+                "name": "Value",
+                "type": "FVector"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "__EAILockSource": {
+        "isEnum": true,
+        "properties": {
+          "Animation": [
+            "EAILockSource"
+          ],
+          "Gameplay": [
+            "EAILockSource"
+          ],
+          "Logic": [
+            "EAILockSource"
+          ]
+        }
+      }
+    },
+    {
+      "UAbilitySystemComponent": {
+        "inherits": "UGameplayTasksComponent",
+        "doc": "The core ActorComponent for interfacing with the GameplayAbilities System",
+        "properties": {
+          "AffectedAnimInstanceTag": [
+            "FName",
+            "The linked Anim Instance that this component will play montages in. Use NAME_None for the main anim instance."
+          ]
+        },
+        "methods": [
+          {
+            "name": "GetOwnedGameplayTags",
+            "return": "void",
+            "const": true,
+            "args": [
+              {
+                "name": "TagContainer",
+                "type": "FGameplayTagContainer&"
+              }
+            ]
+          },
+          {
+            "name": "TryActivateAbilitiesByTag",
+            "return": "bool",
+            "doc": "Attempts to activate every gameplay ability that matches the given tag and DoesAbilitySatisfyTagRequirements().\nReturns true if anything attempts to activate. Can activate more than one ability and the ability may fail later.\nIf bAllowRemoteActivation is true, it will remotely activate local/server abilities, if false it will only try to locally activate abilities.",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "GameplayTagContainer",
+                "type": "FGameplayTagContainer"
+              },
+              {
+                "name": "bAllowRemoteActivation",
+                "default": "true",
+                "type": "bool"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "UGameplayAbility": {
+        "inherits": "UObject",
+        "doc": "Abilities define custom gameplay logic that can be activated by players or external game logic",
+        "properties": {
+          "AbilityTags": [
+            "FGameplayTagContainer",
+            2,
+            ""
+          ]
+        },
+        "methods": [
+          {
+            "name": "ApplyGameplayEffectToOwner",
+            "return": "FActiveGameplayEffectHandle",
+            "doc": "Apply a gameplay effect to the owner of this ability",
+            "ufunction": true,
+            "unrealname": "BP_ApplyGameplayEffectToOwner",
+            "meta": null,
+            "args": [
+              {
+                "name": "GameplayEffectClass",
+                "type": "TSubclassOf<UGameplayEffect>"
+              },
+              {
+                "name": "GameplayEffectLevel",
+                "default": "1",
+                "type": "int"
+              },
+              {
+                "name": "Stacks",
+                "default": "1",
+                "type": "int"
+              }
+            ]
+          },
+          {
+            "name": "GetAbilitySystemComponentFromActorInfo",
+            "return": "UAbilitySystemComponent",
+            "const": true,
+            "doc": "Returns the AbilitySystemComponent that is activating this ability",
+            "ufunction": true,
+            "meta": null,
+            "args": []
+          }
+        ]
+      }
+    },
+    {
+      "UGameplayEffect": {
+        "inherits": "UObject",
+        "doc": "UGameplayEffect\n    The GameplayEffect definition. This is the data asset defined in the editor that drives everything.\n This is only blueprintable to allow for templating gameplay effects. Gameplay effects should NOT contain blueprint graphs.",
+        "properties": {
+          "GameplayCues": [
+            "TArray<FGameplayEffectCue>",
+            "Cues to trigger non-simulated reactions in response to this GameplayEffect such as sounds, particle effects, etc"
+          ]
+        },
+        "methods": [
+          {
+            "name": "GetGrantedTags",
+            "return": "FGameplayTagContainer",
+            "const": true,
+            "doc": "Returns all tags granted to the Target Actor of this gameplay effect. That is to say: If this GE is applied to an Actor, they get these tags.",
+            "meta": null,
+            "args": []
+          },
+          {
+            "name": "GetOwnedGameplayTags",
+            "return": "void",
+            "const": true,
+            "args": [
+              {
+                "name": "TagContainer",
+                "type": "FGameplayTagContainer&"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "UGameplayTask": {
+        "inherits": "UObject",
+        "methods": [
+          {
+            "name": "EndTask",
+            "return": "void",
+            "doc": "Called explicitly to end the task (usually by the task itself). Calls OnDestroy.\n    @NOTE: you need to call EndTask before sending out any \"on completed\" delegates.\n    If you don't the task will still be in an \"active\" state while the event receivers may\n    assume it's already \"finished\"",
+            "ufunction": true,
+            "meta": null,
+            "args": []
+          },
+          {
+            "name": "ReadyForActivation",
+            "return": "void",
+            "meta": null,
+            "args": []
+          }
+        ]
+      }
+    },
+    {
+      "UGameplayTask_WaitDelay": {
+        "inherits": "UGameplayTask",
+        "properties": {
+          "OnFinish": [
+            "FTaskDelayDelegate__GameplayTask_WaitDelay"
+          ]
+        }
+      }
+    },
+    {
+      "AAIController": {
+        "inherits": "AController",
+        "doc": "AIController is the base class of controllers for AI-controlled Pawns.\n\nControllers are non-physical actors that can be attached to a pawn to control its actions.\nAIControllers manage the artificial intelligence for the pawns they control.\nIn networked games, they only exist on the server.\n\n@see https://docs.unrealengine.com/latest/INT/Gameplay/Framework/Controller/",
+        "properties": {
+          "BrainComponent": [
+            "UBrainComponent",
+            1,
+            "Component responsible for behaviors."
+          ]
+        },
+        "methods": [
+          {
+            "name": "GetAIPerceptionComponent",
+            "return": "UAIPerceptionComponent",
+            "ufunction": true,
+            "meta": null,
+            "args": []
+          },
+          {
+            "name": "MoveToActor",
+            "return": "EPathFollowingRequestResult",
+            "doc": "Makes AI go toward specified Goal actor (destination will be continuously updated), aborts any active path following\n@param AcceptanceRadius - finish move if pawn gets close enough\n@param bStopOnOverlap - add pawn's radius to AcceptanceRadius\n@param bUsePathfinding - use navigation data to calculate path (otherwise it will go in straight line)\n@param bCanStrafe - set focus related flag: bAllowStrafe\n@param FilterClass - navigation filter for pathfinding adjustments. If none specified DefaultNavigationFilterClass will be used\n@param bAllowPartialPath - use incomplete path when goal can't be reached\n    @note AcceptanceRadius has default value or -1 due to Header Parser not being able to recognize UPathFollowingComponent::DefaultAcceptanceRadius",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "Goal",
+                "type": "AActor"
+              },
+              {
+                "name": "AcceptanceRadius",
+                "default": "- 1.000000",
+                "type": "float32"
+              },
+              {
+                "name": "bStopOnOverlap",
+                "default": "true",
+                "type": "bool"
+              },
+              {
+                "name": "bUsePathfinding",
+                "default": "true",
+                "type": "bool"
+              },
+              {
+                "name": "bCanStrafe",
+                "default": "true",
+                "type": "bool"
+              },
+              {
+                "name": "FilterClass",
+                "default": "nullptr",
+                "type": "TSubclassOf<UNavigationQueryFilter>"
+              },
+              {
+                "name": "bAllowPartialPath",
+                "default": "true",
+                "type": "bool"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "UMovementComponent": {
+        "inherits": "UActorComponent",
+        "doc": "MovementComponent is an abstract component class that defines functionality for moving a PrimitiveComponent (our UpdatedComponent) each tick.\nBase functionality includes:\n   - Restricting movement to a plane or axis.\n   - Utility functions for special handling of collision results (SlideAlongSurface(), ComputeSlideVector(), TwoWallAdjust()).\n   - Utility functions for moving when there may be initial penetration (SafeMoveUpdatedComponent(), ResolvePenetration()).\n   - Automatically registering the component tick and finding a component to move on the owning Actor.\nNormally the root component of the owning actor is moved, however another component may be selected (see SetUpdatedComponent()).\nDuring swept (non-teleporting) movement only collision of UpdatedComponent is considered, attached components will teleport to the end location ignoring collision.",
+        "properties": {
+          "bConstrainToPlane": [
+            "bool",
+            "If true, movement will be constrained to a plane.\n@see PlaneConstraintNormal, PlaneConstraintOrigin, PlaneConstraintAxisSetting"
+          ]
+        },
+        "methods": [
+          {
+            "name": "SetPlaneConstraintEnabled",
+            "return": "void",
+            "doc": "Sets whether or not the plane constraint is enabled.",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "bEnabled",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "StopMovementImmediately",
+            "return": "void",
+            "doc": "Stops movement immediately (zeroes velocity, usually zeros acceleration for components with acceleration).",
+            "ufunction": true,
+            "meta": null,
+            "args": []
+          }
+        ]
+      }
+    },
+    {
+      "UCharacterMovementComponent": {
+        "inherits": "UPawnMovementComponent",
+        "doc": "CharacterMovementComponent handles movement logic for the associated Character owner.\nIt supports various movement modes including: walking, falling, swimming, flying, custom.\n\nMovement is affected primarily by current Velocity and Acceleration. Acceleration is updated each frame\nbased on the input vector accumulated thus far (see UPawnMovementComponent::GetPendingInputVector()).\n\nNetworking is fully implemented, with server-client correction and prediction included.\n\n@see ACharacter, UPawnMovementComponent\n@see https://docs.unrealengine.com/latest/INT/Gameplay/Framework/Pawn/Character/",
+        "properties": {
+          "MovementMode": [
+            "EMovementMode",
+            "Actor's current movement mode (walking, falling, etc).\n   - walking:  Walking on a surface, under the effects of friction, and able to \"step up\" barriers. Vertical velocity is zero.\n   - falling:  Falling under the effects of gravity, after jumping or walking off the edge of a surface.\n   - flying:   Flying, ignoring the effects of gravity.\n   - swimming: Swimming through a fluid volume, under the effects of gravity and buoyancy.\n   - custom:   User-defined custom movement mode, including many possible sub-modes.\nThis is automatically replicated through the Character owner and for client-server movement functions.\n@see SetMovementMode(), CustomMovementMode"
+          ]
+        },
+        "methods": [
+          {
+            "name": "DisableMovement",
+            "return": "void",
+            "doc": "Make movement impossible (sets movement mode to MOVE_None).",
+            "ufunction": true,
+            "meta": null,
+            "args": []
+          },
+          {
+            "name": "SetMovementMode",
+            "return": "void",
+            "doc": "Change movement mode.\n\n@param NewMovementMode       The new movement mode\n@param NewCustomMode         The new custom sub-mode, only applicable if NewMovementMode is Custom.",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "NewMovementMode",
+                "type": "EMovementMode"
+              },
+              {
+                "name": "NewCustomMode",
+                "default": "0",
+                "type": "uint8"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "UNavMovementComponent": {
+        "inherits": "UMovementComponent",
+        "doc": "NavMovementComponent defines base functionality for MovementComponents that move any 'agent' that may be involved in AI pathfinding.",
+        "properties": {
+          "NavAgentProps": [
+            "FNavAgentProperties",
+            "Properties that define how the component can move."
+          ]
+        },
+        "methods": [
+          {
+            "name": "GetVelocityForNavMovement",
+            "return": "FVector",
+            "const": true,
+            "doc": "Get the current velocity of the movement component",
+            "ufunction": true,
+            "meta": null,
+            "args": []
+          },
+          {
+            "name": "IsMovingOnGround",
+            "return": "bool",
+            "const": true,
+            "doc": "Returns true if currently moving on the ground (e.g. walking or driving)",
+            "ufunction": true,
+            "meta": null,
+            "args": []
+          }
+        ]
+      }
+    },
+    {
+      "ACameraRig_Rail": {
+        "inherits": "AActor",
+        "properties": {
+          "CurrentPositionOnRail": [
+            "float32",
+            "Defines current position of the mount point along the rail, in terms of normalized distance from the beginning of the rail."
+          ],
+          "RailSplineComponent": [
+            "USplineComponent",
+            "Spline component to define the rail path."
+          ]
+        },
+        "methods": [
+          {
+            "name": "GetRailSplineComponent",
+            "return": "USplineComponent",
+            "doc": "Returns the spline component that defines the rail path",
+            "ufunction": true,
+            "meta": null,
+            "args": []
+          }
+        ]
+      }
+    },
+    {
+      "UCameraComponent": {
+        "inherits": "USceneComponent",
+        "doc": "Represents a camera viewpoint and settings, such as projection type, field of view, and post-process overrides.\nThe default behavior for an actor used as the camera view target is to look for an attached camera component and use its location, rotation, and settings.",
+        "properties": {
+          "FieldOfView": [
+            "float32",
+            "The horizontal field of view (in degrees) in perspective mode (ignored in Orthographic mode)\n\nIf the aspect ratio axis constraint (from ULocalPlayer, ALevelSequenceActor, etc.) is set to maintain vertical FOV, the AspectRatio\nproperty will be used to convert this property's value to a vertical FOV."
+          ]
+        },
+        "methods": [
+          {
+            "name": "GetCameraView",
+            "return": "void",
+            "doc": "Returns camera's Point of View.\nCalled by Camera class. Subclass and postprocess to add any effects.",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "DeltaTime",
+                "type": "float32"
+              },
+              {
+                "name": "DesiredView",
+                "type": "FMinimalViewInfo&"
+              }
+            ]
+          },
+          {
+            "name": "SetAspectRatio",
+            "return": "void",
+            "ufunction": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "InAspectRatio",
+                "type": "float32"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "FGameplayTag": {
+        "isStruct": true,
+        "doc": "A single gameplay tag, which represents a hierarchical name of the form x.y that is registered in the GameplayTagsManager\nYou can filter the gameplay tags displayed in the editor using, meta = (Categories = \"Tag1.Tag2.Tag3\"))",
+        "methods": [
+          {
+            "name": "GetGameplayTagParents",
+            "return": "FGameplayTagContainer",
+            "const": true,
+            "doc": "Returns a new tag container that includes this tag and all parent tags as explicitly added tags.\nFor example, calling this on x.y.z would return a tag container with x.y.z, x.y, and x",
+            "meta": null,
+            "args": []
+          },
+          {
+            "name": "MatchesTagExact",
+            "return": "bool",
+            "const": true,
+            "doc": "Determine if TagToCheck is valid and exactly matches this tag\n\"A.1\".MatchesTagExact(\"A\") will return False\nIf TagToCheck is not Valid it will always return False\n\n@return True if TagToCheck is Valid and is exactly this tag",
+            "meta": null,
+            "args": [
+              {
+                "name": "TagToCheck",
+                "type": "FGameplayTag"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "FGameplayTagContainer": {
+        "isStruct": true,
+        "doc": "A Tag Container holds a collection of FGameplayTags, tags are included explicitly by adding them, and implicitly from adding child tags",
+        "properties": {
+          "GameplayTags": [
+            "TArray<FGameplayTag>",
+            1,
+            "Array of gameplay tags"
+          ]
+        },
+        "methods": [
+          {
+            "name": "GetMatchedTags",
+            "return": "FGameplayTagContainer",
+            "const": true,
+            "meta": null,
+            "args": [
+              {
+                "name": "TagToMatch",
+                "type": "FGameplayTag"
+              }
+            ]
+          },
+          {
+            "name": "HasAll",
+            "return": "bool",
+            "const": true,
+            "doc": "Checks if this container contains ALL of the tags in the specified container, also checks against parent tags\n{\"A.1\",\"B.1\"}.HasAll({\"A\",\"B\"}) will return True, {\"A\",\"B\"}.HasAll({\"A.1\",\"B.1\"}) will return False\nIf ContainerToCheck is empty/invalid it will always return True, because there were no failed checks\n\n@return True if this container has ALL of the tags of in ContainerToCheck, including if ContainerToCheck is empty",
+            "meta": null,
+            "args": [
+              {
+                "name": "ContainerToCheck",
+                "type": "FGameplayTagContainer"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "UWidget": {
+        "inherits": "UVisual",
+        "doc": "This is the base class for all wrapped Slate controls that are exposed to UObjects.",
+        "properties": {
+          "ToolTipWidget": [
+            "UWidget",
+            "Tooltip widget to show when the user hovers over the widget with the mouse"
+          ]
+        },
+        "methods": [
+          {
+            "name": "GetAccessibleText",
+            "return": "FText",
+            "const": true,
+            "doc": "Gets the accessible text from the underlying Slate accessible widget\n@return The accessible text of the underlying Slate accessible widget. Returns an empty text if\naccessibility is dsabled or the underlying accessible widget is invalid.",
+            "ufunction": true,
+            "meta": null,
+            "args": []
+          }
+        ]
+      }
+    },
+    {
+      "AActor": {
+        "inherits": "UObject",
+        "doc": "Actor is the base class for an Object that can be placed or spawned in a level.\nActors may contain a collection of ActorComponents, which can be used to control how actors move, how they are rendered, etc.\nThe other main function of an Actor is the replication of properties and function calls across the network during play.\n\n\nActor initialization has multiple steps, here's the order of important virtual functions that get called:\n- UObject::PostLoad: For actors statically placed in a level, the normal UObject PostLoad gets called both in the editor and during gameplay.\n                     This is not called for newly spawned actors.\n- UActorComponent::OnComponentCreated: When an actor is spawned in the editor or during gameplay, this gets called for any native components.\n                                       For blueprint-created components, this gets called during construction for that component.\n                                       This is not called for components loaded from a level.\n- AActor::PreRegisterAllComponents: For statically placed actors and spawned actors that have native root components, this gets called now.\n                                    For blueprint actors without a native root component, these registration functions get called later during construction.\n- UActorComponent::RegisterComponent: All components are registered in editor and at runtime, this creates their physical/visual representation.\n                                      These calls may be distributed over multiple frames, but are always after PreRegisterAllComponents.\n                                      This may also get called later on after an UnregisterComponent call removes it from the world.\n- AActor::PostRegisterAllComponents: Called for all actors both in the editor and in gameplay, this is the last function that is called in all cases.\n- AActor::PostActorCreated: When an actor is created in the editor or during gameplay, this gets called right before construction.\n                            This is not called for components loaded from a level.\n- AActor::UserConstructionScript: Called for blueprints that implement a construction script.\n- AActor::OnConstruction: Called at the end of ExecuteConstruction, which calls the blueprint construction script.\n                          This is called after all blueprint-created components are fully created and registered.\n                          This is only called during gameplay for spawned actors, and may get rerun in the editor when changing blueprints.\n- AActor::PreInitializeComponents: Called before InitializeComponent is called on the actor's components.\n                                   This is only called during gameplay and in certain editor preview windows.\n- UActorComponent::Activate: This will be called only if the component has bAutoActivate set.\n                             It will also got called later on if a component is manually activated.\n- UActorComponent::InitializeComponent: This will be called only if the component has bWantsInitializeComponentSet.\n                                        This only happens once per gameplay session.\n- AActor::PostInitializeComponents: Called after the actor's components have been initialized, only during gameplay and some editor previews.\n- AActor::BeginPlay: Called when the level starts ticking, only during actual gameplay.\n                     This normally happens right after PostInitializeComponents but can be delayed for networked or child actors.\n\n@see https://docs.unrealengine.com/Programming/UnrealArchitecture/Actors\n@see https://docs.unrealengine.com/Programming/UnrealArchitecture/Actors/ActorLifecycle\n@see UActorComponent",
+        "properties": {
+          "ActorGuid": [
+            "FGuid",
+            1,
+            "The GUID for this actor; this guid will be the same for actors from instanced streaming levels.\n@see         ActorInstanceGuid, FActorInstanceGuidMapper\n@note        Don't use VisibleAnywhere here to avoid getting the CPF_Edit flag and get this property reset when resetting to defaults.\n                     See FActorDetails::AddActorCategory and EditorUtilities::CopySingleProperty for details."
+          ]
+        },
+        "methods": [
+          {
+            "name": "GetActorNameOrLabel",
+            "return": "FString",
+            "const": true,
+            "args": []
+          }
+        ]
+      }
+    },
+    {
+      "FInputDebugKeyBinding": {
+        "isStruct": true,
+        "methods": [
+          {
+            "name": "Execute",
+            "return": "void",
+            "const": true,
+            "args": [
+              {
+                "name": "ActionValue",
+                "type": "FInputActionValue"
+              }
+            ]
+          },
+          {
+            "name": "GetHandle",
+            "return": "uint",
+            "const": true,
+            "args": []
+          }
+        ]
+      }
+    }
+  ],
+  "cases": [
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AbilitySystem::AddGameplayTags"
+      ],
+      "id": "plain-callable-ability-system",
+      "mode": "plain",
+      "query": "ability system add gameplay tags("
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "CameraPose::MakeCameraPoseFromCameraComponent"
+      ],
+      "id": "plain-callable-camera-pose",
+      "mode": "plain",
+      "query": "camera pose make camera pose("
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "AActor"
+      ],
+      "id": "plain-entry-aactor",
+      "mode": "plain",
+      "query": "Actor"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "AAIController"
+      ],
+      "id": "plain-entry-aaicontroller",
+      "mode": "plain",
+      "query": "AI Controller"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "ACameraRig_Rail"
+      ],
+      "id": "plain-entry-acamerarig-rail",
+      "mode": "plain",
+      "query": "Camera Rig Rail"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "EAILockSource"
+      ],
+      "id": "plain-entry-eailocksource",
+      "mode": "plain",
+      "query": "AI Lock Source"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "FGameplayTag"
+      ],
+      "id": "plain-entry-fgameplaytag",
+      "mode": "plain",
+      "query": "Gameplay Tag"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "FGameplayTagContainer"
+      ],
+      "id": "plain-entry-fgameplaytagcontainer",
+      "mode": "plain",
+      "query": "Gameplay Tag Container"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "FInputDebugKeyBinding"
+      ],
+      "id": "plain-entry-finputdebugkeybinding",
+      "mode": "plain",
+      "query": "Input Debug Key Binding"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UAbilitySystemComponent"
+      ],
+      "id": "plain-entry-uabilitysystemcomponent",
+      "mode": "plain",
+      "query": "Ability System Component"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UCameraComponent"
+      ],
+      "id": "plain-entry-ucameracomponent",
+      "mode": "plain",
+      "query": "Camera Component"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UCharacterMovementComponent"
+      ],
+      "id": "plain-entry-ucharactermovementcomponent",
+      "mode": "plain",
+      "query": "Character Movement Component"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UGameplayAbility"
+      ],
+      "id": "plain-entry-ugameplayability",
+      "mode": "plain",
+      "query": "Gameplay Ability"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UGameplayEffect"
+      ],
+      "id": "plain-entry-ugameplayeffect",
+      "mode": "plain",
+      "query": "Gameplay Effect"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UGameplayTask"
+      ],
+      "id": "plain-entry-ugameplaytask",
+      "mode": "plain",
+      "query": "Gameplay Task"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UGameplayTask_WaitDelay"
+      ],
+      "id": "plain-entry-ugameplaytask-waitdelay",
+      "mode": "plain",
+      "query": "Gameplay Task Wait Delay"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UMovementComponent"
+      ],
+      "id": "plain-entry-umovementcomponent",
+      "mode": "plain",
+      "query": "Movement Component"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UNavMovementComponent"
+      ],
+      "id": "plain-entry-unavmovementcomponent",
+      "mode": "plain",
+      "query": "Nav Movement Component"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UWidget"
+      ],
+      "id": "plain-entry-uwidget",
+      "mode": "plain",
+      "query": "Widget"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AActor.GetActorNameOrLabel"
+      ],
+      "id": "plain-exact-method-aactor-getactornameorlabel",
+      "mode": "plain",
+      "query": "AActor.GetActorNameOrLabel(",
+      "expectFirst": "AActor.GetActorNameOrLabel"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AAIController.GetAIPerceptionComponent"
+      ],
+      "id": "plain-exact-method-aaicontroller-getaiperceptioncomponent",
+      "mode": "plain",
+      "query": "AAIController.GetAIPerceptionComponent(",
+      "expectFirst": "AAIController.GetAIPerceptionComponent"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AAIController.MoveToActor"
+      ],
+      "id": "plain-exact-method-aaicontroller-movetoactor",
+      "mode": "plain",
+      "query": "AAIController.MoveToActor(",
+      "expectFirst": "AAIController.MoveToActor"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AbilitySystem::AddGameplayTags"
+      ],
+      "id": "plain-exact-method-abilitysystem-addgameplaytags",
+      "mode": "plain",
+      "query": "AbilitySystem::AddGameplayTags(",
+      "expectFirst": "AbilitySystem::AddGameplayTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AbilitySystem::BindEventWrapperToGameplayTagChanged"
+      ],
+      "id": "plain-exact-method-abilitysystem-bindeventwrappertogameplaytagchanged",
+      "mode": "plain",
+      "query": "AbilitySystem::BindEventWrapperToGameplayTagChanged(",
+      "expectFirst": "AbilitySystem::BindEventWrapperToGameplayTagChanged"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AbilitySystem::DoesGameplayCueMeetTagRequirements"
+      ],
+      "id": "plain-exact-method-abilitysystem-doesgameplaycuemeettagrequirements",
+      "mode": "plain",
+      "query": "AbilitySystem::DoesGameplayCueMeetTagRequirements(",
+      "expectFirst": "AbilitySystem::DoesGameplayCueMeetTagRequirements"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "ACameraRig_Rail.GetRailSplineComponent"
+      ],
+      "id": "plain-exact-method-acamerarig-rail-getrailsplinecomponent",
+      "mode": "plain",
+      "query": "ACameraRig_Rail.GetRailSplineComponent(",
+      "expectFirst": "ACameraRig_Rail.GetRailSplineComponent"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AIHelper::GetAIController"
+      ],
+      "id": "plain-exact-method-aihelper-getaicontroller",
+      "mode": "plain",
+      "query": "AIHelper::GetAIController(",
+      "expectFirst": "AIHelper::GetAIController"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AIHelper::IsValidAILocation"
+      ],
+      "id": "plain-exact-method-aihelper-isvalidailocation",
+      "mode": "plain",
+      "query": "AIHelper::IsValidAILocation(",
+      "expectFirst": "AIHelper::IsValidAILocation"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AIHelper::SpawnAIFromClass"
+      ],
+      "id": "plain-exact-method-aihelper-spawnaifromclass",
+      "mode": "plain",
+      "query": "AIHelper::SpawnAIFromClass(",
+      "expectFirst": "AIHelper::SpawnAIFromClass"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "CameraPose::GetAimDir"
+      ],
+      "id": "plain-exact-method-camerapose-getaimdir",
+      "mode": "plain",
+      "query": "CameraPose::GetAimDir(",
+      "expectFirst": "CameraPose::GetAimDir"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "CameraPose::GetTransform"
+      ],
+      "id": "plain-exact-method-camerapose-gettransform",
+      "mode": "plain",
+      "query": "CameraPose::GetTransform(",
+      "expectFirst": "CameraPose::GetTransform"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "CameraPose::MakeCameraPoseFromCameraComponent"
+      ],
+      "id": "plain-exact-method-camerapose-makecameraposefromcameracomponent",
+      "mode": "plain",
+      "query": "CameraPose::MakeCameraPoseFromCameraComponent(",
+      "expectFirst": "CameraPose::MakeCameraPoseFromCameraComponent"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "CameraVariableTable::GetFloatCameraVariable"
+      ],
+      "id": "plain-exact-method-cameravariabletable-getfloatcameravariable",
+      "mode": "plain",
+      "query": "CameraVariableTable::GetFloatCameraVariable(",
+      "expectFirst": "CameraVariableTable::GetFloatCameraVariable"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "CameraVariableTable::SetVector3CameraVariable"
+      ],
+      "id": "plain-exact-method-cameravariabletable-setvector3cameravariable",
+      "mode": "plain",
+      "query": "CameraVariableTable::SetVector3CameraVariable(",
+      "expectFirst": "CameraVariableTable::SetVector3CameraVariable"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FGameplayTag.GetGameplayTagParents"
+      ],
+      "id": "plain-exact-method-fgameplaytag-getgameplaytagparents",
+      "mode": "plain",
+      "query": "FGameplayTag.GetGameplayTagParents(",
+      "expectFirst": "FGameplayTag.GetGameplayTagParents"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FGameplayTag.MatchesTagExact"
+      ],
+      "id": "plain-exact-method-fgameplaytag-matchestagexact",
+      "mode": "plain",
+      "query": "FGameplayTag.MatchesTagExact(",
+      "expectFirst": "FGameplayTag.MatchesTagExact"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FGameplayTagContainer.GetMatchedTags"
+      ],
+      "id": "plain-exact-method-fgameplaytagcontainer-getmatchedtags",
+      "mode": "plain",
+      "query": "FGameplayTagContainer.GetMatchedTags(",
+      "expectFirst": "FGameplayTagContainer.GetMatchedTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FGameplayTagContainer.HasAll"
+      ],
+      "id": "plain-exact-method-fgameplaytagcontainer-hasall",
+      "mode": "plain",
+      "query": "FGameplayTagContainer.HasAll(",
+      "expectFirst": "FGameplayTagContainer.HasAll"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FInputDebugKeyBinding.Execute"
+      ],
+      "id": "plain-exact-method-finputdebugkeybinding-execute",
+      "mode": "plain",
+      "query": "FInputDebugKeyBinding.Execute(",
+      "expectFirst": "FInputDebugKeyBinding.Execute"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FInputDebugKeyBinding.GetHandle"
+      ],
+      "id": "plain-exact-method-finputdebugkeybinding-gethandle",
+      "mode": "plain",
+      "query": "FInputDebugKeyBinding.GetHandle(",
+      "expectFirst": "FInputDebugKeyBinding.GetHandle"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UAbilitySystemComponent.GetOwnedGameplayTags"
+      ],
+      "id": "plain-exact-method-uabilitysystemcomponent-getownedgameplaytags",
+      "mode": "plain",
+      "query": "UAbilitySystemComponent.GetOwnedGameplayTags(",
+      "expectFirst": "UAbilitySystemComponent.GetOwnedGameplayTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UAbilitySystemComponent.TryActivateAbilitiesByTag"
+      ],
+      "id": "plain-exact-method-uabilitysystemcomponent-tryactivateabilitiesbytag",
+      "mode": "plain",
+      "query": "UAbilitySystemComponent.TryActivateAbilitiesByTag(",
+      "expectFirst": "UAbilitySystemComponent.TryActivateAbilitiesByTag"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCameraComponent.GetCameraView"
+      ],
+      "id": "plain-exact-method-ucameracomponent-getcameraview",
+      "mode": "plain",
+      "query": "UCameraComponent.GetCameraView(",
+      "expectFirst": "UCameraComponent.GetCameraView"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCameraComponent.SetAspectRatio"
+      ],
+      "id": "plain-exact-method-ucameracomponent-setaspectratio",
+      "mode": "plain",
+      "query": "UCameraComponent.SetAspectRatio(",
+      "expectFirst": "UCameraComponent.SetAspectRatio"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCharacterMovementComponent.DisableMovement"
+      ],
+      "id": "plain-exact-method-ucharactermovementcomponent-disablemovement",
+      "mode": "plain",
+      "query": "UCharacterMovementComponent.DisableMovement(",
+      "expectFirst": "UCharacterMovementComponent.DisableMovement"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCharacterMovementComponent.SetMovementMode"
+      ],
+      "id": "plain-exact-method-ucharactermovementcomponent-setmovementmode",
+      "mode": "plain",
+      "query": "UCharacterMovementComponent.SetMovementMode(",
+      "expectFirst": "UCharacterMovementComponent.SetMovementMode"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayAbility.ApplyGameplayEffectToOwner"
+      ],
+      "id": "plain-exact-method-ugameplayability-applygameplayeffecttoowner",
+      "mode": "plain",
+      "query": "UGameplayAbility.ApplyGameplayEffectToOwner(",
+      "expectFirst": "UGameplayAbility.ApplyGameplayEffectToOwner"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayAbility.GetAbilitySystemComponentFromActorInfo"
+      ],
+      "id": "plain-exact-method-ugameplayability-getabilitysystemcomponentfromactorinfo",
+      "mode": "plain",
+      "query": "UGameplayAbility.GetAbilitySystemComponentFromActorInfo(",
+      "expectFirst": "UGameplayAbility.GetAbilitySystemComponentFromActorInfo"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayEffect.GetGrantedTags"
+      ],
+      "id": "plain-exact-method-ugameplayeffect-getgrantedtags",
+      "mode": "plain",
+      "query": "UGameplayEffect.GetGrantedTags(",
+      "expectFirst": "UGameplayEffect.GetGrantedTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayEffect.GetOwnedGameplayTags"
+      ],
+      "id": "plain-exact-method-ugameplayeffect-getownedgameplaytags",
+      "mode": "plain",
+      "query": "UGameplayEffect.GetOwnedGameplayTags(",
+      "expectFirst": "UGameplayEffect.GetOwnedGameplayTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayTask.EndTask"
+      ],
+      "id": "plain-exact-method-ugameplaytask-endtask",
+      "mode": "plain",
+      "query": "UGameplayTask.EndTask(",
+      "expectFirst": "UGameplayTask.EndTask"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayTask.ReadyForActivation"
+      ],
+      "id": "plain-exact-method-ugameplaytask-readyforactivation",
+      "mode": "plain",
+      "query": "UGameplayTask.ReadyForActivation(",
+      "expectFirst": "UGameplayTask.ReadyForActivation"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UMovementComponent.SetPlaneConstraintEnabled"
+      ],
+      "id": "plain-exact-method-umovementcomponent-setplaneconstraintenabled",
+      "mode": "plain",
+      "query": "UMovementComponent.SetPlaneConstraintEnabled(",
+      "expectFirst": "UMovementComponent.SetPlaneConstraintEnabled"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UMovementComponent.StopMovementImmediately"
+      ],
+      "id": "plain-exact-method-umovementcomponent-stopmovementimmediately",
+      "mode": "plain",
+      "query": "UMovementComponent.StopMovementImmediately(",
+      "expectFirst": "UMovementComponent.StopMovementImmediately"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UNavMovementComponent.GetVelocityForNavMovement"
+      ],
+      "id": "plain-exact-method-unavmovementcomponent-getvelocityfornavmovement",
+      "mode": "plain",
+      "query": "UNavMovementComponent.GetVelocityForNavMovement(",
+      "expectFirst": "UNavMovementComponent.GetVelocityForNavMovement"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UNavMovementComponent.IsMovingOnGround"
+      ],
+      "id": "plain-exact-method-unavmovementcomponent-ismovingonground",
+      "mode": "plain",
+      "query": "UNavMovementComponent.IsMovingOnGround(",
+      "expectFirst": "UNavMovementComponent.IsMovingOnGround"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UWidget.GetAccessibleText"
+      ],
+      "id": "plain-exact-method-uwidget-getaccessibletext",
+      "mode": "plain",
+      "query": "UWidget.GetAccessibleText(",
+      "expectFirst": "UWidget.GetAccessibleText"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AActor.ActorGuid"
+      ],
+      "id": "plain-exact-property-aactor-actorguid",
+      "mode": "plain",
+      "query": "AActor.ActorGuid",
+      "expectFirst": "AActor.ActorGuid"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AAIController.BrainComponent"
+      ],
+      "id": "plain-exact-property-aaicontroller-braincomponent",
+      "mode": "plain",
+      "query": "AAIController.BrainComponent",
+      "expectFirst": "AAIController.BrainComponent"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "ACameraRig_Rail.CurrentPositionOnRail"
+      ],
+      "id": "plain-exact-property-acamerarig-rail-currentpositiononrail",
+      "mode": "plain",
+      "query": "ACameraRig_Rail.CurrentPositionOnRail",
+      "expectFirst": "ACameraRig_Rail.CurrentPositionOnRail"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "ACameraRig_Rail.RailSplineComponent"
+      ],
+      "id": "plain-exact-property-acamerarig-rail-railsplinecomponent",
+      "mode": "plain",
+      "query": "ACameraRig_Rail.RailSplineComponent",
+      "expectFirst": "ACameraRig_Rail.RailSplineComponent"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "EAILockSource.Animation"
+      ],
+      "id": "plain-exact-property-eailocksource-animation",
+      "mode": "plain",
+      "query": "EAILockSource.Animation",
+      "expectFirst": "EAILockSource.Animation"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "EAILockSource.Gameplay"
+      ],
+      "id": "plain-exact-property-eailocksource-gameplay",
+      "mode": "plain",
+      "query": "EAILockSource.Gameplay",
+      "expectFirst": "EAILockSource.Gameplay"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "EAILockSource.Logic"
+      ],
+      "id": "plain-exact-property-eailocksource-logic",
+      "mode": "plain",
+      "query": "EAILockSource.Logic",
+      "expectFirst": "EAILockSource.Logic"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FGameplayTagContainer.GameplayTags"
+      ],
+      "id": "plain-exact-property-fgameplaytagcontainer-gameplaytags",
+      "mode": "plain",
+      "query": "FGameplayTagContainer.GameplayTags",
+      "expectFirst": "FGameplayTagContainer.GameplayTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::FeatureName_AIPawnData"
+      ],
+      "id": "plain-exact-property-gameplaytags-featurename-aipawndata",
+      "mode": "plain",
+      "query": "GameplayTags::FeatureName_AIPawnData",
+      "expectFirst": "GameplayTags::FeatureName_AIPawnData"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::GameplayCue"
+      ],
+      "id": "plain-exact-property-gameplaytags-gameplaycue",
+      "mode": "plain",
+      "query": "GameplayTags::GameplayCue",
+      "expectFirst": "GameplayTags::GameplayCue"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::GameplayCue_Test"
+      ],
+      "id": "plain-exact-property-gameplaytags-gameplaycue-test",
+      "mode": "plain",
+      "query": "GameplayTags::GameplayCue_Test",
+      "expectFirst": "GameplayTags::GameplayCue_Test"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::Settings_Movement"
+      ],
+      "id": "plain-exact-property-gameplaytags-settings-movement",
+      "mode": "plain",
+      "query": "GameplayTags::Settings_Movement",
+      "expectFirst": "GameplayTags::Settings_Movement"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::Status"
+      ],
+      "id": "plain-exact-property-gameplaytags-status",
+      "mode": "plain",
+      "query": "GameplayTags::Status",
+      "expectFirst": "GameplayTags::Status"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::Status_StunGauge"
+      ],
+      "id": "plain-exact-property-gameplaytags-status-stungauge",
+      "mode": "plain",
+      "query": "GameplayTags::Status_StunGauge",
+      "expectFirst": "GameplayTags::Status_StunGauge"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UAbilitySystemComponent.AffectedAnimInstanceTag"
+      ],
+      "id": "plain-exact-property-uabilitysystemcomponent-affectedaniminstancetag",
+      "mode": "plain",
+      "query": "UAbilitySystemComponent.AffectedAnimInstanceTag",
+      "expectFirst": "UAbilitySystemComponent.AffectedAnimInstanceTag"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCameraComponent.FieldOfView"
+      ],
+      "id": "plain-exact-property-ucameracomponent-fieldofview",
+      "mode": "plain",
+      "query": "UCameraComponent.FieldOfView",
+      "expectFirst": "UCameraComponent.FieldOfView"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCharacterMovementComponent.MovementMode"
+      ],
+      "id": "plain-exact-property-ucharactermovementcomponent-movementmode",
+      "mode": "plain",
+      "query": "UCharacterMovementComponent.MovementMode",
+      "expectFirst": "UCharacterMovementComponent.MovementMode"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayAbility.AbilityTags"
+      ],
+      "id": "plain-exact-property-ugameplayability-abilitytags",
+      "mode": "plain",
+      "query": "UGameplayAbility.AbilityTags",
+      "expectFirst": "UGameplayAbility.AbilityTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayEffect.GameplayCues"
+      ],
+      "id": "plain-exact-property-ugameplayeffect-gameplaycues",
+      "mode": "plain",
+      "query": "UGameplayEffect.GameplayCues",
+      "expectFirst": "UGameplayEffect.GameplayCues"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayTask_WaitDelay.OnFinish"
+      ],
+      "id": "plain-exact-property-ugameplaytask-waitdelay-onfinish",
+      "mode": "plain",
+      "query": "UGameplayTask_WaitDelay.OnFinish",
+      "expectFirst": "UGameplayTask_WaitDelay.OnFinish"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UMovementComponent.bConstrainToPlane"
+      ],
+      "id": "plain-exact-property-umovementcomponent-bconstraintoplane",
+      "mode": "plain",
+      "query": "UMovementComponent.bConstrainToPlane",
+      "expectFirst": "UMovementComponent.bConstrainToPlane"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UNavMovementComponent.NavAgentProps"
+      ],
+      "id": "plain-exact-property-unavmovementcomponent-navagentprops",
+      "mode": "plain",
+      "query": "UNavMovementComponent.NavAgentProps",
+      "expectFirst": "UNavMovementComponent.NavAgentProps"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UWidget.ToolTipWidget"
+      ],
+      "id": "plain-exact-property-uwidget-tooltipwidget",
+      "mode": "plain",
+      "query": "UWidget.ToolTipWidget",
+      "expectFirst": "UWidget.ToolTipWidget"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "GameplayTags::GameplayCue"
+      ],
+      "id": "plain-gameplay-cue",
+      "mode": "plain",
+      "query": "gameplay cue"
+    },
+    {
+      "topWindow": 12,
+      "expectWithinTop": [
+        "AIHelper::GetAIController",
+        "AAIController",
+        "EAILockSource.Gameplay"
+      ],
+      "id": "smart-bucket-ai",
+      "mode": "smart",
+      "query": "ai"
+    },
+    {
+      "topWindow": 12,
+      "expectWithinTop": [
+        "GameplayTags::GameplayCue",
+        "UGameplayAbility",
+        "FGameplayTag"
+      ],
+      "id": "smart-bucket-ameplay",
+      "mode": "smart",
+      "query": "ameplay"
+    },
+    {
+      "topWindow": 12,
+      "expectWithinTop": [
+        "CameraPose::GetAimDir",
+        "CameraVariableTable::GetFloatCameraVariable",
+        "ACameraRig_Rail"
+      ],
+      "id": "smart-bucket-camera",
+      "mode": "smart",
+      "query": "camera"
+    },
+    {
+      "topWindow": 12,
+      "expectWithinTop": [
+        "GameplayTags::GameplayCue",
+        "UGameplayAbility",
+        "FGameplayTag"
+      ],
+      "id": "smart-bucket-gameplay",
+      "mode": "smart",
+      "query": "gameplay"
+    },
+    {
+      "topWindow": 16,
+      "expectWithinTop": [
+        "UMovementComponent",
+        "UCharacterMovementComponent",
+        "GameplayTags::Settings_Movement"
+      ],
+      "id": "smart-bucket-movement",
+      "mode": "smart",
+      "query": "movement"
+    },
+    {
+      "topWindow": 12,
+      "expectWithinTop": [
+        "GameplayTags::Status",
+        "GameplayTags::Status_StunGauge"
+      ],
+      "id": "smart-bucket-status",
+      "mode": "smart",
+      "query": "status"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "AActor"
+      ],
+      "id": "smart-entry-aactor",
+      "mode": "smart",
+      "query": "Actor"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "AAIController"
+      ],
+      "id": "smart-entry-aaicontroller",
+      "mode": "smart",
+      "query": "AI Controller"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "ACameraRig_Rail"
+      ],
+      "id": "smart-entry-acamerarig-rail",
+      "mode": "smart",
+      "query": "Camera Rig Rail"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "EAILockSource"
+      ],
+      "id": "smart-entry-eailocksource",
+      "mode": "smart",
+      "query": "AI Lock Source"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "FGameplayTag"
+      ],
+      "id": "smart-entry-fgameplaytag",
+      "mode": "smart",
+      "query": "Gameplay Tag"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "FGameplayTagContainer"
+      ],
+      "id": "smart-entry-fgameplaytagcontainer",
+      "mode": "smart",
+      "query": "Gameplay Tag Container"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "FInputDebugKeyBinding"
+      ],
+      "id": "smart-entry-finputdebugkeybinding",
+      "mode": "smart",
+      "query": "Input Debug Key Binding"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UAbilitySystemComponent"
+      ],
+      "id": "smart-entry-uabilitysystemcomponent",
+      "mode": "smart",
+      "query": "Ability System Component"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UCameraComponent"
+      ],
+      "id": "smart-entry-ucameracomponent",
+      "mode": "smart",
+      "query": "Camera Component"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UCharacterMovementComponent"
+      ],
+      "id": "smart-entry-ucharactermovementcomponent",
+      "mode": "smart",
+      "query": "Character Movement Component"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UGameplayAbility"
+      ],
+      "id": "smart-entry-ugameplayability",
+      "mode": "smart",
+      "query": "Gameplay Ability"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UGameplayEffect"
+      ],
+      "id": "smart-entry-ugameplayeffect",
+      "mode": "smart",
+      "query": "Gameplay Effect"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UGameplayTask"
+      ],
+      "id": "smart-entry-ugameplaytask",
+      "mode": "smart",
+      "query": "Gameplay Task"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UGameplayTask_WaitDelay"
+      ],
+      "id": "smart-entry-ugameplaytask-waitdelay",
+      "mode": "smart",
+      "query": "Gameplay Task Wait Delay"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UMovementComponent"
+      ],
+      "id": "smart-entry-umovementcomponent",
+      "mode": "smart",
+      "query": "Movement Component"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UNavMovementComponent"
+      ],
+      "id": "smart-entry-unavmovementcomponent",
+      "mode": "smart",
+      "query": "Nav Movement Component"
+    },
+    {
+      "topWindow": 8,
+      "expectWithinTop": [
+        "UWidget"
+      ],
+      "id": "smart-entry-uwidget",
+      "mode": "smart",
+      "query": "Widget"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AActor.GetActorNameOrLabel"
+      ],
+      "id": "smart-method-aactor-getactornameorlabel",
+      "mode": "smart",
+      "query": "Actor Get Actor Name Or Label"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AAIController.GetAIPerceptionComponent"
+      ],
+      "id": "smart-method-aaicontroller-getaiperceptioncomponent",
+      "mode": "smart",
+      "query": "AI Controller Get AI Perception Component"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AAIController.MoveToActor"
+      ],
+      "id": "smart-method-aaicontroller-movetoactor",
+      "mode": "smart",
+      "query": "AI Controller Move To Actor"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AbilitySystem::AddGameplayTags"
+      ],
+      "id": "smart-method-abilitysystem-addgameplaytags",
+      "mode": "smart",
+      "query": "Ability System Add Gameplay Tags"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AbilitySystem::BindEventWrapperToGameplayTagChanged"
+      ],
+      "id": "smart-method-abilitysystem-bindeventwrappertogameplaytagchanged",
+      "mode": "smart",
+      "query": "Ability System Bind Event Wrapper To Gameplay Tag Changed"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AbilitySystem::DoesGameplayCueMeetTagRequirements"
+      ],
+      "id": "smart-method-abilitysystem-doesgameplaycuemeettagrequirements",
+      "mode": "smart",
+      "query": "Ability System Does Gameplay Cue Meet Tag Requirements"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "ACameraRig_Rail.GetRailSplineComponent"
+      ],
+      "id": "smart-method-acamerarig-rail-getrailsplinecomponent",
+      "mode": "smart",
+      "query": "Camera Rig Rail Get Rail Spline Component"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AIHelper::GetAIController"
+      ],
+      "id": "smart-method-aihelper-getaicontroller",
+      "mode": "smart",
+      "query": "I Helper Get AI Controller"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AIHelper::IsValidAILocation"
+      ],
+      "id": "smart-method-aihelper-isvalidailocation",
+      "mode": "smart",
+      "query": "I Helper Is Valid AI Location"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AIHelper::SpawnAIFromClass"
+      ],
+      "id": "smart-method-aihelper-spawnaifromclass",
+      "mode": "smart",
+      "query": "I Helper Spawn AI From Class"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "CameraPose::GetAimDir"
+      ],
+      "id": "smart-method-camerapose-getaimdir",
+      "mode": "smart",
+      "query": "Camera Pose Get Aim Dir"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "CameraPose::GetTransform"
+      ],
+      "id": "smart-method-camerapose-gettransform",
+      "mode": "smart",
+      "query": "Camera Pose Get Transform"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "CameraPose::MakeCameraPoseFromCameraComponent"
+      ],
+      "id": "smart-method-camerapose-makecameraposefromcameracomponent",
+      "mode": "smart",
+      "query": "Camera Pose Make Camera Pose From Component"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "CameraVariableTable::GetFloatCameraVariable"
+      ],
+      "id": "smart-method-cameravariabletable-getfloatcameravariable",
+      "mode": "smart",
+      "query": "Camera Variable Table Get Float Camera Variable"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "CameraVariableTable::SetVector3CameraVariable"
+      ],
+      "id": "smart-method-cameravariabletable-setvector3cameravariable",
+      "mode": "smart",
+      "query": "Camera Variable Table Set Vector3 Camera Variable"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "FGameplayTag.GetGameplayTagParents"
+      ],
+      "id": "smart-method-fgameplaytag-getgameplaytagparents",
+      "mode": "smart",
+      "query": "Gameplay Tag Get Gameplay Tag Parents"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "FGameplayTag.MatchesTagExact"
+      ],
+      "id": "smart-method-fgameplaytag-matchestagexact",
+      "mode": "smart",
+      "query": "Gameplay Tag Matches Tag Exact"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "FGameplayTagContainer.GetMatchedTags"
+      ],
+      "id": "smart-method-fgameplaytagcontainer-getmatchedtags",
+      "mode": "smart",
+      "query": "Gameplay Tag Container Get Matched Tags"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "FGameplayTagContainer.HasAll"
+      ],
+      "id": "smart-method-fgameplaytagcontainer-hasall",
+      "mode": "smart",
+      "query": "Gameplay Tag Container Has All"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "FInputDebugKeyBinding.Execute"
+      ],
+      "id": "smart-method-finputdebugkeybinding-execute",
+      "mode": "smart",
+      "query": "Input Debug Key Binding Execute"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "FInputDebugKeyBinding.GetHandle"
+      ],
+      "id": "smart-method-finputdebugkeybinding-gethandle",
+      "mode": "smart",
+      "query": "Input Debug Key Binding Get Handle"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UAbilitySystemComponent.GetOwnedGameplayTags"
+      ],
+      "id": "smart-method-uabilitysystemcomponent-getownedgameplaytags",
+      "mode": "smart",
+      "query": "Ability System Component Get Owned Gameplay Tags"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UAbilitySystemComponent.TryActivateAbilitiesByTag"
+      ],
+      "id": "smart-method-uabilitysystemcomponent-tryactivateabilitiesbytag",
+      "mode": "smart",
+      "query": "Ability System Component Try Activate Abilities By Tag"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UCameraComponent.GetCameraView"
+      ],
+      "id": "smart-method-ucameracomponent-getcameraview",
+      "mode": "smart",
+      "query": "Camera Component Get Camera View"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UCameraComponent.SetAspectRatio"
+      ],
+      "id": "smart-method-ucameracomponent-setaspectratio",
+      "mode": "smart",
+      "query": "Camera Component Set Aspect Ratio"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UCharacterMovementComponent.DisableMovement"
+      ],
+      "id": "smart-method-ucharactermovementcomponent-disablemovement",
+      "mode": "smart",
+      "query": "Character Movement Component Disable Movement"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UCharacterMovementComponent.SetMovementMode"
+      ],
+      "id": "smart-method-ucharactermovementcomponent-setmovementmode",
+      "mode": "smart",
+      "query": "Character Movement Component Set Movement Mode"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UGameplayAbility.ApplyGameplayEffectToOwner"
+      ],
+      "id": "smart-method-ugameplayability-applygameplayeffecttoowner",
+      "mode": "smart",
+      "query": "Gameplay Ability Apply Gameplay Effect To Owner"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UGameplayAbility.GetAbilitySystemComponentFromActorInfo"
+      ],
+      "id": "smart-method-ugameplayability-getabilitysystemcomponentfromactorinfo",
+      "mode": "smart",
+      "query": "Gameplay Ability Get Ability System Component From Actor Info"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UGameplayEffect.GetGrantedTags"
+      ],
+      "id": "smart-method-ugameplayeffect-getgrantedtags",
+      "mode": "smart",
+      "query": "Gameplay Effect Get Granted Tags"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UGameplayEffect.GetOwnedGameplayTags"
+      ],
+      "id": "smart-method-ugameplayeffect-getownedgameplaytags",
+      "mode": "smart",
+      "query": "Gameplay Effect Get Owned Gameplay Tags"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UGameplayTask.EndTask"
+      ],
+      "id": "smart-method-ugameplaytask-endtask",
+      "mode": "smart",
+      "query": "Gameplay Task End Task"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UGameplayTask.ReadyForActivation"
+      ],
+      "id": "smart-method-ugameplaytask-readyforactivation",
+      "mode": "smart",
+      "query": "Gameplay Task Ready For Activation"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UMovementComponent.SetPlaneConstraintEnabled"
+      ],
+      "id": "smart-method-umovementcomponent-setplaneconstraintenabled",
+      "mode": "smart",
+      "query": "Movement Component Set Plane Constraint Enabled"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UMovementComponent.StopMovementImmediately"
+      ],
+      "id": "smart-method-umovementcomponent-stopmovementimmediately",
+      "mode": "smart",
+      "query": "Movement Component Stop Movement Immediately"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UNavMovementComponent.GetVelocityForNavMovement"
+      ],
+      "id": "smart-method-unavmovementcomponent-getvelocityfornavmovement",
+      "mode": "smart",
+      "query": "Nav Movement Component Get Velocity For Nav Movement"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UNavMovementComponent.IsMovingOnGround"
+      ],
+      "id": "smart-method-unavmovementcomponent-ismovingonground",
+      "mode": "smart",
+      "query": "Nav Movement Component Is Moving On Ground"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UWidget.GetAccessibleText"
+      ],
+      "id": "smart-method-uwidget-getaccessibletext",
+      "mode": "smart",
+      "query": "Widget Get Accessible Text"
+    },
+    {
+      "topWindow": 12,
+      "expectWithinTop": [
+        "CameraPose::GetAimDir",
+        "CameraPose::MakeCameraPoseFromCameraComponent"
+      ],
+      "id": "smart-multi-camera-pose",
+      "mode": "smart",
+      "query": "camera pose"
+    },
+    {
+      "topWindow": 12,
+      "expectWithinTop": [
+        "GameplayTags::FeatureName_AIPawnData"
+      ],
+      "id": "smart-multi-gameplay-ai-pawn",
+      "mode": "smart",
+      "query": "gameplay ai pawn"
+    },
+    {
+      "topWindow": 12,
+      "expectWithinTop": [
+        "UMovementComponent",
+        "UCharacterMovementComponent"
+      ],
+      "id": "smart-multi-movement-component",
+      "mode": "smart",
+      "query": "movement component"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AActor.ActorGuid"
+      ],
+      "id": "smart-property-aactor-actorguid",
+      "mode": "smart",
+      "query": "Actor Actor Guid"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AAIController.BrainComponent"
+      ],
+      "id": "smart-property-aaicontroller-braincomponent",
+      "mode": "smart",
+      "query": "AI Controller Brain Component"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "ACameraRig_Rail.CurrentPositionOnRail"
+      ],
+      "id": "smart-property-acamerarig-rail-currentpositiononrail",
+      "mode": "smart",
+      "query": "Camera Rig Rail Current Position On Rail"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "ACameraRig_Rail.RailSplineComponent"
+      ],
+      "id": "smart-property-acamerarig-rail-railsplinecomponent",
+      "mode": "smart",
+      "query": "Camera Rig Rail Rail Spline Component"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "EAILockSource.Animation"
+      ],
+      "id": "smart-property-eailocksource-animation",
+      "mode": "smart",
+      "query": "AI Lock Source Animation"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "EAILockSource.Gameplay"
+      ],
+      "id": "smart-property-eailocksource-gameplay",
+      "mode": "smart",
+      "query": "AI Lock Source Gameplay"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "EAILockSource.Logic"
+      ],
+      "id": "smart-property-eailocksource-logic",
+      "mode": "smart",
+      "query": "AI Lock Source Logic"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "FGameplayTagContainer.GameplayTags"
+      ],
+      "id": "smart-property-fgameplaytagcontainer-gameplaytags",
+      "mode": "smart",
+      "query": "Gameplay Tag Container Gameplay Tags"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "GameplayTags::FeatureName_AIPawnData"
+      ],
+      "id": "smart-property-gameplaytags-featurename-aipawndata",
+      "mode": "smart",
+      "query": "Gameplay Tags Feature Name AI Pawn Data"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "GameplayTags::GameplayCue"
+      ],
+      "id": "smart-property-gameplaytags-gameplaycue",
+      "mode": "smart",
+      "query": "Gameplay Tags Gameplay Cue"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "GameplayTags::GameplayCue_Test"
+      ],
+      "id": "smart-property-gameplaytags-gameplaycue-test",
+      "mode": "smart",
+      "query": "Gameplay Tags Gameplay Cue Test"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "GameplayTags::Settings_Movement"
+      ],
+      "id": "smart-property-gameplaytags-settings-movement",
+      "mode": "smart",
+      "query": "Gameplay Tags Settings Movement"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "GameplayTags::Status"
+      ],
+      "id": "smart-property-gameplaytags-status",
+      "mode": "smart",
+      "query": "Gameplay Tags Status"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "GameplayTags::Status_StunGauge"
+      ],
+      "id": "smart-property-gameplaytags-status-stungauge",
+      "mode": "smart",
+      "query": "Gameplay Tags Status Stun Gauge"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UAbilitySystemComponent.AffectedAnimInstanceTag"
+      ],
+      "id": "smart-property-uabilitysystemcomponent-affectedaniminstancetag",
+      "mode": "smart",
+      "query": "Ability System Component Affected Anim Instance Tag"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UCameraComponent.FieldOfView"
+      ],
+      "id": "smart-property-ucameracomponent-fieldofview",
+      "mode": "smart",
+      "query": "Camera Component Field Of View"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UCharacterMovementComponent.MovementMode"
+      ],
+      "id": "smart-property-ucharactermovementcomponent-movementmode",
+      "mode": "smart",
+      "query": "Character Movement Component Movement Mode"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UGameplayAbility.AbilityTags"
+      ],
+      "id": "smart-property-ugameplayability-abilitytags",
+      "mode": "smart",
+      "query": "Gameplay Ability Ability Tags"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UGameplayEffect.GameplayCues"
+      ],
+      "id": "smart-property-ugameplayeffect-gameplaycues",
+      "mode": "smart",
+      "query": "Gameplay Effect Gameplay Cues"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UGameplayTask_WaitDelay.OnFinish"
+      ],
+      "id": "smart-property-ugameplaytask-waitdelay-onfinish",
+      "mode": "smart",
+      "query": "Gameplay Task Wait Delay On Finish"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UMovementComponent.bConstrainToPlane"
+      ],
+      "id": "smart-property-umovementcomponent-bconstraintoplane",
+      "mode": "smart",
+      "query": "Movement Component b Constrain To Plane"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UNavMovementComponent.NavAgentProps"
+      ],
+      "id": "smart-property-unavmovementcomponent-navagentprops",
+      "mode": "smart",
+      "query": "Nav Movement Component Nav Agent Props"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "UWidget.ToolTipWidget"
+      ],
+      "id": "smart-property-uwidget-tooltipwidget",
+      "mode": "smart",
+      "query": "Widget Tool Tip Widget"
+    }
+  ]
+}
