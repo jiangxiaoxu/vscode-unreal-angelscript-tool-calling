@@ -4,6 +4,7 @@
 帮助 AI agent 在不扫描全仓的前提下,快速理解当前 `angelscript_*` 工具的公共契约,关键实现入口,以及这次 LM-only 搜索协议改造后的维护边界.
 
 ## 当前工具契约基线
+<!-- BEGIN GENERATED:LM_TOOL_CONTRACTS -->
 适用工具:
 - `angelscript_searchApi`
 - `angelscript_resolveSymbolAtPosition`
@@ -19,54 +20,38 @@
 - 结构化结果继续沿用内部 `{ ok, data/error }` envelope.
 
 统一文本风格:
-- 首行使用稳定标题,例如 `Angelscript API search`.
-- 成功文本默认采用 code-first 风格,主体优先是声明式文本或源码片段.
+- 首行使用稳定标题, 例如 `Angelscript API search`.
+- 成功文本默认采用 code-first 风格, 主体优先是声明式文本或源码片段.
 - 文档统一归一化后渲染为 `/** ... */`.
-- owner、origin、range、scope、truncation 等元信息统一使用 `// ...` 注释.
+- owner, origin, range, scope, truncation 等元信息统一使用 `// ...` 注释.
 - 源码预览使用 `lineNumber + ':'/'-' + 4 spaces + source text`.
-- 无结果时输出代码风格注释,例如 `// No matches found.`.
-- 错误统一输出:
-  - 标题
-  - `error: ...`
-  - `code: ...`
-  - 可选 `hint: ...`
-- 可选 `details: ...`
+- 无结果时输出代码风格注释, 例如 `// No matches found.`.
+- 错误统一输出标题, `error: ...`, `code: ...`, 以及可选 `hint: ...` 和 `details: ...`.
 
-## 各工具文本形态
+各工具公共契约摘要:
+| Tool | 选择边界 | 关键输入 |
+| --- | --- | --- |
+| `angelscript_searchApi` | 在不知道精确符号名时用于发现 API symbol. 不用于已有文件位置的 symbol resolve. | `query` 必填; `mode` 取 `smart|regex`; `scope` 预先收窄 namespace/type; `includeInheritedFromScope` 只影响 class scope; `includeDocs` 只补全文档. |
+| `angelscript_resolveSymbolAtPosition` | 在已有绝对路径和光标位置时用于识别当前位置 symbol, signature, doc 和 definition. 不用于项目级 references 搜索. | `filePath` 必须是绝对路径; `position.line` 和 `position.character` 都是 1-based; `includeDocumentation` 默认 `true`. |
+| `angelscript_getTypeMembers` | 在只需要单个 Angelscript type 的成员列表时使用. 不用于父子类层级遍历. | `name` 必填; `namespace` 只做消歧; `includeInherited` 默认 `false`; `includeDocs` 只控制成员文档; `kinds` 过滤 `both\|method\|property`. |
+| `angelscript_getClassHierarchy` | 在需要父链或子类扩展时使用. 不用于单个 type 的成员查询. | `name` 必填; `maxSuperDepth`, `maxSubDepth`, `maxSubBreadth` 都是非负整数限制, 默认 `3/2/10`. |
+| `angelscript_findReferences` | 在已有 symbol 位置并需要项目级 references 时使用. 不用于当前位置 symbol resolve. | `filePath` 必须是绝对路径; `position.line` 和 `position.character` 都是 1-based; `limit` 默认 `30`, 最大 `200`. |
+
+各工具文本形态:
 | Tool | 主要文本主体 | 注释元信息 | 预览规则 |
 | --- | --- | --- | --- |
-| `angelscript_searchApi` | owner/namespace 分组后的类型桩或成员声明 | `// scope: ...`、`// notice [...]`、`// native`、`// mixin from ...`、`// inherited from ...` | 无源码预览 |
-| `angelscript_resolveSymbolAtPosition` | `/** ... */` + 声明,或 `/** ... */` + definition preview | `// definition: <file>:<start>-<end>`、`// source unavailable` | 宏回溯行用 `-`, 定义命中行用 `:` |
-| `angelscript_getTypeMembers` | 目标类型说明 + 成员声明列表 | `// inherited from ...`、`// mixin from ...` | 无源码预览 |
-| `angelscript_getClassHierarchy` | `// lineage: ...`、`// derived:` 树,再接源码预览或声明桩 | `// native`、`// truncated: ...`、`// source unavailable` | 脚本类预览默认按真实行号输出 |
-| `angelscript_findReferences` | 每个文件下的 `// range: ...` + preview | `// <filePath>`、`// truncated at limit ...` | 命中引用行用 `:` |
+| `angelscript_searchApi` | 按 scope, owner 或 namespace 分组后的类型桩或成员声明 | `// scope: ...`, `// notice [...]`, `// native`, `// mixin from ...`, `// inherited from ...` | 无源码预览 |
+| `angelscript_resolveSymbolAtPosition` | `/** ... */` + 声明,或 `/** ... */` + definition preview | `// definition: <file>:<start>-<end>`, `// source unavailable` | 宏回溯行用 `-`, 定义命中行用 `:` |
+| `angelscript_getTypeMembers` | 目标类型说明 + 成员声明列表 | `// inherited from ...`, `// mixin from ...` | 无源码预览 |
+| `angelscript_getClassHierarchy` | `// lineage: ...`, `// derived:` 树, 再接源码预览或声明桩 | `// native`, `// truncated: ...`, `// source unavailable` | 脚本类预览按真实行号输出 |
+| `angelscript_findReferences` | 每个文件下的 `// range: ...` + preview | `// <filePath>`, `// truncated at limit ...` | 命中引用行用 `:` |
 
-## `angelscript_searchApi` 查询契约
-面板与 LM tool 已拆分:
-- Angelscript API 面板继续使用 `smart search`.
-- LM tool 默认使用 `plain search`, 对外输入为 `query`、`limit`、`source`、`scope`、`includeInheritedFromScope`、`includeDocs`、`regex`.
-
-plain search 规则:
-- 大小写不敏感.
-- 优先识别 `Type.Member`、`Namespace::Func` 这类代码形态查询.
-- 支持 ordered token gap,例如 `Status AI`.
-- 支持 weak token reorder fallback,但优先级较低.
-- 尾部 `(` 或 `()` 表示 callable-only,只限制到 `method/function`,不匹配完整 signature.
-
-regex search 规则:
-- 仅在 `regex=true` 时启用.
-- `query` 必须使用 `/pattern/flags` 形式.
-- 仅匹配名字视图:
-  - `shortName`
-  - `qualifiedName`
-  - `alias`
-  - callable `shortName()`
-  - callable `qualifiedName()`
-  - callable `alias()`
-
-scope 规则:
-- `scope` 用于在排序前收窄已知 namespace 或 containing type 的搜索域.
-- 对 type scope, `includeInheritedFromScope=true` 会扩展 inherited members 与 mixin member views.
+`angelscript_searchApi` 关键规则:
+- API 面板和 LM tool 都以 `mode=smart` 作为默认行为; `mode=regex` 仍然要求 `query` 使用 `/pattern/flags`.
+- `smart` 查询支持 `Type.Member`, `Namespace::Func`, `GameplayCue;`, 尾部 `(` 或 `()`, 以及 `|` branch.
+- `scope` 会在排序前收窄已知 namespace 或 containing type; 同名 namespace 和 type scope 会自动合并.
+- 省略 `includeInheritedFromScope` 时, 只有 class scope 会自动展开 inherited method/property, 其他 scope 保持关闭.
+<!-- END GENERATED:LM_TOOL_CONTRACTS -->
 
 ## 路径与行号规则
 输入路径:
@@ -123,7 +108,7 @@ scope 规则:
 
 `extension/src/toolTextFormatter.ts`
 - 纯文本契约核心.
-- 所有 code-first 标题、声明清洗、注释归一化与预览渲染都在这里统一完成.
+- 所有 code-first 标题, 声明清洗, 注释归一化与预览渲染都在这里统一完成.
 
 `extension/src/toolShared.ts`
 - 仍保留内部 `{ ok, data/error }` 中间结构,仅作为实现细节.
@@ -143,7 +128,7 @@ scope 规则:
 - 预览行格式/标记规则.
 - LM `text+structured` transport.
 - LM `text-only` transport.
-- language-server search: smart/plain/regex、ordered token gap、weak reorder、scope、inheritance、override dedupe.
+- language-server search: smart/regex, ordered token gap, scope, inheritance, override dedupe.
 
 提交前最低验收:
 - `npm run compile`
@@ -154,8 +139,8 @@ scope 规则:
 - `README.md`
 - `CHANGELOG.md`
 - `face-ai-report.md`
-- `package.json` 中对应 tool 的 `modelDescription`
-- `extension/src/toolRegistry.ts` 中对应 tool 的 `description`
+- `scripts/lmToolManifest.mjs`
+- 运行 `npm run sync:lm-tools`
 
 高风险回归点:
 - 不要重新引入仓库内 MCP server/runtime 实现.

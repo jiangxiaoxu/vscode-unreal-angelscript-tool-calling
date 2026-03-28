@@ -63,12 +63,21 @@ The extension restores cache data at startup to provide baseline capabilities wi
 - Write strategy: temp file + fsync + rename
 
 ### Language Model Tools
+<!-- BEGIN GENERATED:LM_TOOLS_EN -->
 Exposed tools:
 - `angelscript_searchApi`
 - `angelscript_resolveSymbolAtPosition`
 - `angelscript_getTypeMembers`
 - `angelscript_getClassHierarchy`
 - `angelscript_findReferences`
+
+Tool notes:
+- `angelscript_searchApi`: Requires `query`. Default `mode` is `smart`; use `regex` only with `/pattern/flags`. `scope` narrows a known namespace or type before ranking, `includeInheritedFromScope` only changes class scopes, and `includeDocs=true` adds docs without changing ranking.
+- `angelscript_resolveSymbolAtPosition`: Requires absolute `filePath` plus 1-based `position`. `includeDocumentation` defaults to `true`.
+- `angelscript_getTypeMembers`: Requires exact `name`; `namespace` only disambiguates collisions. `type.description` is always returned, while member docs need `includeDocs=true`.
+- `angelscript_getClassHierarchy`: Requires exact class `name`. `maxSuperDepth`, `maxSubDepth`, and `maxSubBreadth` bound the returned tree and default to `3/2/10`.
+- `angelscript_findReferences`: Requires absolute `filePath` plus 1-based `position`. `limit` defaults to `30` and caps results at `200`.
+<!-- END GENERATED:LM_TOOLS_EN -->
 
 Output rules:
 - This repository now implements VS Code `Language Model Tool` only.
@@ -88,13 +97,6 @@ Output rules:
 - `text+structured` and `text-only` do not change the text style.
 - Input and output `filePath` use normalized absolute paths.
 - For line-based results, text output includes source previews (max 20 lines, truncated with `... (truncated)`, fallback `<source unavailable>`).
-
-Tool notes:
-- `angelscript_searchApi`: The Angelscript API panel and LM tool now both default to smart search. Public input is `query` plus optional `mode`, `limit`, `source`, `scope`, `includeInheritedFromScope`, and `includeDocs`, where `mode` is `smart` or `regex` and defaults to `smart`. Smart search is case-insensitive, supports code-like queries such as `Type.Member` and `Namespace::Func`, ordered token gaps such as `Status AI`, explicit boundaries such as `GameplayTags :: AI` and `movement . start`, callable-only trailing `(` or `()`, smart OR branches with `|`, and qualified-name-first ranking after exact canonical qualified matches. Smart search does not provide the old weak token reorder fallback. `scope` narrows the search domain to a known namespace or containing type before ranking; when a namespace and type share the same exact name, search automatically merges both scopes. When `includeInheritedFromScope` is omitted, class scopes auto-expand inherited methods and properties while namespace/struct/enum scopes keep inheritance expansion off silently; explicit `true` keeps legacy ignored-scope reporting for invalid or non-class scopes. When `mode='regex'`, `query` must use VS Code-style `/pattern/flags` syntax and matches only symbol name views: short names, qualified names, mixin member-view aliases, and callable `...()` views for methods/functions. Results return `matches`, `matchCounts`, optional `scopeGroups`, optional `notices`, optional `scopeLookup`, optional `inheritedScopeOutcome`, and tool-layer `request`. Tool-layer `request` now reports `mode`, the resolved `includeInheritedFromScope` boolean, and `includeInheritedFromScopeMode` (`auto` or `explicit`). Structured matches include `matchReason`, and full docs are returned through `documentation` only when requested. Human-readable text now groups matches by scope first, then by owner/namespace, and renders type/member hits as declarations with comment-based metadata.
-- `angelscript_resolveSymbolAtPosition`: Requires an absolute `filePath`. All line/character indices in tool input are 1-based. Human-readable text now prefers `/** ... */` plus declaration or definition preview. It still checks the line before definition start for `UCLASS/UPROPERTY/UFUNCTION/UENUM`; when matched, that macro line is rendered as preview context.
-- `angelscript_getTypeMembers`: List members for an exact type name. The target type description is always returned in `type.description`; member descriptions are included only when `includeDocs=true`. Human-readable text now renders members as Angelscript-style declarations, with inherited/mixin origin and docs emitted as comments.
-- `angelscript_getClassHierarchy`: Returns `root`, `supers`, `derivedByParent`, `limits`, `truncated`, and `sourceByClass` in structured JSON. Human-readable text now uses comment-based lineage/derived trees plus code-first source blocks. Script classes prefer preview lines; native classes render as declaration stubs such as `class AActor;`; unresolved script sources degrade to `// source unavailable` plus a declaration stub. Defaults are `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
-- `angelscript_findReferences`: Requires an absolute `filePath`. All line/character indices in tool input are 1-based. Optional `limit` defaults to `30` and caps the returned references at `200`. Human-readable text now renders `// <filePath>` + `// range: ...` + preview blocks, with truncation surfaced as a final comment.
 
 
 
@@ -153,12 +155,21 @@ https://angelscript.hazelight.se
 - 写入策略: 临时文件 + fsync + rename
 
 ### Language Model Tools
+<!-- BEGIN GENERATED:LM_TOOLS_ZH -->
 提供以下工具:
 - `angelscript_searchApi`
 - `angelscript_resolveSymbolAtPosition`
 - `angelscript_getTypeMembers`
 - `angelscript_getClassHierarchy`
 - `angelscript_findReferences`
+
+工具说明:
+- `angelscript_searchApi`: 需要 `query`. `mode` 默认是 `smart`, 只有明确提供 `/pattern/flags` 时才使用 `regex`. `scope` 会在排序前收窄已知 namespace 或 type, `includeInheritedFromScope` 只改变 class scope, `includeDocs=true` 只补全文档而不改变排序.
+- `angelscript_resolveSymbolAtPosition`: 需要绝对路径 `filePath` 和 1-based 的 `position`. `includeDocumentation` 默认是 `true`.
+- `angelscript_getTypeMembers`: 需要精确 `name`; `namespace` 只用于消除重名歧义. `type.description` 始终返回, 成员文档需要 `includeDocs=true`.
+- `angelscript_getClassHierarchy`: 需要精确 class `name`. `maxSuperDepth`, `maxSubDepth` 和 `maxSubBreadth` 用来裁剪返回层级, 默认值是 `3/2/10`.
+- `angelscript_findReferences`: 需要绝对路径 `filePath` 和 1-based 的 `position`. `limit` 默认 `30`, 最大 `200`.
+<!-- END GENERATED:LM_TOOLS_ZH -->
 
 输出规则:
 - 当前仓库只实现 VS Code `Language Model Tool`.
@@ -178,13 +189,6 @@ https://angelscript.hazelight.se
 - `text+structured` 和 `text-only` 不会改变文本风格.
 - 输入和输出 `filePath` 统一使用标准化后的绝对路径.
 - 涉及行号/范围的结果会直接在文本中渲染源码片段(最多 20 行,超出追加 `... (truncated)`,不可读时为 `<source unavailable>`).
-
-工具说明:
-- `angelscript_searchApi`: Angelscript API 面板和 LM tool 现在都默认使用 smart search. 对外输入为 `query` 和可选 `mode`, `limit`, `source`, `scope`, `includeInheritedFromScope`, `includeDocs`, 其中 `mode` 只接受 `smart` 或 `regex`, 默认是 `smart`. smart search 大小写不敏感, 支持 `Type.Member`, `Namespace::Func` 这类代码形态查询, 支持 `Status AI` 这类 ordered token gap, 支持 `GameplayTags :: AI`, `movement . start` 这类显式 boundary, 支持尾部 callable-only 的 `(` 或 `()`, 支持通过 `|` 编写 smart OR branch, 并在 exact canonical qualified 命中之后优先按 canonical qualified name 中的匹配起点排序. smart search 不再提供旧 plain 模式里的 weak token reorder 回退. `scope` 用于在排序前先收窄已知 namespace 或 containing type 的搜索域; 当 namespace 与 type 具有相同的精确名字时, 搜索会自动合并这两个 scope; 当 `includeInheritedFromScope` 省略时, class scope 会自动展开 inherited method/property, 而 namespace/struct/enum scope 会静默保持关闭; 显式传 `true` 时仍保留 invalid/non-class scope 的 `ignored_*` 报告. 当 `mode='regex'` 时, `query` 必须使用 VS Code 风格的 `/pattern/flags`, 且只匹配 symbol name views: short name, qualified name, mixin member-view alias, 以及 method/function 额外提供的 callable `...()` 视图. 结果返回 `matches`, `matchCounts`, 可选 `scopeGroups`, 可选 `notices`, 可选 `scopeLookup`, 可选 `inheritedScopeOutcome`, 并在 tool 层补充 `request`. tool 层 `request` 现在会返回 `mode`, 解析后的 `includeInheritedFromScope` 布尔值和 `includeInheritedFromScopeMode`(`auto` 或 `explicit`). 结构化命中会附带 `matchReason`, 只有显式请求时才会通过 `documentation` 返回全文文档. 可读文本现在会先按 scope 分段, 再按 owner/namespace 分组, 把类型和成员命中渲染成声明式文本, 并通过注释补充 scope, 来源和 notice.
-- `angelscript_resolveSymbolAtPosition`: 需要传入绝对路径 `filePath`. 工具输入中的行列索引全部为 1-based. 可读文本默认优先输出 `/** ... */` 加声明或定义预览. 仍会检查定义起始行上一行是否为 `UCLASS/UPROPERTY/UFUNCTION/UENUM`,命中时把宏行作为预览上下文输出.
-- `angelscript_getTypeMembers`: 按精确类型名列出成员. 目标类型自身描述始终通过 `type.description` 返回; 成员描述仅在 `includeDocs=true` 时返回. 可读文本现在会按 Angelscript 风格声明渲染成员,并用注释补充 inherited/mixin 来源与文档.
-- `angelscript_getClassHierarchy`: 结构化结果返回 `root`、`supers`、`derivedByParent`、`limits`、`truncated` 与 `sourceByClass`. 可读文本现在会用注释化 lineage/derived tree 加 code-first 的源码块展示层级. 脚本类优先显示预览, native 类显示 `class AActor;` 这类声明桩,脚本源码不可解析时降级为 `// source unavailable` 加声明桩. 默认值: `maxSuperDepth=3`, `maxSubDepth=2`, `maxSubBreadth=10`.
-- `angelscript_findReferences`: 需要传入绝对路径 `filePath`. 工具输入中的行列索引全部为 1-based. 可选 `limit` 默认值为 `30`,最大值为 `200`. 可读文本现在会按 `// <filePath>` + `// range: ...` + 预览块的形式输出引用,只有截断时才追加最小注释提示.
 
 
 ### 已知限制

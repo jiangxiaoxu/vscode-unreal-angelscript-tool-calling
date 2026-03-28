@@ -12,7 +12,7 @@ The model is designed for symbol search rather than free-form text search:
 
 ## Query Syntax
 
-Smart queries recognize four constructs:
+Smart queries recognize five constructs:
 
 - `space`
   - Acts as an ordered wildcard gap.
@@ -21,13 +21,18 @@ Smart queries recognize four constructs:
   - Requires a namespace or type boundary.
 - `.`
   - Requires a member boundary.
+- trailing ASCII `;`
+  - Anchors the final fragment to an identifier boundary.
+  - Allows matches to end before `.`, `::`, or end-of-text.
+  - Rejects identifier continuation such as letters, digits, or `_`.
+  - Does not treat full-width `；` as syntax.
 - trailing `(` or `()`
   - Means callable-only.
   - Restricts matches to callable symbols such as methods and functions.
   - Does not match argument lists.
   - Does not mean "zero arguments".
 
-Only the trailing `(` / `()` form is special. Parentheses in other positions are treated as ordinary text unless the host project defines extra rules.
+Only trailing ASCII `;`, `(`, and `()` are special. Parentheses in other positions are treated as ordinary text unless the host project defines extra rules.
 
 ## Matching Rules
 
@@ -39,7 +44,8 @@ Given a parsed query and a candidate symbol view:
 4. Let `space` cross any characters.
 5. Require `::` to cross a namespace/type boundary.
 6. Require `.` to cross a member boundary.
-7. If trailing `(` or `()` is present, filter results to callable kinds before ranking.
+7. If trailing ASCII `;` is present, require the final fragment to stop at an identifier boundary.
+8. If trailing `(` or `()` is present, filter results to callable kinds before ranking.
 
 The same query can be evaluated against multiple views, for example:
 - canonical qualified name
@@ -79,6 +85,7 @@ Queries:
 - `gameplayt AI`
 - `gameplayt :: AI`
 - `play tag :: AI`
+- `GameplayCue;`
 
 These should match.
 
@@ -92,6 +99,7 @@ Queries:
 
 - `OpenPawnDataAIAsset(`
 - `OpenPawnDataAIAsset()`
+- `OpenPawnDataAIAsset;(`
 - `Cthu Extension . DataAIAsset(`
 - `Cthu Extension DataAIAsset(`
 

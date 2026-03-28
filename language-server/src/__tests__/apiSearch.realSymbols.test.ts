@@ -75,6 +75,25 @@ test('real-symbol fixture metadata is path-masked', () =>
     assert.equal(normalizedFixture.includes('sourcecachepathmasked'), true);
 });
 
+test('real-symbol smart search supports ASCII semicolon leaf termination', () =>
+{
+    const plain = GetAPISearch({
+        query: 'GameplayCue',
+        mode: 'smart',
+        limit: 10
+    });
+    assert.ok(plain.matches.some((match) => match.qualifiedName === 'GameplayTags::GameplayCue'));
+    assert.ok(plain.matches.some((match) => match.qualifiedName === 'GameplayTags::GameplayCue_Test'));
+    assert.ok(plain.matches.some((match) => match.qualifiedName === 'AbilitySystem::DoesGameplayCueMeetTagRequirements'));
+
+    const terminated = GetAPISearch({
+        query: 'GameplayCue;',
+        mode: 'smart',
+        limit: 10
+    });
+    assert.deepEqual(terminated.matches.map((match) => match.qualifiedName), ['GameplayTags::GameplayCue']);
+});
+
 for (const testCase of fixture.cases)
 {
     test(`real-symbol search: ${testCase.id}`, () =>

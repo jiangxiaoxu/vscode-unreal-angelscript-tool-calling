@@ -64,6 +64,8 @@ const boundaryFiles = [
     'extension/src/angelscriptApiSearch.ts',
     'extension/src/apiRequests.ts',
     'language-server/src/api_search.ts',
+    'scripts/lmToolManifest.mjs',
+    'scripts/sync-lm-tools.mjs',
 ];
 
 const contractSensitiveFiles = [
@@ -74,12 +76,15 @@ const contractSensitiveFiles = [
     'extension/src/apiRequests.ts',
     'language-server/src/api_search.ts',
     'language-server/src/server.ts',
+    'scripts/lmToolManifest.mjs',
+    'scripts/sync-lm-tools.mjs',
 ];
 
 const docsFiles = [
     'README.md',
     'CHANGELOG.md',
     'MAINTAINING.md',
+    'face-ai-report.md',
 ];
 
 const highConflictChanges = listMatches(changedFiles, highConflictFiles);
@@ -91,6 +96,7 @@ const schemaChanged = changedFiles.some((file) =>
     file === 'package.json'
     || file === 'extension/src/toolRegistry.ts'
     || file === 'extension/src/apiRequests.ts'
+    || file === 'scripts/lmToolManifest.mjs'
 );
 
 const activationChanged = changedFiles.some((file) =>

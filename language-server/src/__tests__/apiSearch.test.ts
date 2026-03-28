@@ -178,6 +178,24 @@ function setupSearchFixture(): void
         null,
         'Gameplay root tag.'
     ));
+    characters.addSymbol(createProperty(
+        'CthuActorProperty',
+        'int',
+        'Game.Modules.Characters',
+        'Leaf termination base property.'
+    ));
+    characters.addSymbol(createProperty(
+        'CthuActorProperty_A',
+        'int',
+        'Game.Modules.Characters',
+        'Leaf termination suffix fixture A.'
+    ));
+    characters.addSymbol(createProperty(
+        'CthuActorProperty_B',
+        'int',
+        'Game.Modules.Characters',
+        'Leaf termination suffix fixture B.'
+    ));
 
     tools.addSymbol(createMethod(
         'MovementDebugger',
@@ -528,6 +546,34 @@ test('smart search uses ordered wildcard matching with strict separators', () =>
     const allTinyOr = GetAPISearch({ query: 'U | A', mode: 'smart', limit: 10 });
     assert.equal(allTinyOr.matches.length, 0);
     assert.equal(allTinyOr.notices?.[0]?.code, 'QUERY_TOO_SHORT');
+});
+
+test('smart search supports ASCII semicolon leaf termination', () =>
+{
+    const plain = GetAPISearch({ query: 'Cthu ty', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
+    assert.deepEqual(plain.matches.map((match) => match.qualifiedName), [
+        'Gameplay::Characters::CthuActorProperty',
+        'Gameplay::Characters::CthuActorProperty_A',
+        'Gameplay::Characters::CthuActorProperty_B'
+    ]);
+
+    const terminated = GetAPISearch({ query: 'Cthu ty;', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
+    assert.deepEqual(terminated.matches.map((match) => match.qualifiedName), [
+        'Gameplay::Characters::CthuActorProperty'
+    ]);
+
+    const callableTerminated = GetAPISearch({
+        query: 'UCthuAICharacterExtension.OpenPawnDataAIAsset;(',
+        mode: 'smart',
+        limit: 10
+    });
+    assert.deepEqual(callableTerminated.matches.map((match) => match.qualifiedName), [
+        'Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset'
+    ]);
+    assert.equal(callableTerminated.matches[0]?.kind, 'method');
+
+    const fullWidthSemicolon = GetAPISearch({ query: 'Cthu ty；', mode: 'smart', kinds: ['globalVariable'], limit: 10 });
+    assert.deepEqual(fullWidthSemicolon.matches, []);
 });
 
 test('source and kind filters narrow the search result set', () =>

@@ -215,6 +215,7 @@ type ParsedSmartQuery = {
     hasStrongSeparator: boolean;
     searchableCharCount: number;
     requiresCallable: boolean;
+    requiresLeafTermination: boolean;
 };
 
 type SearchMatchSortKey = {
@@ -1607,6 +1608,13 @@ function parseSmartQuery(query: string) : ParsedSmartQuery
         requiresCallable = true;
     }
 
+    let requiresLeafTermination = false;
+    if (raw.endsWith(';'))
+    {
+        raw = raw.slice(0, -1).trimEnd();
+        requiresLeafTermination = true;
+    }
+
     let tokens = raw.match(/::|\.|\s+|[^.\s:]+/g) ?? [];
     let segments: string[] = [];
     let connectors: SearchConnector[] = [];
@@ -1659,7 +1667,8 @@ function parseSmartQuery(query: string) : ParsedSmartQuery
         connectors,
         hasStrongSeparator,
         searchableCharCount: segments.reduce((total, segment) => total + segment.length, 0),
-        requiresCallable
+        requiresCallable,
+        requiresLeafTermination
     };
 }
 
@@ -1759,6 +1768,15 @@ function findStructuredMatchFrom(
         }
 
         let currentEnd = foundIndex + segment.length;
+        if (segmentIndex == query.segments.length - 1
+            && query.requiresLeafTermination
+            && currentEnd < variant.text.length
+            && isIdentifierContinuationCharacter(variant.text[currentEnd]))
+        {
+            nextStart = foundIndex + 1;
+            continue;
+        }
+
         let currentMatch: StructuredMatchState = {
             start: previous ? previous.start : foundIndex,
             end: currentEnd,
@@ -1814,6 +1832,14 @@ function connectorMatches(
         && boundary.start >= previousEnd
         && boundary.end <= nextStart
     );
+}
+
+function isIdentifierContinuationCharacter(value: string) : boolean
+{
+    return (value >= 'a' && value <= 'z')
+        || (value >= 'A' && value <= 'Z')
+        || (value >= '0' && value <= '9')
+        || value == '_';
 }
 
 function buildMatch(candidate: SearchCandidate, includeDocs: boolean) : GetAPISearchMatch

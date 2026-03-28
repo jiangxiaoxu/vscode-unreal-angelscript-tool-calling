@@ -22,9 +22,9 @@ Maintenance rule:
 - `angelscript_resolveSymbolAtPosition` and `angelscript_findReferences` now require absolute `filePath` input, and LM tool outputs now normalize `filePath` to absolute-path form only.
 - `angelscript_findReferences` now accepts optional `limit` (default `30`, max `200`) and returns `total`, `returned`, `limit`, and `truncated` in structured output while surfacing truncation notices in text output.
 - `angelscript_getClassHierarchy` now degrades unresolved script preview paths to `<source unavailable>` instead of failing the entire tool with `InvalidParams`.
-- `angelscript_searchApi` now splits its search contract by caller: the Angelscript API panel keeps smart search, while the LM tool uses `query` plus optional `limit`, `source`, `scope`, `includeInheritedFromScope`, `includeDocs`, and `regex`.
+- `angelscript_searchApi` now splits its search contract by caller: the Angelscript API panel keeps smart search, while the LM tool uses `query` plus optional `mode`, `limit`, `source`, `scope`, `includeInheritedFromScope`, and `includeDocs`.
 - `angelscript_searchApi` now returns `matches`, optional `notices`, optional `scopeLookup`, and tool-layer `request`.
-- Search execution moved into a dedicated language-server index with smart/plain/regex matching, ordered token-gap plain matching, weak token reorder fallback, namespace/type scoping, inherited member expansion, and nearest-override dedupe.
+- Search execution moved into a dedicated language-server index with smart/regex matching, ordered token-gap search, namespace/type scoping, inherited member expansion, and nearest-override dedupe.
 - The API panel search path now consumes the new `angelscript/getAPISearch` result directly instead of applying client-side pagination, regex, and secondary sorting.
 - VS Code LM tools now default to `text-only`; `LanguageModelDataPart.json(...)` is included only when `UnrealAngelscript.languageModelTools.outputMode=text+structured`.
 - This repository no longer carries MCP server/runtime transport helpers or MCP-specific test/doc promises.
@@ -33,7 +33,7 @@ Maintenance rule:
 - `angelscript_resolveSymbolAtPosition` preview still checks one line above definition start for Unreal reflection macros (`UCLASS/UPROPERTY/UFUNCTION/UENUM`) and renders that macro line as context when matched.
 - `angelscript_findReferences` plain-text output now includes 1-based `range` labels and per-file grouping.
 - Added language-server search behavior tests plus refreshed formatter/transport tests for LM `text+structured` and `text-only`.
-- Updated tool descriptions, schema docs, README, and face-ai report to match the split panel-smart and LM-plain search contract.
+- Updated tool descriptions, schema docs, README, and face-ai report to match the single-source LM tool manifest and the current smart/regex search contract.
 - CI release workflow migrated from `beta/release` to `pre-release/release`: now publishes to VS Code Marketplace only (no GitHub release assets), keeps `runs-on: ubuntu-latest`, packages VSIX without platform target, and force-updates branch tags `pre-release`/`release` on successful runs.
 
 #### Breaking Changes
@@ -57,9 +57,9 @@ Maintenance rule:
 - `angelscript_resolveSymbolAtPosition` 与 `angelscript_findReferences` 现在要求传入绝对路径 `filePath`,LM tool 输出中的 `filePath` 也统一规范为绝对路径格式.
 - `angelscript_findReferences` 现在支持可选 `limit` 参数(默认 `30`,最大 `200`),结构化输出新增 `total`、`returned`、`limit`、`truncated`,文本输出会明确提示结果是否被截断.
 - `angelscript_getClassHierarchy` 现在在脚本类预览路径无法解析时会降级为 `<source unavailable>`,而不是让整个工具以 `InvalidParams` 失败.
-- `angelscript_searchApi` 现在按调用方拆分搜索契约: Angelscript API 面板继续使用 smart search, LM tool 改为使用 `query` 和可选 `limit`、`source`、`scope`、`includeInheritedFromScope`、`includeDocs`、`regex`.
+- `angelscript_searchApi` 现在按调用方拆分搜索契约: Angelscript API 面板继续使用 smart search, LM tool 改为使用 `query` 和可选 `mode`、`limit`、`source`、`scope`、`includeInheritedFromScope`、`includeDocs`.
 - `angelscript_searchApi` 现在返回 `matches`、可选 `notices`、可选 `scopeLookup`,并在 tool 层附加 `request`.
-- 搜索执行已下沉到独立的 language-server 索引,支持 smart/plain/regex、ordered token gap plain 匹配、weak token reorder 回退、namespace/type scope、继承成员扩展与最近 override 去重.
+- 搜索执行已下沉到独立的 language-server 索引,支持 smart/regex、ordered token gap 搜索、namespace/type scope、继承成员扩展与最近 override 去重.
 - API 面板搜索路径现在直接消费新的 `angelscript/getAPISearch` 结果,不再在 extension 侧做分页、正则和二次排序.
 - VS Code LM tool 现在默认返回 `text-only`; 只有在 `UnrealAngelscript.languageModelTools.outputMode=text+structured` 时才会附带 `LanguageModelDataPart.json(...)`.
 - 当前仓库已不再保留 MCP server/runtime transport helper 和 MCP 专属测试/文档承诺.
@@ -68,7 +68,7 @@ Maintenance rule:
 - `angelscript_resolveSymbolAtPosition` 的预览仍会检查定义起始行上一行是否为 Unreal 反射宏(`UCLASS/UPROPERTY/UFUNCTION/UENUM`),命中时把宏行作为上下文输出.
 - `angelscript_findReferences` 的纯文本输出现在会显示 1-based 的 `range` 标签,并按文件分组展示引用.
 - 新增 language-server 搜索行为测试,并更新 formatter/transport 测试以覆盖 LM `text+structured` 与 `text-only`.
-- 已同步更新工具描述、schema 文案、README 与 face-ai report,确保面板 smart search 与 LM plain search 的拆分契约一致.
+- 已同步更新工具描述、schema 文案、README 与 face-ai report,确保单一 LM tool manifest 与当前 smart/regex 搜索契约一致.
 - CI 发布流程从 `beta/release` 迁移到 `pre-release/release`: 仅发布到 VS Code Marketplace(不再发布 GitHub 资产),保持 `runs-on: ubuntu-latest`,VSIX 打包不限定平台,并在成功后强制更新分支同名 tag(`pre-release`/`release`).
 
 #### Breaking Changes

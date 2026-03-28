@@ -46,8 +46,8 @@
                 ],
                 "toolReferenceName": "angelscript_searchApi",
                 "displayName": "Angelscript API Search",
-                "modelDescription": "Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires query. Default mode is `smart`. Use `smart` for fragment-based symbol lookup such as `GameplayTags :: AI`, `movement . start`, `Type.Member`, or `BuildMovementPath(`. Smart search is case-insensitive, preserves fragment order, supports namespace and member boundaries, recognizes callable-only trailing `(` or `()`, and ranks exact and fuzzy matches together with canonical qualified-name position as the primary sort key after exact canonical qualified matches. Use `regex` only for explicit VS Code-style `/pattern/flags` queries; regex search matches only symbol name views: short names, qualified names, mixin aliases, and callable `...()` views for methods/functions. Optional controls: limit (default 20, max 200), source (native|script|both, default both), scope, includeInheritedFromScope, and includeDocs. `scope` narrows the search domain to a known namespace or containing type before ranking. When a namespace and type share the same exact scope name, search automatically merges both scopes and may return grouped `scopeGroups` plus aggregate `matchCounts`. When `includeInheritedFromScope` is omitted, class scopes auto-expand inherited methods and properties while other scopes stay off silently; explicit `true` keeps legacy ignored-scope reporting. `includeDocs=true` only enriches returned matches with full documentation and does not affect ranking. Structured matches may include `matchReason` to help the model judge confidence. Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Success text groups matches by owner or namespace and renders declarations with minimal comment metadata.",
-                "userDescription": "Search Angelscript API symbols with smart search by default. Use fragment-based queries such as `Type.Member`, `Namespace::Func`, `GameplayTags :: AI`, `movement . start`, or a trailing `(` for callable-only. Use `mode=regex` with `/pattern/flags` only when needed. Same-name namespace and type scopes merge automatically, and omitted `includeInheritedFromScope` auto-expands class scopes only. `includeDocs=true` only enriches returned matches.",
+                "modelDescription": "Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires `query`; leave `mode` at the default `smart` unless you are intentionally sending `/pattern/flags`.",
+                "userDescription": "Search Angelscript API symbols.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(search)",
                 "inputSchema": {
@@ -55,11 +55,11 @@
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "Search query for Angelscript API symbols. Smart search is case-insensitive and supports fragment-based code-like queries such as `Type.Member`, `Namespace::Func`, `GameplayTags :: AI`, `movement . start`, and callable-only trailing `(` or `()`. When `mode=regex`, provide a VS Code-style `/pattern/flags` regex."
+                            "description": "Search query. In `smart` mode, supports `Type.Member`, `Namespace::Func`, `GameplayCue;` with ASCII `;` leaf termination, trailing `(` or `()`, and `|` branches. In `regex` mode, use `/pattern/flags`."
                         },
                         "mode": {
                             "type": "string",
-                            "description": "Optional. Search mode. Default is `smart`. Use `smart` for fragment-based fuzzy symbol search and `regex` only for explicit `/pattern/flags` queries.",
+                            "description": "Search mode. Defaults to `smart`. Use `regex` only with `/pattern/flags`.",
                             "enum": [
                                 "smart",
                                 "regex"
@@ -68,14 +68,14 @@
                         },
                         "limit": {
                             "type": "number",
-                            "description": "Optional. Maximum number of matches to return. Default is 20.",
+                            "description": "Maximum matches to return. Integer 1-200. Defaults to 20.",
                             "minimum": 1,
                             "maximum": 200,
                             "default": 20
                         },
                         "source": {
                             "type": "string",
-                            "description": "Optional. Filter results by source. Supported values: native, script, both. Default is both.",
+                            "description": "Limit results to `native`, `script`, or `both`. Defaults to `both`.",
                             "enum": [
                                 "native",
                                 "script",
@@ -84,70 +84,20 @@
                         },
                         "scope": {
                             "type": "string",
-                            "description": "Optional. Known namespace or containing type. Type scopes can expand inherited methods and properties, and also surface applicable mixin functions. When a namespace and type share the same exact name, search automatically merges both scopes."
+                            "description": "Known namespace or containing type to narrow before ranking. Type scopes can surface declared members, inherited methods and properties, and applicable mixin functions. Same-name namespace and type scopes merge automatically."
                         },
                         "includeInheritedFromScope": {
                             "type": "boolean",
-                            "description": "Optional. Only applies to class/type scopes. When omitted, class scopes auto-expand inherited methods and properties while namespace/struct/enum scopes keep inheritance expansion off. Explicit `true` preserves ignored-scope reporting for invalid or non-class scopes."
+                            "description": "Only applies to class/type scopes. When omitted, class scopes auto-expand inherited methods and properties, while namespace/struct/enum scopes keep inheritance expansion off. Explicit `true` preserves ignored-scope reporting for invalid or non-class scopes."
                         },
                         "includeDocs": {
                             "type": "boolean",
-                            "description": "Optional. Attach full documentation text to returned matches. This enriches results only and does not affect search ranking.",
+                            "description": "Attach full documentation text to returned matches. This enriches results only and does not affect ranking. Defaults to false.",
                             "default": false
                         }
                     },
                     "required": [
                         "query"
-                    ]
-                }
-            },
-            {
-                "name": "angelscript_getTypeMembers",
-                "tags": [
-                    "angelscript",
-                    "type",
-                    "members"
-                ],
-                "toolReferenceName": "angelscript_getTypeMembers",
-                "displayName": "Angelscript Type Members",
-                "modelDescription": "Use when you need the member list of a specific Angelscript type, including inherited members when requested. Do not use when you need parent/child hierarchy traversal between classes. Requires exact name (optional namespace for disambiguation). Optional switches: includeInherited (default false), includeDocs (default false), and kinds (both|method|property, default both). Returns readable text by default; structured JSON is included only when output mode is `text+structured`. Structured payload includes `type.name`, `type.namespace`, `type.qualifiedName`, always-on `type.description`, and member entries whose descriptions are populated only when `includeDocs=true`.",
-                "userDescription": "List members for a given Angelscript type. Structured JSON is optional via `text+structured` mode.",
-                "canBeReferencedInPrompt": true,
-                "icon": "$(symbol-class)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Type name to inspect."
-                        },
-                        "namespace": {
-                            "type": "string",
-                            "description": "Optional namespace to disambiguate type name. Use empty string for root namespace."
-                        },
-                        "includeInherited": {
-                            "type": "boolean",
-                            "description": "Optional. Include inherited members. Default is false.",
-                            "default": false
-                        },
-                        "includeDocs": {
-                            "type": "boolean",
-                            "description": "Optional. Include description text. Default is false.",
-                            "default": false
-                        },
-                        "kinds": {
-                            "type": "string",
-                            "description": "Optional. Filter by member kind. Default is both.",
-                            "enum": [
-                                "both",
-                                "method",
-                                "property"
-                            ],
-                            "default": "both"
-                        }
-                    },
-                    "required": [
-                        "name"
                     ]
                 }
             },
@@ -160,8 +110,8 @@
                 ],
                 "toolReferenceName": "angelscript_resolveSymbolAtPosition",
                 "displayName": "Angelscript Resolve Symbol At Position",
-                "modelDescription": "Use when you have an absolute file path and cursor position and need to identify the symbol, signature, documentation, or definition. Do not use when your primary goal is collecting all references across the project. Requires absolute filePath and position (line, character, both 1-based). Optional includeDocumentation controls doc payload (default true). Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Success text prefers normalized `/** ... */` docs plus declaration or definition preview. Preview still checks one line above definition start for Unreal reflection macros (UCLASS|UPROPERTY|UFUNCTION|UENUM).",
-                "userDescription": "Resolve the symbol at a file position with code-like text. Structured JSON is optional via `text+structured` mode.",
+                "modelDescription": "Use when you have an absolute file path and 1-based cursor position and need the symbol, signature, documentation, or definition at that location. Do not use when the primary goal is collecting project references.",
+                "userDescription": "Resolve the symbol at an absolute file path and 1-based position.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-method)",
                 "inputSchema": {
@@ -169,7 +119,7 @@
                     "properties": {
                         "filePath": {
                             "type": "string",
-                            "description": "Absolute path to the file containing the symbol."
+                            "description": "Absolute file path containing the symbol."
                         },
                         "position": {
                             "type": "object",
@@ -192,13 +142,63 @@
                         },
                         "includeDocumentation": {
                             "type": "boolean",
-                            "description": "Include documentation when available. Default is true.",
+                            "description": "Include documentation when available. Defaults to true.",
                             "default": true
                         }
                     },
                     "required": [
                         "filePath",
                         "position"
+                    ]
+                }
+            },
+            {
+                "name": "angelscript_getTypeMembers",
+                "tags": [
+                    "angelscript",
+                    "type",
+                    "members"
+                ],
+                "toolReferenceName": "angelscript_getTypeMembers",
+                "displayName": "Angelscript Type Members",
+                "modelDescription": "Use when you need members from one exact Angelscript type. Do not use when you need class hierarchy traversal. Requires exact `name`; provide `namespace` only to disambiguate collisions.",
+                "userDescription": "List members for a given Angelscript type.",
+                "canBeReferencedInPrompt": true,
+                "icon": "$(symbol-class)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Type name to inspect."
+                        },
+                        "namespace": {
+                            "type": "string",
+                            "description": "Namespace used only to disambiguate the type name. Use an empty string for the root namespace."
+                        },
+                        "includeInherited": {
+                            "type": "boolean",
+                            "description": "Include inherited members. Defaults to false.",
+                            "default": false
+                        },
+                        "includeDocs": {
+                            "type": "boolean",
+                            "description": "Include member description text. `type.description` is always returned. Defaults to false.",
+                            "default": false
+                        },
+                        "kinds": {
+                            "type": "string",
+                            "description": "Filter members to `both`, `method`, or `property`. Defaults to `both`.",
+                            "enum": [
+                                "both",
+                                "method",
+                                "property"
+                            ],
+                            "default": "both"
+                        }
+                    },
+                    "required": [
+                        "name"
                     ]
                 }
             },
@@ -211,8 +211,8 @@
                 ],
                 "toolReferenceName": "angelscript_getClassHierarchy",
                 "displayName": "Angelscript Class Hierarchy",
-                "modelDescription": "Use when you need class inheritance structure, including parent chain and derived-class expansion. Do not use when you only need members of a single type. Requires exact class name (e.g., \"APawn\"). Optional limits: maxSuperDepth (default 3), maxSubDepth (default 2), maxSubBreadth (default 10). Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Structured payload includes root, supers, derivedByParent, limits, truncated info, and script-class preview text when available. Success text uses comment-based lineage/derived trees plus source previews or native declaration stubs, and unresolved script sources degrade to `// source unavailable` instead of failing the tool.",
-                "userDescription": "Get class hierarchy with code-like lineage comments and previews. Structured JSON is optional via `text+structured` mode.",
+                "modelDescription": "Use when you need the parent chain or derived classes for one exact class. Do not use when you only need members from a single type. Requires exact class `name`.",
+                "userDescription": "Get class hierarchy for a given Angelscript class.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(symbol-class)",
                 "inputSchema": {
@@ -220,21 +220,21 @@
                     "properties": {
                         "name": {
                             "type": "string",
-                            "description": "Exact class name to inspect (e.g., \"APawn\")."
+                            "description": "Exact class name to inspect, for example `APawn`."
                         },
                         "maxSuperDepth": {
                             "type": "number",
-                            "description": "Optional. Maximum number of supertypes to return. Non-negative integer. Default is 3.",
+                            "description": "Maximum number of supertypes to return. Non-negative integer. Defaults to 3.",
                             "default": 3
                         },
                         "maxSubDepth": {
                             "type": "number",
-                            "description": "Optional. Maximum depth for subtype tree. Non-negative integer. Default is 2.",
+                            "description": "Maximum depth for the subtype tree. Non-negative integer. Defaults to 2.",
                             "default": 2
                         },
                         "maxSubBreadth": {
                             "type": "number",
-                            "description": "Optional. Maximum number of direct children returned per class. Non-negative integer. Default is 10. Truncation per class is reported in truncated.derivedBreadthByClass.",
+                            "description": "Maximum direct children returned per class. Non-negative integer. Defaults to 10. Per-class truncation counts are reported in `truncated.derivedBreadthByClass`.",
                             "default": 10
                         }
                     },
@@ -252,8 +252,8 @@
                 ],
                 "toolReferenceName": "angelscript_findReferences",
                 "displayName": "Angelscript Find References",
-                "modelDescription": "Use when you have a symbol location and need project references to that symbol. Do not use when you only need to identify what symbol is at the current position. Requires absolute filePath and position (line, character, both 1-based). Optional limit controls the maximum number of returned references (default 30, max 200). Returns readable code-first text by default; structured JSON is included only when output mode is `text+structured`. Structured payload includes total, returned, limit, truncated, per-file grouping, 1-based range labels, and preview text. Success text renders `// <filePath>` + `// range: ...` + preview blocks, with truncation surfaced as a final comment only when needed.",
-                "userDescription": "Find symbol references with file-grouped preview blocks. Structured JSON is optional via `text+structured` mode.",
+                "modelDescription": "Use when you have an absolute file path and 1-based symbol position and need project references to that symbol. Do not use when you only need to identify the symbol at the current position.",
+                "userDescription": "Find references for the symbol at an absolute file path and 1-based position.",
                 "canBeReferencedInPrompt": true,
                 "icon": "$(references)",
                 "inputSchema": {
@@ -261,7 +261,7 @@
                     "properties": {
                         "filePath": {
                             "type": "string",
-                            "description": "Absolute path to the file containing the symbol."
+                            "description": "Absolute file path containing the symbol."
                         },
                         "position": {
                             "type": "object",
@@ -284,7 +284,7 @@
                         },
                         "limit": {
                             "type": "number",
-                            "description": "Optional. Maximum number of references to return. Default is 30.",
+                            "description": "Maximum references to return. Integer 1-200. Defaults to 30.",
                             "minimum": 1,
                             "maximum": 200,
                             "default": 30
@@ -983,11 +983,11 @@
         "glob": "^13.0.0",
         "vscode-languageclient": "^9.0.1",
         "vscode-languageserver": "^9.0.1",
-        "vscode-languageserver-textdocument": "^1.0.12",
-        "zod": "^4.3.5"
+        "vscode-languageserver-textdocument": "^1.0.12"
     },
     "scripts": {
         "vscode:prepublish": "npm run compile",
+        "sync:lm-tools": "node scripts/sync-lm-tools.mjs",
         "compile": "npm run compile:extension && npm run compile:language-server",
         "compile:extension": "cd extension && node esbuild.js",
         "compile:language-server": "cd language-server && node esbuild.js",
@@ -996,7 +996,7 @@
         "watch": "npm-run-all -p watch:*",
         "watch:extension": "cd extension && node esbuild.js --watch",
         "watch:language-server": "cd language-server && node esbuild.js --watch",
-        "test:fork-boundary": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/toolContractUtils.test.js extension/out/__tests__/toolResultTransport.test.js extension/out/__tests__/toolTextFormatter.test.js language-server/out/__tests__/apiSearch.test.js language-server/out/__tests__/apiSearch.realSymbols.test.js language-server/out/__tests__/getTypeMembers.test.js language-server/out/__tests__/symbolResolve.test.js language-server/out/__tests__/workspaceLayout.test.js",
+        "test:fork-boundary": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/lmToolContractSync.test.js extension/out/__tests__/toolContractUtils.test.js extension/out/__tests__/toolResultTransport.test.js extension/out/__tests__/toolTextFormatter.test.js language-server/out/__tests__/apiSearch.test.js language-server/out/__tests__/apiSearch.realSymbols.test.js language-server/out/__tests__/getTypeMembers.test.js language-server/out/__tests__/symbolResolve.test.js language-server/out/__tests__/workspaceLayout.test.js",
         "test": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/*.test.js language-server/out/__tests__/*.test.js",
         "upstream:divergence:log": "git log --oneline upstream/master..HEAD",
         "upstream:divergence:stat": "git diff --stat upstream/master..HEAD",
