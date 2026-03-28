@@ -25,13 +25,13 @@ export type ToolSuccess<TData> = {
 
 export type ToolResult<TData> = ToolSuccess<TData> | ToolFailure;
 
-export type SearchMode = 'smart' | 'plain' | 'regex';
+export type SearchMode = 'smart' | 'regex';
 export type SearchSource = 'native' | 'script' | 'both';
 export type SearchMatchSource = 'native' | 'script';
 export type SearchKind = 'class' | 'struct' | 'enum' | 'method' | 'function' | 'property' | 'globalVariable';
 export type SearchScopeKind = 'namespace' | 'class' | 'struct' | 'enum';
 export type SearchScopeRelationship = 'declared' | 'inherited' | 'mixin';
-export type SearchMatchReason = 'exact-qualified' | 'exact-short' | 'boundary-ordered' | 'ordered-wildcard' | 'short-ordered' | 'weak-reorder';
+export type SearchMatchReason = 'exact-qualified' | 'exact-short' | 'boundary-ordered' | 'ordered-wildcard' | 'short-ordered';
 export type SearchIncludeInheritedFromScopeMode = 'auto' | 'explicit';
 
 export type GetAPISearchParams = {
@@ -125,7 +125,7 @@ export type GetAPISearchToolData = {
     inheritedScopeOutcome?: InheritedScopeOutcome;
     request?: {
         query: string;
-        regex: boolean;
+        mode: SearchMode;
         limit: number;
         source: SearchSource;
         scope?: string;

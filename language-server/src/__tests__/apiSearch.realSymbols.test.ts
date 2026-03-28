@@ -14,7 +14,7 @@ import { GetAPISearch, InvalidateAPISearchCache } from '../api_search';
 
 type RealSymbolFixtureCase = {
     id: string;
-    mode: 'smart' | 'plain';
+    mode: 'smart' | 'regex';
     query: string;
     topWindow: number;
     expectWithinTop: string[];

@@ -63,7 +63,7 @@
       "AActor",
       "FInputDebugKeyBinding"
     ],
-    "caseCount": 168
+    "caseCount": 151
   },
   "debugDatabaseChunks": [
     {
@@ -884,796 +884,6 @@
   ],
   "cases": [
     {
-      "topWindow": 10,
-      "expectWithinTop": [
-        "AbilitySystem::AddGameplayTags"
-      ],
-      "id": "plain-callable-ability-system",
-      "mode": "plain",
-      "query": "ability system add gameplay tags("
-    },
-    {
-      "topWindow": 10,
-      "expectWithinTop": [
-        "CameraPose::MakeCameraPoseFromCameraComponent"
-      ],
-      "id": "plain-callable-camera-pose",
-      "mode": "plain",
-      "query": "camera pose make camera pose("
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "AActor"
-      ],
-      "id": "plain-entry-aactor",
-      "mode": "plain",
-      "query": "Actor"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "AAIController"
-      ],
-      "id": "plain-entry-aaicontroller",
-      "mode": "plain",
-      "query": "AI Controller"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "ACameraRig_Rail"
-      ],
-      "id": "plain-entry-acamerarig-rail",
-      "mode": "plain",
-      "query": "Camera Rig Rail"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "EAILockSource"
-      ],
-      "id": "plain-entry-eailocksource",
-      "mode": "plain",
-      "query": "AI Lock Source"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "FGameplayTag"
-      ],
-      "id": "plain-entry-fgameplaytag",
-      "mode": "plain",
-      "query": "Gameplay Tag"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "FGameplayTagContainer"
-      ],
-      "id": "plain-entry-fgameplaytagcontainer",
-      "mode": "plain",
-      "query": "Gameplay Tag Container"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "FInputDebugKeyBinding"
-      ],
-      "id": "plain-entry-finputdebugkeybinding",
-      "mode": "plain",
-      "query": "Input Debug Key Binding"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "UAbilitySystemComponent"
-      ],
-      "id": "plain-entry-uabilitysystemcomponent",
-      "mode": "plain",
-      "query": "Ability System Component"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "UCameraComponent"
-      ],
-      "id": "plain-entry-ucameracomponent",
-      "mode": "plain",
-      "query": "Camera Component"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "UCharacterMovementComponent"
-      ],
-      "id": "plain-entry-ucharactermovementcomponent",
-      "mode": "plain",
-      "query": "Character Movement Component"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "UGameplayAbility"
-      ],
-      "id": "plain-entry-ugameplayability",
-      "mode": "plain",
-      "query": "Gameplay Ability"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "UGameplayEffect"
-      ],
-      "id": "plain-entry-ugameplayeffect",
-      "mode": "plain",
-      "query": "Gameplay Effect"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "UGameplayTask"
-      ],
-      "id": "plain-entry-ugameplaytask",
-      "mode": "plain",
-      "query": "Gameplay Task"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "UGameplayTask_WaitDelay"
-      ],
-      "id": "plain-entry-ugameplaytask-waitdelay",
-      "mode": "plain",
-      "query": "Gameplay Task Wait Delay"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "UMovementComponent"
-      ],
-      "id": "plain-entry-umovementcomponent",
-      "mode": "plain",
-      "query": "Movement Component"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "UNavMovementComponent"
-      ],
-      "id": "plain-entry-unavmovementcomponent",
-      "mode": "plain",
-      "query": "Nav Movement Component"
-    },
-    {
-      "topWindow": 8,
-      "expectWithinTop": [
-        "UWidget"
-      ],
-      "id": "plain-entry-uwidget",
-      "mode": "plain",
-      "query": "Widget"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "AActor.GetActorNameOrLabel"
-      ],
-      "id": "plain-exact-method-aactor-getactornameorlabel",
-      "mode": "plain",
-      "query": "AActor.GetActorNameOrLabel(",
-      "expectFirst": "AActor.GetActorNameOrLabel"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "AAIController.GetAIPerceptionComponent"
-      ],
-      "id": "plain-exact-method-aaicontroller-getaiperceptioncomponent",
-      "mode": "plain",
-      "query": "AAIController.GetAIPerceptionComponent(",
-      "expectFirst": "AAIController.GetAIPerceptionComponent"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "AAIController.MoveToActor"
-      ],
-      "id": "plain-exact-method-aaicontroller-movetoactor",
-      "mode": "plain",
-      "query": "AAIController.MoveToActor(",
-      "expectFirst": "AAIController.MoveToActor"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "AbilitySystem::AddGameplayTags"
-      ],
-      "id": "plain-exact-method-abilitysystem-addgameplaytags",
-      "mode": "plain",
-      "query": "AbilitySystem::AddGameplayTags(",
-      "expectFirst": "AbilitySystem::AddGameplayTags"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "AbilitySystem::BindEventWrapperToGameplayTagChanged"
-      ],
-      "id": "plain-exact-method-abilitysystem-bindeventwrappertogameplaytagchanged",
-      "mode": "plain",
-      "query": "AbilitySystem::BindEventWrapperToGameplayTagChanged(",
-      "expectFirst": "AbilitySystem::BindEventWrapperToGameplayTagChanged"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "AbilitySystem::DoesGameplayCueMeetTagRequirements"
-      ],
-      "id": "plain-exact-method-abilitysystem-doesgameplaycuemeettagrequirements",
-      "mode": "plain",
-      "query": "AbilitySystem::DoesGameplayCueMeetTagRequirements(",
-      "expectFirst": "AbilitySystem::DoesGameplayCueMeetTagRequirements"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "ACameraRig_Rail.GetRailSplineComponent"
-      ],
-      "id": "plain-exact-method-acamerarig-rail-getrailsplinecomponent",
-      "mode": "plain",
-      "query": "ACameraRig_Rail.GetRailSplineComponent(",
-      "expectFirst": "ACameraRig_Rail.GetRailSplineComponent"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "AIHelper::GetAIController"
-      ],
-      "id": "plain-exact-method-aihelper-getaicontroller",
-      "mode": "plain",
-      "query": "AIHelper::GetAIController(",
-      "expectFirst": "AIHelper::GetAIController"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "AIHelper::IsValidAILocation"
-      ],
-      "id": "plain-exact-method-aihelper-isvalidailocation",
-      "mode": "plain",
-      "query": "AIHelper::IsValidAILocation(",
-      "expectFirst": "AIHelper::IsValidAILocation"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "AIHelper::SpawnAIFromClass"
-      ],
-      "id": "plain-exact-method-aihelper-spawnaifromclass",
-      "mode": "plain",
-      "query": "AIHelper::SpawnAIFromClass(",
-      "expectFirst": "AIHelper::SpawnAIFromClass"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "CameraPose::GetAimDir"
-      ],
-      "id": "plain-exact-method-camerapose-getaimdir",
-      "mode": "plain",
-      "query": "CameraPose::GetAimDir(",
-      "expectFirst": "CameraPose::GetAimDir"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "CameraPose::GetTransform"
-      ],
-      "id": "plain-exact-method-camerapose-gettransform",
-      "mode": "plain",
-      "query": "CameraPose::GetTransform(",
-      "expectFirst": "CameraPose::GetTransform"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "CameraPose::MakeCameraPoseFromCameraComponent"
-      ],
-      "id": "plain-exact-method-camerapose-makecameraposefromcameracomponent",
-      "mode": "plain",
-      "query": "CameraPose::MakeCameraPoseFromCameraComponent(",
-      "expectFirst": "CameraPose::MakeCameraPoseFromCameraComponent"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "CameraVariableTable::GetFloatCameraVariable"
-      ],
-      "id": "plain-exact-method-cameravariabletable-getfloatcameravariable",
-      "mode": "plain",
-      "query": "CameraVariableTable::GetFloatCameraVariable(",
-      "expectFirst": "CameraVariableTable::GetFloatCameraVariable"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "CameraVariableTable::SetVector3CameraVariable"
-      ],
-      "id": "plain-exact-method-cameravariabletable-setvector3cameravariable",
-      "mode": "plain",
-      "query": "CameraVariableTable::SetVector3CameraVariable(",
-      "expectFirst": "CameraVariableTable::SetVector3CameraVariable"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "FGameplayTag.GetGameplayTagParents"
-      ],
-      "id": "plain-exact-method-fgameplaytag-getgameplaytagparents",
-      "mode": "plain",
-      "query": "FGameplayTag.GetGameplayTagParents(",
-      "expectFirst": "FGameplayTag.GetGameplayTagParents"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "FGameplayTag.MatchesTagExact"
-      ],
-      "id": "plain-exact-method-fgameplaytag-matchestagexact",
-      "mode": "plain",
-      "query": "FGameplayTag.MatchesTagExact(",
-      "expectFirst": "FGameplayTag.MatchesTagExact"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "FGameplayTagContainer.GetMatchedTags"
-      ],
-      "id": "plain-exact-method-fgameplaytagcontainer-getmatchedtags",
-      "mode": "plain",
-      "query": "FGameplayTagContainer.GetMatchedTags(",
-      "expectFirst": "FGameplayTagContainer.GetMatchedTags"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "FGameplayTagContainer.HasAll"
-      ],
-      "id": "plain-exact-method-fgameplaytagcontainer-hasall",
-      "mode": "plain",
-      "query": "FGameplayTagContainer.HasAll(",
-      "expectFirst": "FGameplayTagContainer.HasAll"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "FInputDebugKeyBinding.Execute"
-      ],
-      "id": "plain-exact-method-finputdebugkeybinding-execute",
-      "mode": "plain",
-      "query": "FInputDebugKeyBinding.Execute(",
-      "expectFirst": "FInputDebugKeyBinding.Execute"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "FInputDebugKeyBinding.GetHandle"
-      ],
-      "id": "plain-exact-method-finputdebugkeybinding-gethandle",
-      "mode": "plain",
-      "query": "FInputDebugKeyBinding.GetHandle(",
-      "expectFirst": "FInputDebugKeyBinding.GetHandle"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UAbilitySystemComponent.GetOwnedGameplayTags"
-      ],
-      "id": "plain-exact-method-uabilitysystemcomponent-getownedgameplaytags",
-      "mode": "plain",
-      "query": "UAbilitySystemComponent.GetOwnedGameplayTags(",
-      "expectFirst": "UAbilitySystemComponent.GetOwnedGameplayTags"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UAbilitySystemComponent.TryActivateAbilitiesByTag"
-      ],
-      "id": "plain-exact-method-uabilitysystemcomponent-tryactivateabilitiesbytag",
-      "mode": "plain",
-      "query": "UAbilitySystemComponent.TryActivateAbilitiesByTag(",
-      "expectFirst": "UAbilitySystemComponent.TryActivateAbilitiesByTag"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UCameraComponent.GetCameraView"
-      ],
-      "id": "plain-exact-method-ucameracomponent-getcameraview",
-      "mode": "plain",
-      "query": "UCameraComponent.GetCameraView(",
-      "expectFirst": "UCameraComponent.GetCameraView"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UCameraComponent.SetAspectRatio"
-      ],
-      "id": "plain-exact-method-ucameracomponent-setaspectratio",
-      "mode": "plain",
-      "query": "UCameraComponent.SetAspectRatio(",
-      "expectFirst": "UCameraComponent.SetAspectRatio"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UCharacterMovementComponent.DisableMovement"
-      ],
-      "id": "plain-exact-method-ucharactermovementcomponent-disablemovement",
-      "mode": "plain",
-      "query": "UCharacterMovementComponent.DisableMovement(",
-      "expectFirst": "UCharacterMovementComponent.DisableMovement"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UCharacterMovementComponent.SetMovementMode"
-      ],
-      "id": "plain-exact-method-ucharactermovementcomponent-setmovementmode",
-      "mode": "plain",
-      "query": "UCharacterMovementComponent.SetMovementMode(",
-      "expectFirst": "UCharacterMovementComponent.SetMovementMode"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UGameplayAbility.ApplyGameplayEffectToOwner"
-      ],
-      "id": "plain-exact-method-ugameplayability-applygameplayeffecttoowner",
-      "mode": "plain",
-      "query": "UGameplayAbility.ApplyGameplayEffectToOwner(",
-      "expectFirst": "UGameplayAbility.ApplyGameplayEffectToOwner"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UGameplayAbility.GetAbilitySystemComponentFromActorInfo"
-      ],
-      "id": "plain-exact-method-ugameplayability-getabilitysystemcomponentfromactorinfo",
-      "mode": "plain",
-      "query": "UGameplayAbility.GetAbilitySystemComponentFromActorInfo(",
-      "expectFirst": "UGameplayAbility.GetAbilitySystemComponentFromActorInfo"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UGameplayEffect.GetGrantedTags"
-      ],
-      "id": "plain-exact-method-ugameplayeffect-getgrantedtags",
-      "mode": "plain",
-      "query": "UGameplayEffect.GetGrantedTags(",
-      "expectFirst": "UGameplayEffect.GetGrantedTags"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UGameplayEffect.GetOwnedGameplayTags"
-      ],
-      "id": "plain-exact-method-ugameplayeffect-getownedgameplaytags",
-      "mode": "plain",
-      "query": "UGameplayEffect.GetOwnedGameplayTags(",
-      "expectFirst": "UGameplayEffect.GetOwnedGameplayTags"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UGameplayTask.EndTask"
-      ],
-      "id": "plain-exact-method-ugameplaytask-endtask",
-      "mode": "plain",
-      "query": "UGameplayTask.EndTask(",
-      "expectFirst": "UGameplayTask.EndTask"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UGameplayTask.ReadyForActivation"
-      ],
-      "id": "plain-exact-method-ugameplaytask-readyforactivation",
-      "mode": "plain",
-      "query": "UGameplayTask.ReadyForActivation(",
-      "expectFirst": "UGameplayTask.ReadyForActivation"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UMovementComponent.SetPlaneConstraintEnabled"
-      ],
-      "id": "plain-exact-method-umovementcomponent-setplaneconstraintenabled",
-      "mode": "plain",
-      "query": "UMovementComponent.SetPlaneConstraintEnabled(",
-      "expectFirst": "UMovementComponent.SetPlaneConstraintEnabled"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UMovementComponent.StopMovementImmediately"
-      ],
-      "id": "plain-exact-method-umovementcomponent-stopmovementimmediately",
-      "mode": "plain",
-      "query": "UMovementComponent.StopMovementImmediately(",
-      "expectFirst": "UMovementComponent.StopMovementImmediately"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UNavMovementComponent.GetVelocityForNavMovement"
-      ],
-      "id": "plain-exact-method-unavmovementcomponent-getvelocityfornavmovement",
-      "mode": "plain",
-      "query": "UNavMovementComponent.GetVelocityForNavMovement(",
-      "expectFirst": "UNavMovementComponent.GetVelocityForNavMovement"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UNavMovementComponent.IsMovingOnGround"
-      ],
-      "id": "plain-exact-method-unavmovementcomponent-ismovingonground",
-      "mode": "plain",
-      "query": "UNavMovementComponent.IsMovingOnGround(",
-      "expectFirst": "UNavMovementComponent.IsMovingOnGround"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UWidget.GetAccessibleText"
-      ],
-      "id": "plain-exact-method-uwidget-getaccessibletext",
-      "mode": "plain",
-      "query": "UWidget.GetAccessibleText(",
-      "expectFirst": "UWidget.GetAccessibleText"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "AActor.ActorGuid"
-      ],
-      "id": "plain-exact-property-aactor-actorguid",
-      "mode": "plain",
-      "query": "AActor.ActorGuid",
-      "expectFirst": "AActor.ActorGuid"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "AAIController.BrainComponent"
-      ],
-      "id": "plain-exact-property-aaicontroller-braincomponent",
-      "mode": "plain",
-      "query": "AAIController.BrainComponent",
-      "expectFirst": "AAIController.BrainComponent"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "ACameraRig_Rail.CurrentPositionOnRail"
-      ],
-      "id": "plain-exact-property-acamerarig-rail-currentpositiononrail",
-      "mode": "plain",
-      "query": "ACameraRig_Rail.CurrentPositionOnRail",
-      "expectFirst": "ACameraRig_Rail.CurrentPositionOnRail"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "ACameraRig_Rail.RailSplineComponent"
-      ],
-      "id": "plain-exact-property-acamerarig-rail-railsplinecomponent",
-      "mode": "plain",
-      "query": "ACameraRig_Rail.RailSplineComponent",
-      "expectFirst": "ACameraRig_Rail.RailSplineComponent"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "EAILockSource.Animation"
-      ],
-      "id": "plain-exact-property-eailocksource-animation",
-      "mode": "plain",
-      "query": "EAILockSource.Animation",
-      "expectFirst": "EAILockSource.Animation"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "EAILockSource.Gameplay"
-      ],
-      "id": "plain-exact-property-eailocksource-gameplay",
-      "mode": "plain",
-      "query": "EAILockSource.Gameplay",
-      "expectFirst": "EAILockSource.Gameplay"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "EAILockSource.Logic"
-      ],
-      "id": "plain-exact-property-eailocksource-logic",
-      "mode": "plain",
-      "query": "EAILockSource.Logic",
-      "expectFirst": "EAILockSource.Logic"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "FGameplayTagContainer.GameplayTags"
-      ],
-      "id": "plain-exact-property-fgameplaytagcontainer-gameplaytags",
-      "mode": "plain",
-      "query": "FGameplayTagContainer.GameplayTags",
-      "expectFirst": "FGameplayTagContainer.GameplayTags"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "GameplayTags::FeatureName_AIPawnData"
-      ],
-      "id": "plain-exact-property-gameplaytags-featurename-aipawndata",
-      "mode": "plain",
-      "query": "GameplayTags::FeatureName_AIPawnData",
-      "expectFirst": "GameplayTags::FeatureName_AIPawnData"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "GameplayTags::GameplayCue"
-      ],
-      "id": "plain-exact-property-gameplaytags-gameplaycue",
-      "mode": "plain",
-      "query": "GameplayTags::GameplayCue",
-      "expectFirst": "GameplayTags::GameplayCue"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "GameplayTags::GameplayCue_Test"
-      ],
-      "id": "plain-exact-property-gameplaytags-gameplaycue-test",
-      "mode": "plain",
-      "query": "GameplayTags::GameplayCue_Test",
-      "expectFirst": "GameplayTags::GameplayCue_Test"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "GameplayTags::Settings_Movement"
-      ],
-      "id": "plain-exact-property-gameplaytags-settings-movement",
-      "mode": "plain",
-      "query": "GameplayTags::Settings_Movement",
-      "expectFirst": "GameplayTags::Settings_Movement"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "GameplayTags::Status"
-      ],
-      "id": "plain-exact-property-gameplaytags-status",
-      "mode": "plain",
-      "query": "GameplayTags::Status",
-      "expectFirst": "GameplayTags::Status"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "GameplayTags::Status_StunGauge"
-      ],
-      "id": "plain-exact-property-gameplaytags-status-stungauge",
-      "mode": "plain",
-      "query": "GameplayTags::Status_StunGauge",
-      "expectFirst": "GameplayTags::Status_StunGauge"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UAbilitySystemComponent.AffectedAnimInstanceTag"
-      ],
-      "id": "plain-exact-property-uabilitysystemcomponent-affectedaniminstancetag",
-      "mode": "plain",
-      "query": "UAbilitySystemComponent.AffectedAnimInstanceTag",
-      "expectFirst": "UAbilitySystemComponent.AffectedAnimInstanceTag"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UCameraComponent.FieldOfView"
-      ],
-      "id": "plain-exact-property-ucameracomponent-fieldofview",
-      "mode": "plain",
-      "query": "UCameraComponent.FieldOfView",
-      "expectFirst": "UCameraComponent.FieldOfView"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UCharacterMovementComponent.MovementMode"
-      ],
-      "id": "plain-exact-property-ucharactermovementcomponent-movementmode",
-      "mode": "plain",
-      "query": "UCharacterMovementComponent.MovementMode",
-      "expectFirst": "UCharacterMovementComponent.MovementMode"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UGameplayAbility.AbilityTags"
-      ],
-      "id": "plain-exact-property-ugameplayability-abilitytags",
-      "mode": "plain",
-      "query": "UGameplayAbility.AbilityTags",
-      "expectFirst": "UGameplayAbility.AbilityTags"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UGameplayEffect.GameplayCues"
-      ],
-      "id": "plain-exact-property-ugameplayeffect-gameplaycues",
-      "mode": "plain",
-      "query": "UGameplayEffect.GameplayCues",
-      "expectFirst": "UGameplayEffect.GameplayCues"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UGameplayTask_WaitDelay.OnFinish"
-      ],
-      "id": "plain-exact-property-ugameplaytask-waitdelay-onfinish",
-      "mode": "plain",
-      "query": "UGameplayTask_WaitDelay.OnFinish",
-      "expectFirst": "UGameplayTask_WaitDelay.OnFinish"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UMovementComponent.bConstrainToPlane"
-      ],
-      "id": "plain-exact-property-umovementcomponent-bconstraintoplane",
-      "mode": "plain",
-      "query": "UMovementComponent.bConstrainToPlane",
-      "expectFirst": "UMovementComponent.bConstrainToPlane"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UNavMovementComponent.NavAgentProps"
-      ],
-      "id": "plain-exact-property-unavmovementcomponent-navagentprops",
-      "mode": "plain",
-      "query": "UNavMovementComponent.NavAgentProps",
-      "expectFirst": "UNavMovementComponent.NavAgentProps"
-    },
-    {
-      "topWindow": 5,
-      "expectWithinTop": [
-        "UWidget.ToolTipWidget"
-      ],
-      "id": "plain-exact-property-uwidget-tooltipwidget",
-      "mode": "plain",
-      "query": "UWidget.ToolTipWidget",
-      "expectFirst": "UWidget.ToolTipWidget"
-    },
-    {
-      "topWindow": 10,
-      "expectWithinTop": [
-        "GameplayTags::GameplayCue"
-      ],
-      "id": "plain-gameplay-cue",
-      "mode": "plain",
-      "query": "gameplay cue"
-    },
-    {
       "topWindow": 12,
       "expectWithinTop": [
         "AIHelper::GetAIController",
@@ -1737,6 +947,24 @@
       "id": "smart-bucket-status",
       "mode": "smart",
       "query": "status"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "AbilitySystem::AddGameplayTags"
+      ],
+      "id": "smart-callable-ability-system",
+      "mode": "smart",
+      "query": "ability system add gameplay tags("
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "CameraPose::MakeCameraPoseFromCameraComponent"
+      ],
+      "id": "smart-callable-camera-pose",
+      "mode": "smart",
+      "query": "camera pose make camera pose("
     },
     {
       "topWindow": 8,
@@ -1890,6 +1118,625 @@
       "id": "smart-entry-uwidget",
       "mode": "smart",
       "query": "Widget"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AActor.GetActorNameOrLabel"
+      ],
+      "id": "smart-exact-method-aactor-getactornameorlabel",
+      "mode": "smart",
+      "query": "AActor.GetActorNameOrLabel(",
+      "expectFirst": "AActor.GetActorNameOrLabel"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AAIController.GetAIPerceptionComponent"
+      ],
+      "id": "smart-exact-method-aaicontroller-getaiperceptioncomponent",
+      "mode": "smart",
+      "query": "AAIController.GetAIPerceptionComponent(",
+      "expectFirst": "AAIController.GetAIPerceptionComponent"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AAIController.MoveToActor"
+      ],
+      "id": "smart-exact-method-aaicontroller-movetoactor",
+      "mode": "smart",
+      "query": "AAIController.MoveToActor(",
+      "expectFirst": "AAIController.MoveToActor"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AbilitySystem::AddGameplayTags"
+      ],
+      "id": "smart-exact-method-abilitysystem-addgameplaytags",
+      "mode": "smart",
+      "query": "AbilitySystem::AddGameplayTags(",
+      "expectFirst": "AbilitySystem::AddGameplayTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AbilitySystem::BindEventWrapperToGameplayTagChanged"
+      ],
+      "id": "smart-exact-method-abilitysystem-bindeventwrappertogameplaytagchanged",
+      "mode": "smart",
+      "query": "AbilitySystem::BindEventWrapperToGameplayTagChanged(",
+      "expectFirst": "AbilitySystem::BindEventWrapperToGameplayTagChanged"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AbilitySystem::DoesGameplayCueMeetTagRequirements"
+      ],
+      "id": "smart-exact-method-abilitysystem-doesgameplaycuemeettagrequirements",
+      "mode": "smart",
+      "query": "AbilitySystem::DoesGameplayCueMeetTagRequirements(",
+      "expectFirst": "AbilitySystem::DoesGameplayCueMeetTagRequirements"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "ACameraRig_Rail.GetRailSplineComponent"
+      ],
+      "id": "smart-exact-method-acamerarig-rail-getrailsplinecomponent",
+      "mode": "smart",
+      "query": "ACameraRig_Rail.GetRailSplineComponent(",
+      "expectFirst": "ACameraRig_Rail.GetRailSplineComponent"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AIHelper::GetAIController"
+      ],
+      "id": "smart-exact-method-aihelper-getaicontroller",
+      "mode": "smart",
+      "query": "AIHelper::GetAIController(",
+      "expectFirst": "AIHelper::GetAIController"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AIHelper::IsValidAILocation"
+      ],
+      "id": "smart-exact-method-aihelper-isvalidailocation",
+      "mode": "smart",
+      "query": "AIHelper::IsValidAILocation(",
+      "expectFirst": "AIHelper::IsValidAILocation"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AIHelper::SpawnAIFromClass"
+      ],
+      "id": "smart-exact-method-aihelper-spawnaifromclass",
+      "mode": "smart",
+      "query": "AIHelper::SpawnAIFromClass(",
+      "expectFirst": "AIHelper::SpawnAIFromClass"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "CameraPose::GetAimDir"
+      ],
+      "id": "smart-exact-method-camerapose-getaimdir",
+      "mode": "smart",
+      "query": "CameraPose::GetAimDir(",
+      "expectFirst": "CameraPose::GetAimDir"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "CameraPose::GetTransform"
+      ],
+      "id": "smart-exact-method-camerapose-gettransform",
+      "mode": "smart",
+      "query": "CameraPose::GetTransform(",
+      "expectFirst": "CameraPose::GetTransform"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "CameraPose::MakeCameraPoseFromCameraComponent"
+      ],
+      "id": "smart-exact-method-camerapose-makecameraposefromcameracomponent",
+      "mode": "smart",
+      "query": "CameraPose::MakeCameraPoseFromCameraComponent(",
+      "expectFirst": "CameraPose::MakeCameraPoseFromCameraComponent"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "CameraVariableTable::GetFloatCameraVariable"
+      ],
+      "id": "smart-exact-method-cameravariabletable-getfloatcameravariable",
+      "mode": "smart",
+      "query": "CameraVariableTable::GetFloatCameraVariable(",
+      "expectFirst": "CameraVariableTable::GetFloatCameraVariable"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "CameraVariableTable::SetVector3CameraVariable"
+      ],
+      "id": "smart-exact-method-cameravariabletable-setvector3cameravariable",
+      "mode": "smart",
+      "query": "CameraVariableTable::SetVector3CameraVariable(",
+      "expectFirst": "CameraVariableTable::SetVector3CameraVariable"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FGameplayTag.GetGameplayTagParents"
+      ],
+      "id": "smart-exact-method-fgameplaytag-getgameplaytagparents",
+      "mode": "smart",
+      "query": "FGameplayTag.GetGameplayTagParents(",
+      "expectFirst": "FGameplayTag.GetGameplayTagParents"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FGameplayTag.MatchesTagExact"
+      ],
+      "id": "smart-exact-method-fgameplaytag-matchestagexact",
+      "mode": "smart",
+      "query": "FGameplayTag.MatchesTagExact(",
+      "expectFirst": "FGameplayTag.MatchesTagExact"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FGameplayTagContainer.GetMatchedTags"
+      ],
+      "id": "smart-exact-method-fgameplaytagcontainer-getmatchedtags",
+      "mode": "smart",
+      "query": "FGameplayTagContainer.GetMatchedTags(",
+      "expectFirst": "FGameplayTagContainer.GetMatchedTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FGameplayTagContainer.HasAll"
+      ],
+      "id": "smart-exact-method-fgameplaytagcontainer-hasall",
+      "mode": "smart",
+      "query": "FGameplayTagContainer.HasAll(",
+      "expectFirst": "FGameplayTagContainer.HasAll"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FInputDebugKeyBinding.Execute"
+      ],
+      "id": "smart-exact-method-finputdebugkeybinding-execute",
+      "mode": "smart",
+      "query": "FInputDebugKeyBinding.Execute(",
+      "expectFirst": "FInputDebugKeyBinding.Execute"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FInputDebugKeyBinding.GetHandle"
+      ],
+      "id": "smart-exact-method-finputdebugkeybinding-gethandle",
+      "mode": "smart",
+      "query": "FInputDebugKeyBinding.GetHandle(",
+      "expectFirst": "FInputDebugKeyBinding.GetHandle"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UAbilitySystemComponent.GetOwnedGameplayTags"
+      ],
+      "id": "smart-exact-method-uabilitysystemcomponent-getownedgameplaytags",
+      "mode": "smart",
+      "query": "UAbilitySystemComponent.GetOwnedGameplayTags(",
+      "expectFirst": "UAbilitySystemComponent.GetOwnedGameplayTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UAbilitySystemComponent.TryActivateAbilitiesByTag"
+      ],
+      "id": "smart-exact-method-uabilitysystemcomponent-tryactivateabilitiesbytag",
+      "mode": "smart",
+      "query": "UAbilitySystemComponent.TryActivateAbilitiesByTag(",
+      "expectFirst": "UAbilitySystemComponent.TryActivateAbilitiesByTag"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCameraComponent.GetCameraView"
+      ],
+      "id": "smart-exact-method-ucameracomponent-getcameraview",
+      "mode": "smart",
+      "query": "UCameraComponent.GetCameraView(",
+      "expectFirst": "UCameraComponent.GetCameraView"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCameraComponent.SetAspectRatio"
+      ],
+      "id": "smart-exact-method-ucameracomponent-setaspectratio",
+      "mode": "smart",
+      "query": "UCameraComponent.SetAspectRatio(",
+      "expectFirst": "UCameraComponent.SetAspectRatio"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCharacterMovementComponent.DisableMovement"
+      ],
+      "id": "smart-exact-method-ucharactermovementcomponent-disablemovement",
+      "mode": "smart",
+      "query": "UCharacterMovementComponent.DisableMovement(",
+      "expectFirst": "UCharacterMovementComponent.DisableMovement"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCharacterMovementComponent.SetMovementMode"
+      ],
+      "id": "smart-exact-method-ucharactermovementcomponent-setmovementmode",
+      "mode": "smart",
+      "query": "UCharacterMovementComponent.SetMovementMode(",
+      "expectFirst": "UCharacterMovementComponent.SetMovementMode"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayAbility.ApplyGameplayEffectToOwner"
+      ],
+      "id": "smart-exact-method-ugameplayability-applygameplayeffecttoowner",
+      "mode": "smart",
+      "query": "UGameplayAbility.ApplyGameplayEffectToOwner(",
+      "expectFirst": "UGameplayAbility.ApplyGameplayEffectToOwner"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayAbility.GetAbilitySystemComponentFromActorInfo"
+      ],
+      "id": "smart-exact-method-ugameplayability-getabilitysystemcomponentfromactorinfo",
+      "mode": "smart",
+      "query": "UGameplayAbility.GetAbilitySystemComponentFromActorInfo(",
+      "expectFirst": "UGameplayAbility.GetAbilitySystemComponentFromActorInfo"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayEffect.GetGrantedTags"
+      ],
+      "id": "smart-exact-method-ugameplayeffect-getgrantedtags",
+      "mode": "smart",
+      "query": "UGameplayEffect.GetGrantedTags(",
+      "expectFirst": "UGameplayEffect.GetGrantedTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayEffect.GetOwnedGameplayTags"
+      ],
+      "id": "smart-exact-method-ugameplayeffect-getownedgameplaytags",
+      "mode": "smart",
+      "query": "UGameplayEffect.GetOwnedGameplayTags(",
+      "expectFirst": "UGameplayEffect.GetOwnedGameplayTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayTask.EndTask"
+      ],
+      "id": "smart-exact-method-ugameplaytask-endtask",
+      "mode": "smart",
+      "query": "UGameplayTask.EndTask(",
+      "expectFirst": "UGameplayTask.EndTask"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayTask.ReadyForActivation"
+      ],
+      "id": "smart-exact-method-ugameplaytask-readyforactivation",
+      "mode": "smart",
+      "query": "UGameplayTask.ReadyForActivation(",
+      "expectFirst": "UGameplayTask.ReadyForActivation"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UMovementComponent.SetPlaneConstraintEnabled"
+      ],
+      "id": "smart-exact-method-umovementcomponent-setplaneconstraintenabled",
+      "mode": "smart",
+      "query": "UMovementComponent.SetPlaneConstraintEnabled(",
+      "expectFirst": "UMovementComponent.SetPlaneConstraintEnabled"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UMovementComponent.StopMovementImmediately"
+      ],
+      "id": "smart-exact-method-umovementcomponent-stopmovementimmediately",
+      "mode": "smart",
+      "query": "UMovementComponent.StopMovementImmediately(",
+      "expectFirst": "UMovementComponent.StopMovementImmediately"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UNavMovementComponent.GetVelocityForNavMovement"
+      ],
+      "id": "smart-exact-method-unavmovementcomponent-getvelocityfornavmovement",
+      "mode": "smart",
+      "query": "UNavMovementComponent.GetVelocityForNavMovement(",
+      "expectFirst": "UNavMovementComponent.GetVelocityForNavMovement"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UNavMovementComponent.IsMovingOnGround"
+      ],
+      "id": "smart-exact-method-unavmovementcomponent-ismovingonground",
+      "mode": "smart",
+      "query": "UNavMovementComponent.IsMovingOnGround(",
+      "expectFirst": "UNavMovementComponent.IsMovingOnGround"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UWidget.GetAccessibleText"
+      ],
+      "id": "smart-exact-method-uwidget-getaccessibletext",
+      "mode": "smart",
+      "query": "UWidget.GetAccessibleText(",
+      "expectFirst": "UWidget.GetAccessibleText"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AActor.ActorGuid"
+      ],
+      "id": "smart-exact-property-aactor-actorguid",
+      "mode": "smart",
+      "query": "AActor.ActorGuid",
+      "expectFirst": "AActor.ActorGuid"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "AAIController.BrainComponent"
+      ],
+      "id": "smart-exact-property-aaicontroller-braincomponent",
+      "mode": "smart",
+      "query": "AAIController.BrainComponent",
+      "expectFirst": "AAIController.BrainComponent"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "ACameraRig_Rail.CurrentPositionOnRail"
+      ],
+      "id": "smart-exact-property-acamerarig-rail-currentpositiononrail",
+      "mode": "smart",
+      "query": "ACameraRig_Rail.CurrentPositionOnRail",
+      "expectFirst": "ACameraRig_Rail.CurrentPositionOnRail"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "ACameraRig_Rail.RailSplineComponent"
+      ],
+      "id": "smart-exact-property-acamerarig-rail-railsplinecomponent",
+      "mode": "smart",
+      "query": "ACameraRig_Rail.RailSplineComponent",
+      "expectFirst": "ACameraRig_Rail.RailSplineComponent"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "EAILockSource.Animation"
+      ],
+      "id": "smart-exact-property-eailocksource-animation",
+      "mode": "smart",
+      "query": "EAILockSource.Animation",
+      "expectFirst": "EAILockSource.Animation"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "EAILockSource.Gameplay"
+      ],
+      "id": "smart-exact-property-eailocksource-gameplay",
+      "mode": "smart",
+      "query": "EAILockSource.Gameplay",
+      "expectFirst": "EAILockSource.Gameplay"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "EAILockSource.Logic"
+      ],
+      "id": "smart-exact-property-eailocksource-logic",
+      "mode": "smart",
+      "query": "EAILockSource.Logic",
+      "expectFirst": "EAILockSource.Logic"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "FGameplayTagContainer.GameplayTags"
+      ],
+      "id": "smart-exact-property-fgameplaytagcontainer-gameplaytags",
+      "mode": "smart",
+      "query": "FGameplayTagContainer.GameplayTags",
+      "expectFirst": "FGameplayTagContainer.GameplayTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::FeatureName_AIPawnData"
+      ],
+      "id": "smart-exact-property-gameplaytags-featurename-aipawndata",
+      "mode": "smart",
+      "query": "GameplayTags::FeatureName_AIPawnData",
+      "expectFirst": "GameplayTags::FeatureName_AIPawnData"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::GameplayCue"
+      ],
+      "id": "smart-exact-property-gameplaytags-gameplaycue",
+      "mode": "smart",
+      "query": "GameplayTags::GameplayCue",
+      "expectFirst": "GameplayTags::GameplayCue"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::GameplayCue_Test"
+      ],
+      "id": "smart-exact-property-gameplaytags-gameplaycue-test",
+      "mode": "smart",
+      "query": "GameplayTags::GameplayCue_Test",
+      "expectFirst": "GameplayTags::GameplayCue_Test"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::Settings_Movement"
+      ],
+      "id": "smart-exact-property-gameplaytags-settings-movement",
+      "mode": "smart",
+      "query": "GameplayTags::Settings_Movement",
+      "expectFirst": "GameplayTags::Settings_Movement"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::Status"
+      ],
+      "id": "smart-exact-property-gameplaytags-status",
+      "mode": "smart",
+      "query": "GameplayTags::Status",
+      "expectFirst": "GameplayTags::Status"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "GameplayTags::Status_StunGauge"
+      ],
+      "id": "smart-exact-property-gameplaytags-status-stungauge",
+      "mode": "smart",
+      "query": "GameplayTags::Status_StunGauge",
+      "expectFirst": "GameplayTags::Status_StunGauge"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UAbilitySystemComponent.AffectedAnimInstanceTag"
+      ],
+      "id": "smart-exact-property-uabilitysystemcomponent-affectedaniminstancetag",
+      "mode": "smart",
+      "query": "UAbilitySystemComponent.AffectedAnimInstanceTag",
+      "expectFirst": "UAbilitySystemComponent.AffectedAnimInstanceTag"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCameraComponent.FieldOfView"
+      ],
+      "id": "smart-exact-property-ucameracomponent-fieldofview",
+      "mode": "smart",
+      "query": "UCameraComponent.FieldOfView",
+      "expectFirst": "UCameraComponent.FieldOfView"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UCharacterMovementComponent.MovementMode"
+      ],
+      "id": "smart-exact-property-ucharactermovementcomponent-movementmode",
+      "mode": "smart",
+      "query": "UCharacterMovementComponent.MovementMode",
+      "expectFirst": "UCharacterMovementComponent.MovementMode"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayAbility.AbilityTags"
+      ],
+      "id": "smart-exact-property-ugameplayability-abilitytags",
+      "mode": "smart",
+      "query": "UGameplayAbility.AbilityTags",
+      "expectFirst": "UGameplayAbility.AbilityTags"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayEffect.GameplayCues"
+      ],
+      "id": "smart-exact-property-ugameplayeffect-gameplaycues",
+      "mode": "smart",
+      "query": "UGameplayEffect.GameplayCues",
+      "expectFirst": "UGameplayEffect.GameplayCues"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UGameplayTask_WaitDelay.OnFinish"
+      ],
+      "id": "smart-exact-property-ugameplaytask-waitdelay-onfinish",
+      "mode": "smart",
+      "query": "UGameplayTask_WaitDelay.OnFinish",
+      "expectFirst": "UGameplayTask_WaitDelay.OnFinish"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UMovementComponent.bConstrainToPlane"
+      ],
+      "id": "smart-exact-property-umovementcomponent-bconstraintoplane",
+      "mode": "smart",
+      "query": "UMovementComponent.bConstrainToPlane",
+      "expectFirst": "UMovementComponent.bConstrainToPlane"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UNavMovementComponent.NavAgentProps"
+      ],
+      "id": "smart-exact-property-unavmovementcomponent-navagentprops",
+      "mode": "smart",
+      "query": "UNavMovementComponent.NavAgentProps",
+      "expectFirst": "UNavMovementComponent.NavAgentProps"
+    },
+    {
+      "topWindow": 5,
+      "expectWithinTop": [
+        "UWidget.ToolTipWidget"
+      ],
+      "id": "smart-exact-property-uwidget-tooltipwidget",
+      "mode": "smart",
+      "query": "UWidget.ToolTipWidget",
+      "expectFirst": "UWidget.ToolTipWidget"
+    },
+    {
+      "topWindow": 10,
+      "expectWithinTop": [
+        "GameplayTags::GameplayCue"
+      ],
+      "id": "smart-gameplay-cue",
+      "mode": "smart",
+      "query": "gameplay cue"
     },
     {
       "topWindow": 10,

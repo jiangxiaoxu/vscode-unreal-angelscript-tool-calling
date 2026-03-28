@@ -7,17 +7,18 @@ import {
     GetAPISearchToolData,
     GetAPISearchToolMatch,
     SearchIncludeInheritedFromScopeMode,
+    SearchMode,
     SearchSource
 } from './apiRequests';
 
 export type AngelscriptSearchToolParams = {
     query: string;
+    mode?: SearchMode;
     limit?: number;
     source?: SearchSource;
     scope?: string;
     includeInheritedFromScope?: boolean;
     includeDocs?: boolean;
-    regex?: boolean;
 };
 
 export class ApiSearchError extends Error
@@ -81,6 +82,20 @@ function normalizeLimit(rawLimit: unknown): number
     return rawLimit;
 }
 
+function normalizeMode(rawMode: unknown): SearchMode
+{
+    if (rawMode === undefined || rawMode === null)
+        return 'smart';
+    if (typeof rawMode !== 'string')
+        throw new ApiSearchError('INVALID_MODE', 'Invalid mode value. Expected "smart" or "regex".', { receivedMode: rawMode });
+
+    const value = rawMode.trim().toLowerCase();
+    if (value === 'smart' || value === 'regex')
+        return value as SearchMode;
+
+    throw new ApiSearchError('INVALID_MODE', `Invalid mode "${rawMode}". Expected "smart" or "regex".`, { receivedMode: rawMode });
+}
+
 function stripInternalSearchMatch(match: GetAPISearchLspResult['matches'][number]): GetAPISearchToolMatch
 {
     const { detailsData: _detailsData, ...publicMatch } = match;
@@ -119,7 +134,7 @@ export async function buildSearchPayload(
     if (!query)
         throw new ApiSearchError('MISSING_QUERY', 'Missing query. Please provide query.');
 
-    const mode = params?.regex === true ? 'regex' : 'plain';
+    const mode = normalizeMode(params?.mode);
     const limit = normalizeLimit(params?.limit);
     const source = normalizeSource(params?.source);
     const scope = typeof params?.scope === 'string' ? params.scope.trim() : '';
@@ -153,7 +168,7 @@ export async function buildSearchPayload(
         ...(result.inheritedScopeOutcome ? { inheritedScopeOutcome: result.inheritedScopeOutcome } : {}),
         request: {
             query,
-            regex: mode === 'regex',
+            mode,
             limit,
             source,
             ...(scope ? { scope } : {}),

@@ -445,7 +445,7 @@ export async function runSearchApi(
                 scope: raw?.scope,
                 ...(hasExplicitIncludeInheritedFromScope ? { includeInheritedFromScope: raw.includeInheritedFromScope } : {}),
                 includeDocs: raw?.includeDocs,
-                regex: raw?.regex
+                mode: raw?.mode
             })
         };
     }

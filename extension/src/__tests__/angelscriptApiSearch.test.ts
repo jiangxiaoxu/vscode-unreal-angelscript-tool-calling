@@ -1,6 +1,6 @@
 import * as assert from 'node:assert/strict';
 import test = require('node:test');
-import { buildSearchPayload } from '../angelscriptApiSearch';
+import { ApiSearchError, buildSearchPayload } from '../angelscriptApiSearch';
 import {
     GetAPISearchLspResult,
     GetAPISearchRequest
@@ -62,7 +62,7 @@ test('buildSearchPayload omits inherited-scope flag for auto mode and records ap
     assert.equal(calls[0].method, GetAPISearchRequest);
     assert.deepEqual(calls[0].payload, {
         query: 'Movement',
-        mode: 'plain',
+        mode: 'smart',
         limit: 20,
         source: 'both',
         scope: 'Gameplay::Movement::UMovementDerived',
@@ -70,7 +70,7 @@ test('buildSearchPayload omits inherited-scope flag for auto mode and records ap
     });
     assert.deepEqual(data.request, {
         query: 'Movement',
-        regex: false,
+        mode: 'smart',
         limit: 20,
         source: 'both',
         scope: 'Gameplay::Movement::UMovementDerived',
@@ -106,7 +106,7 @@ test('buildSearchPayload preserves explicit false and reports explicit mode meta
 
     assert.deepEqual(calls[0], {
         query: 'Movement',
-        mode: 'plain',
+        mode: 'smart',
         limit: 20,
         source: 'both',
         scope: 'Gameplay::Movement::UMovementDerived',
@@ -115,7 +115,7 @@ test('buildSearchPayload preserves explicit false and reports explicit mode meta
     });
     assert.deepEqual(data.request, {
         query: 'Movement',
-        regex: false,
+        mode: 'smart',
         limit: 20,
         source: 'both',
         scope: 'Gameplay::Movement::UMovementDerived',
@@ -162,7 +162,7 @@ test('buildSearchPayload keeps auto mode false for namespace scopes without igno
     assert.equal(data.inheritedScopeOutcome, undefined);
     assert.deepEqual(data.request, {
         query: 'Movement',
-        regex: false,
+        mode: 'smart',
         limit: 20,
         source: 'both',
         scope: 'Gameplay::Movement',
@@ -170,4 +170,55 @@ test('buildSearchPayload keeps auto mode false for namespace scopes without igno
         includeInheritedFromScope: false,
         includeDocs: false
     });
+});
+
+test('buildSearchPayload forwards explicit regex mode and echoes it in request metadata', async () =>
+{
+    const calls: Array<unknown> = [];
+    const client = {
+        sendRequest: async (_method: unknown, payload: unknown) =>
+        {
+            calls.push(payload);
+            return createSearchResult();
+        }
+    } as any;
+
+    const data = await buildSearchPayload(client, {
+        query: '/Movement$/',
+        mode: 'regex'
+    });
+
+    assert.deepEqual(calls[0], {
+        query: '/Movement$/',
+        mode: 'regex',
+        limit: 20,
+        source: 'both',
+        includeDocs: false
+    });
+    assert.deepEqual(data.request, {
+        query: '/Movement$/',
+        mode: 'regex',
+        limit: 20,
+        source: 'both',
+        includeInheritedFromScopeMode: 'auto',
+        includeInheritedFromScope: false,
+        includeDocs: false
+    });
+});
+
+test('buildSearchPayload rejects removed plain mode', async () =>
+{
+    await assert.rejects(
+        () => buildSearchPayload({} as any, {
+            query: 'Movement',
+            mode: 'plain' as any
+        }),
+        (error: unknown) =>
+        {
+            assert.ok(error instanceof ApiSearchError);
+            assert.equal(error.code, 'INVALID_MODE');
+            assert.match(error.message, /Expected "smart" or "regex"/u);
+            return true;
+        }
+    );
 });

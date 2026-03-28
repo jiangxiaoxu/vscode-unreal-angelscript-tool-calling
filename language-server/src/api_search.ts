@@ -1,6 +1,6 @@
 import * as typedb from './database';
 
-export type ApiSearchMode = 'smart' | 'plain' | 'regex';
+export type ApiSearchMode = 'smart' | 'regex';
 export type ApiSearchSource = 'native' | 'script' | 'both';
 export type ApiSearchMatchSource = 'native' | 'script';
 export type ApiSearchKind = 'class' | 'struct' | 'enum' | 'method' | 'function' | 'property' | 'globalVariable';
@@ -94,8 +94,7 @@ export type SearchMatchReason =
     | 'exact-short'
     | 'boundary-ordered'
     | 'ordered-wildcard'
-    | 'short-ordered'
-    | 'weak-reorder';
+    | 'short-ordered';
 
 type ScopeInheritanceMode = 'auto' | 'on' | 'off';
 
@@ -109,7 +108,6 @@ type NormalizedSearchParams = {
     includeInheritedFromScopeMode: ScopeInheritanceMode;
     includeDocs: boolean;
     smartQueries?: ParsedSmartQuery[];
-    plainQuery?: ParsedSmartQuery;
 };
 
 type ScopeCandidate = {
@@ -363,7 +361,7 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
 function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
 {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload))
-        throw new ApiSearchValidationError("Invalid params. Provide { query: string, mode?: 'smart' | 'plain' | 'regex', limit?: number, kinds?: ApiSearchKind[], source?: 'native' | 'script' | 'both', scope?: string, includeInheritedFromScope?: boolean, includeDocs?: boolean }.");
+        throw new ApiSearchValidationError("Invalid params. Provide { query: string, mode?: 'smart' | 'regex', limit?: number, kinds?: ApiSearchKind[], source?: 'native' | 'script' | 'both', scope?: string, includeInheritedFromScope?: boolean, includeDocs?: boolean }.");
 
     let record = payload as Record<string, unknown>;
     let query = typeof record.query === 'string' ? record.query.trim() : '';
@@ -378,7 +376,6 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
     let includeInheritedFromScopeMode = normalizeScopeInheritanceMode(record);
     let includeDocs = record.includeDocs === true;
     let smartQueries = mode == 'smart' ? parseSmartQueries(query) : undefined;
-    let plainQuery = mode == 'plain' ? parsePlainQuery(query) : undefined;
 
     return {
         query,
@@ -389,8 +386,7 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
         ...(scope.length > 0 ? { scope } : {}),
         includeInheritedFromScopeMode,
         includeDocs,
-        ...(smartQueries ? { smartQueries } : {}),
-        ...(plainQuery ? { plainQuery } : {})
+        ...(smartQueries ? { smartQueries } : {})
     };
 }
 
@@ -404,15 +400,15 @@ function normalizeScopeInheritanceMode(record: Record<string, unknown>) : ScopeI
 function normalizeSearchMode(value: unknown) : ApiSearchMode
 {
     if (value === undefined)
-        return 'plain';
+        return 'smart';
     if (typeof value !== 'string')
-        throw new ApiSearchValidationError("Invalid params. 'mode' must be 'smart', 'plain', or 'regex'.");
+        throw new ApiSearchValidationError("Invalid params. 'mode' must be 'smart' or 'regex'.");
 
     let normalized = value.trim().toLowerCase();
-    if (normalized == 'smart' || normalized == 'plain' || normalized == 'regex')
+    if (normalized == 'smart' || normalized == 'regex')
         return normalized as ApiSearchMode;
 
-    throw new ApiSearchValidationError("Invalid params. 'mode' must be 'smart', 'plain', or 'regex'.");
+    throw new ApiSearchValidationError("Invalid params. 'mode' must be 'smart' or 'regex'.");
 }
 
 function normalizeLimit(value: unknown) : number
@@ -1299,29 +1295,6 @@ function rankCandidates(candidates: SearchCandidate[], params: NormalizedSearchP
         return scored;
     }
 
-    if (params.mode == 'plain')
-    {
-        let plainQuery = params.plainQuery;
-        if (!plainQuery)
-            return [];
-
-        let scored = new Array<SearchCandidate>();
-        for (let candidate of candidates)
-        {
-            let match = scorePlainMatch(candidate.entry, plainQuery);
-            if (!match)
-                continue;
-
-            scored.push({
-                ...candidate,
-                matchReason: match.reason,
-                matchSort: applyScopeBiasToSortKey(match.sortKey, candidate)
-            });
-        }
-        scored.sort(compareCandidates);
-        return scored;
-    }
-
     let smartQueries = params.smartQueries?.filter((query) => !isTinySmartQuery(query)) ?? [];
     let scored = new Array<SearchCandidate>();
 
@@ -1370,6 +1343,16 @@ function compareCandidates(left: SearchCandidate, right: SearchCandidate) : numb
         let rightQualifiedSpan = right.matchSort?.qualifiedSpan ?? Number.MAX_SAFE_INTEGER;
         if (leftQualifiedSpan != rightQualifiedSpan)
             return leftQualifiedSpan - rightQualifiedSpan;
+
+        let leftRelationshipOrder = getScopeRelationshipOrder(left.scopeRelationship);
+        let rightRelationshipOrder = getScopeRelationshipOrder(right.scopeRelationship);
+        if (leftRelationshipOrder != rightRelationshipOrder)
+            return leftRelationshipOrder - rightRelationshipOrder;
+
+        let leftDistance = left.scopeDistance ?? 0;
+        let rightDistance = right.scopeDistance ?? 0;
+        if (leftDistance != rightDistance)
+            return leftDistance - rightDistance;
 
         if (left.entry.qualifiedName.length != right.entry.qualifiedName.length)
             return left.entry.qualifiedName.length - right.entry.qualifiedName.length;
@@ -1426,28 +1409,6 @@ function isEntryCallable(entry: SearchIndexEntry) : boolean
     return entry.isCallable;
 }
 
-function scoreExactMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
-{
-    if (entry.qualifiedName == query.raw)
-        return createSearchMatchOutcome('exact-qualified', 0, 0, entry.qualifiedName.length, 0);
-    if (entry.qualifiedNameLower == query.rawLower)
-        return createSearchMatchOutcome('exact-qualified', 0, 0, entry.qualifiedName.length, 0);
-    if (entry.shortName == query.raw)
-        return createSearchMatchOutcome('exact-short', 0, 0, entry.shortName.length, 2);
-    if (entry.shortNameLower == query.rawLower)
-        return createSearchMatchOutcome('exact-short', 0, 0, entry.shortName.length, 2);
-
-    for (let alias of entry.qualifiedAliasTexts)
-    {
-        if (alias.text == query.raw)
-            return createSearchMatchOutcome('exact-qualified', 0, 0, alias.text.length, 1);
-        if (alias.textLower == query.rawLower)
-            return createSearchMatchOutcome('exact-qualified', 0, 0, alias.text.length, 1);
-    }
-
-    return null;
-}
-
 function scoreSmartMatch(
     entry: SearchIndexEntry,
     queries: ParsedSmartQuery[]
@@ -1471,24 +1432,6 @@ function scoreSmartBranch(entry: SearchIndexEntry, query: ParsedSmartQuery) : Se
         return exactMatch;
 
     return scoreSmartOrderedViewsMatch(entry, query);
-}
-
-function scorePlainMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
-{
-    if (query.searchableCharCount == 0 || query.segments.length == 0)
-        return null;
-    if (query.requiresCallable && !isEntryCallable(entry))
-        return null;
-
-    let exactMatch = scoreExactMatch(entry, query);
-    if (exactMatch)
-        return exactMatch;
-
-    let orderedMatch = scoreOrderedViewsMatch(entry, query);
-    if (orderedMatch)
-        return orderedMatch;
-
-    return scoreWeakReorderViewsMatch(entry, query);
 }
 
 function candidateScopeScoreBias(candidate: SearchCandidate) : number
@@ -1519,6 +1462,9 @@ function applyScopeBiasToSortKey(sortKey: SearchMatchSortKey, candidate: SearchC
     let scopeBias = candidateScopeScoreBias(candidate);
     return {
         ...sortKey,
+        qualifiedStart: sortKey.qualifiedPriorityEnabled != 0
+            ? Math.max(0, sortKey.qualifiedStart - scopeBias)
+            : sortKey.qualifiedStart,
         start: Math.max(0, sortKey.start - scopeBias)
     };
 }
@@ -1579,8 +1525,6 @@ function getSearchMatchReasonRank(reason: SearchMatchReason) : number
         return 2;
     if (reason == 'short-ordered')
         return 1;
-    if (reason == 'weak-reorder')
-        return 0;
     return 1;
 }
 
@@ -1609,93 +1553,6 @@ function buildStructuredVariantMatch(
         structuredMatch.end - structuredMatch.start,
         viewPriority
     );
-}
-
-function scoreOrderedViewsMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
-{
-    let bestMatch = pickBetterMatch(
-        buildStructuredVariantMatch(entry.qualifiedText, query, 0),
-        buildStructuredVariantMatch(entry.shortText, query, 2)
-    );
-    for (let alias of entry.qualifiedAliasTexts)
-        bestMatch = pickBetterMatch(bestMatch, buildStructuredVariantMatch(alias, query, 1));
-    return bestMatch;
-}
-
-function scoreWeakReorderViewsMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
-{
-    if (!canUseWeakReorder(query))
-        return null;
-
-    let bestMatch = pickBetterMatch(
-        buildWeakReorderVariantMatch(entry.qualifiedText, query, 0),
-        buildWeakReorderVariantMatch(entry.shortText, query, 2)
-    );
-    for (let alias of entry.qualifiedAliasTexts)
-        bestMatch = pickBetterMatch(bestMatch, buildWeakReorderVariantMatch(alias, query, 1));
-    return bestMatch;
-}
-
-function canUseWeakReorder(query: ParsedSmartQuery) : boolean
-{
-    return !query.hasStrongSeparator
-        && query.segments.length > 1
-        && query.connectors.every((connector) => connector == 'space');
-}
-
-function buildWeakReorderVariantMatch(
-    variant: SearchTextVariant,
-    query: ParsedSmartQuery,
-    viewPriority: number
-) : SearchMatchOutcome | null
-{
-    let weakReorderMatch = findWeakReorderMatch(variant, query);
-    if (!weakReorderMatch)
-        return null;
-
-    return createSearchMatchOutcome(
-        'weak-reorder',
-        weakReorderMatch.start,
-        weakReorderMatch.totalGap,
-        weakReorderMatch.end - weakReorderMatch.start,
-        viewPriority
-    );
-}
-
-function findWeakReorderMatch(variant: SearchTextVariant, query: ParsedSmartQuery) : StructuredMatchState | null
-{
-    if (!canUseWeakReorder(query))
-        return null;
-
-    let occurrences = new Array<{ start: number; end: number }>();
-    for (let segment of query.segments)
-    {
-        let foundIndex = variant.textLower.indexOf(segment);
-        if (foundIndex == -1)
-            return null;
-
-        occurrences.push({
-            start: foundIndex,
-            end: foundIndex + segment.length
-        });
-    }
-
-    occurrences.sort((left, right) =>
-    {
-        if (left.start != right.start)
-            return left.start - right.start;
-        return left.end - right.end;
-    });
-
-    let totalGap = 0;
-    for (let index = 1; index < occurrences.length; index += 1)
-        totalGap += Math.max(0, occurrences[index].start - occurrences[index - 1].end);
-
-    return {
-        start: occurrences[0].start,
-        end: occurrences[occurrences.length - 1].end,
-        totalGap
-    };
 }
 
 function pickBetterMatch(left: SearchMatchOutcome | null, right: SearchMatchOutcome | null) : SearchMatchOutcome | null
@@ -1733,11 +1590,6 @@ function parseSmartQueries(query: string) : ParsedSmartQuery[]
         parsedQueries.push(parseSmartQuery(trimmedBranch));
     }
     return parsedQueries;
-}
-
-function parsePlainQuery(query: string) : ParsedSmartQuery
-{
-    return parseSmartQuery(query);
 }
 
 function parseSmartQuery(query: string) : ParsedSmartQuery

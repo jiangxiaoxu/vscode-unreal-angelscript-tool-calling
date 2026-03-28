@@ -328,25 +328,22 @@ test.beforeEach(() =>
     setupSearchFixture();
 });
 
-test('plain, smart, and regex search modes follow the new name-view contract', () =>
+test('smart and regex search modes follow the new name-view contract', () =>
 {
-    const plainExactQualified = GetAPISearch({ query: 'Gameplay::Movement::UCameraMovementComponent', mode: 'plain', limit: 10 });
-    assert.equal(plainExactQualified.matches[0]?.qualifiedName, 'Gameplay::Movement::UCameraMovementComponent');
-    assert.equal(plainExactQualified.matches[0]?.matchReason, 'exact-qualified');
-
-    const plainCallableQualified = GetAPISearch({
-        query: 'Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset(',
-        mode: 'plain',
-        limit: 10
-    });
-    assert.deepEqual(plainCallableQualified.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
-    assert.equal(plainCallableQualified.matches[0]?.kind, 'method');
-
-    const smart = GetAPISearch({ query: 'Camera Movement', mode: 'smart', limit: 10 });
-    assert.ok(smart.matches.some((match) => match.qualifiedName === 'Gameplay::Movement::UCameraMovementComponent'));
     const smartExactQualified = GetAPISearch({ query: 'Gameplay::Movement::UCameraMovementComponent', mode: 'smart', limit: 10 });
     assert.equal(smartExactQualified.matches[0]?.qualifiedName, 'Gameplay::Movement::UCameraMovementComponent');
     assert.equal(smartExactQualified.matches[0]?.matchReason, 'exact-qualified');
+
+    const smartCallableQualified = GetAPISearch({
+        query: 'Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset(',
+        mode: 'smart',
+        limit: 10
+    });
+    assert.deepEqual(smartCallableQualified.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
+    assert.equal(smartCallableQualified.matches[0]?.kind, 'method');
+
+    const smart = GetAPISearch({ query: 'Camera Movement', mode: 'smart', limit: 10 });
+    assert.ok(smart.matches.some((match) => match.qualifiedName === 'Gameplay::Movement::UCameraMovementComponent'));
 
     const regex = GetAPISearch({ query: '/StartMovement$/', mode: 'regex', kinds: ['method'], limit: 10 });
     assert.deepEqual(regex.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::UMovementDerived.StartMovement']);
@@ -371,38 +368,34 @@ test('plain, smart, and regex search modes follow the new name-view contract', (
     assert.equal(regexDoesNotMatchSignature.matches.length, 0);
 });
 
-test('plain search supports code-like queries, ordered gaps, weak reorder fallback, and callable-only suffixes', () =>
+test('smart search supports code-like queries, ordered gaps, and callable-only suffixes', () =>
 {
-    const codeLikeMember = GetAPISearch({ query: 'UCthuAICharacterExtension.OpenPawnDataAIAsset(', mode: 'plain', limit: 10 });
+    const codeLikeMember = GetAPISearch({ query: 'UCthuAICharacterExtension.OpenPawnDataAIAsset(', mode: 'smart', limit: 10 });
     assert.deepEqual(codeLikeMember.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
     assert.equal(codeLikeMember.matches[0]?.matchReason, 'boundary-ordered');
 
-    const namespaceFunction = GetAPISearch({ query: 'Gameplay::Movement::BuildMovementPath(', mode: 'plain', limit: 10 });
+    const namespaceFunction = GetAPISearch({ query: 'Gameplay::Movement::BuildMovementPath(', mode: 'smart', limit: 10 });
     assert.deepEqual(namespaceFunction.matches.map((match) => match.qualifiedName), ['Gameplay::Movement::BuildMovementPath']);
     assert.equal(namespaceFunction.matches[0]?.kind, 'function');
 
-    const orderedGap = GetAPISearch({ query: 'Status AI', mode: 'plain', limit: 10 });
+    const orderedGap = GetAPISearch({ query: 'Status AI', mode: 'smart', limit: 10 });
     assert.deepEqual(orderedGap.matches.map((match) => match.qualifiedName), ['GameplayTags::Status_AI']);
     assert.equal(orderedGap.matches[0]?.matchReason, 'ordered-wildcard');
 
-    const weakReorder = GetAPISearch({ query: 'AI Status', mode: 'plain', limit: 10 });
-    assert.equal(weakReorder.matches[0]?.qualifiedName, 'GameplayTags::Status_AI');
-    assert.equal(weakReorder.matches[0]?.matchReason, 'weak-reorder');
+    const unorderedGap = GetAPISearch({ query: 'AI Status', mode: 'smart', limit: 10 });
+    assert.equal(unorderedGap.matches.some((match) => match.qualifiedName === 'GameplayTags::Status_AI'), false);
 
-    const callableShort = GetAPISearch({ query: 'OpenPawnDataAIAsset(', mode: 'plain', limit: 10 });
+    const callableShort = GetAPISearch({ query: 'OpenPawnDataAIAsset(', mode: 'smart', limit: 10 });
     assert.deepEqual(callableShort.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
 
-    const callableShortWithParens = GetAPISearch({ query: 'OpenPawnDataAIAsset()', mode: 'plain', limit: 10 });
+    const callableShortWithParens = GetAPISearch({ query: 'OpenPawnDataAIAsset()', mode: 'smart', limit: 10 });
     assert.deepEqual(callableShortWithParens.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAICharacterExtension.OpenPawnDataAIAsset']);
 });
 
 test('callable-only excludes property-like accessors and non-callable methods across search modes', () =>
 {
-    const accessorPlain = GetAPISearch({ query: 'GetCthuASC', mode: 'plain', limit: 10 });
-    assert.deepEqual(accessorPlain.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAbilityTask_Ticker.GetCthuASC']);
-
-    const accessorPlainCallable = GetAPISearch({ query: 'GetCthuASC()', mode: 'plain', limit: 10 });
-    assert.equal(accessorPlainCallable.matches.length, 0);
+    const accessorSmart = GetAPISearch({ query: 'GetCthuASC', mode: 'smart', limit: 10 });
+    assert.deepEqual(accessorSmart.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAbilityTask_Ticker.GetCthuASC']);
 
     const accessorSmartCallable = GetAPISearch({ query: 'GetCthuASC()', mode: 'smart', limit: 10 });
     assert.equal(accessorSmartCallable.matches.length, 0);
@@ -413,11 +406,8 @@ test('callable-only excludes property-like accessors and non-callable methods ac
     const accessorRegexCallable = GetAPISearch({ query: '/GetCthuASC\\(/', mode: 'regex', kinds: ['method'], limit: 10 });
     assert.equal(accessorRegexCallable.matches.length, 0);
 
-    const nonCallablePlain = GetAPISearch({ query: 'OpenEditorOnlyPanel', mode: 'plain', limit: 10 });
-    assert.deepEqual(nonCallablePlain.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAbilityTask_Ticker.OpenEditorOnlyPanel']);
-
-    const nonCallablePlainCallable = GetAPISearch({ query: 'OpenEditorOnlyPanel()', mode: 'plain', limit: 10 });
-    assert.equal(nonCallablePlainCallable.matches.length, 0);
+    const nonCallableSmart = GetAPISearch({ query: 'OpenEditorOnlyPanel', mode: 'smart', limit: 10 });
+    assert.deepEqual(nonCallableSmart.matches.map((match) => match.qualifiedName), ['Gameplay::Characters::UCthuAbilityTask_Ticker.OpenEditorOnlyPanel']);
 
     const nonCallableSmartCallable = GetAPISearch({ query: 'OpenEditorOnlyPanel()', mode: 'smart', limit: 10 });
     assert.equal(nonCallableSmartCallable.matches.length, 0);
@@ -834,7 +824,7 @@ test('scope lookup dedupes identical qualified-name candidates before ambiguity 
 
     const scoped = GetAPISearch({
         query: 'GetOwnedGameplayTags',
-        mode: 'plain',
+        mode: 'smart',
         scope: 'Gameplay::Characters::UCthuBattleSet',
         limit: 20
     });
@@ -878,7 +868,7 @@ test('scope collision auto-merges same-name namespace and class groups', () =>
 
     const scoped = GetAPISearch({
         query: 'Get',
-        mode: 'plain',
+        mode: 'smart',
         scope: 'UCthuBattleSet',
         limit: 2
     });
@@ -953,7 +943,7 @@ test('same-name merged scope auto-expands inherited matches only for the class s
 
     const scoped = GetAPISearch({
         query: 'Get',
-        mode: 'plain',
+        mode: 'smart',
         scope: 'UMergedBattleSet',
         limit: 10
     });
@@ -1027,7 +1017,7 @@ test('namespace is no longer an accepted public kind filter', () =>
     );
 });
 
-test('smart OR rejects empty branches and public exact mode is removed', () =>
+test('smart OR rejects empty branches and removed public modes', () =>
 {
     assert.throws(
         () => GetAPISearch({ query: 'Movement || Start', mode: 'smart', limit: 10 }),
@@ -1039,6 +1029,10 @@ test('smart OR rejects empty branches and public exact mode is removed', () =>
     );
     assert.throws(
         () => GetAPISearch({ query: 'Movement', mode: 'exact', limit: 10 } as any),
-        /'mode' must be 'smart', 'plain', or 'regex'/u
+        /'mode' must be 'smart' or 'regex'/u
+    );
+    assert.throws(
+        () => GetAPISearch({ query: 'Movement', mode: 'plain', limit: 10 } as any),
+        /'mode' must be 'smart' or 'regex'/u
     );
 });

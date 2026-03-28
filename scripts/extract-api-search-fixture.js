@@ -322,8 +322,8 @@ const SPECIAL_CASES = [
         ]
     },
     {
-        id: 'plain-gameplay-cue',
-        mode: 'plain',
+        id: 'smart-gameplay-cue',
+        mode: 'smart',
         query: 'gameplay cue',
         topWindow: 10,
         expectWithinTop: [
@@ -331,8 +331,8 @@ const SPECIAL_CASES = [
         ]
     },
     {
-        id: 'plain-callable-ability-system',
-        mode: 'plain',
+        id: 'smart-callable-ability-system',
+        mode: 'smart',
         query: 'ability system add gameplay tags(',
         topWindow: 10,
         expectWithinTop: [
@@ -340,8 +340,8 @@ const SPECIAL_CASES = [
         ]
     },
     {
-        id: 'plain-callable-camera-pose',
-        mode: 'plain',
+        id: 'smart-callable-camera-pose',
+        mode: 'smart',
         query: 'camera pose make camera pose(',
         topWindow: 10,
         expectWithinTop: [
@@ -604,13 +604,6 @@ function createCases(specs, pickedEntries)
                 topWindow: 8,
                 expectWithinTop: [publicQualifiedName]
             });
-            addCase({
-                id: `plain-entry-${publicQualifiedName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-                mode: 'plain',
-                query: entryQuery,
-                topWindow: 8,
-                expectWithinTop: [publicQualifiedName]
-            });
         }
 
         const methodNames = spec.keepMethods || [];
@@ -625,8 +618,8 @@ function createCases(specs, pickedEntries)
                 expectWithinTop: [qualifiedName]
             });
             addCase({
-                id: `plain-exact-method-${qualifiedName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-                mode: 'plain',
+                id: `smart-exact-method-${qualifiedName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+                mode: 'smart',
                 query: buildExactQuery(spec.name, entry, methodName, 'method'),
                 topWindow: 5,
                 expectWithinTop: [qualifiedName],
@@ -646,8 +639,8 @@ function createCases(specs, pickedEntries)
                 expectWithinTop: [qualifiedName]
             });
             addCase({
-                id: `plain-exact-property-${qualifiedName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-                mode: 'plain',
+                id: `smart-exact-property-${qualifiedName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+                mode: 'smart',
                 query: buildExactQuery(spec.name, entry, propertyName, 'property'),
                 topWindow: 5,
                 expectWithinTop: [qualifiedName],

@@ -41,7 +41,7 @@ test('searchApi success is rendered as grouped code-first text', () =>
         data: {
             request: {
                 query: 'MovementComponent',
-                regex: false,
+                mode: 'smart',
                 limit: 20,
                 source: 'both',
                 scope: 'Gameplay::Movement',
@@ -113,7 +113,7 @@ test('searchApi renders top-level returned count only when truncated', () =>
         data: {
             request: {
                 query: 'Movement',
-                regex: false,
+                mode: 'smart',
                 limit: 2,
                 source: 'both'
             },
@@ -164,7 +164,7 @@ test('searchApi groups multiple members under the same owner header', () =>
         data: {
             request: {
                 query: 'StartMovement IsMoving',
-                regex: false,
+                mode: 'smart',
                 limit: 20,
                 source: 'script',
                 scope: 'Gameplay::Movement::UMovementComponent'
@@ -208,7 +208,7 @@ test('searchApi renders mixin metadata in text output', () =>
         data: {
             request: {
                 query: 'UMovementDerived ApplyDerivedMovement',
-                regex: false,
+                mode: 'smart',
                 limit: 20,
                 source: 'both',
                 scope: 'Gameplay::Movement::UMovementDerived',
@@ -250,7 +250,7 @@ test('searchApi prefers full documentation over summary when includeDocs is enab
         data: {
             request: {
                 query: 'OpenPawnDataAIAsset(',
-                regex: false,
+                mode: 'smart',
                 limit: 20,
                 source: 'both',
                 includeDocs: true
@@ -290,7 +290,7 @@ test('searchApi renders merged same-name scope groups as separate sections', () 
         data: {
             request: {
                 query: 'Get',
-                regex: false,
+                mode: 'smart',
                 limit: 2,
                 source: 'script',
                 scope: 'UCthuBattleSet'
@@ -391,7 +391,7 @@ test('searchApi renders empty results as a code-style comment', () =>
         data: {
             request: {
                 query: 'DefinitelyMissingSymbol',
-                regex: false,
+                mode: 'smart',
                 limit: 20,
                 source: 'both'
             },
@@ -417,7 +417,7 @@ test('searchApi does not render ignored inherited-scope noise for auto namespace
         data: {
             request: {
                 query: 'Movement',
-                regex: false,
+                mode: 'smart',
                 limit: 20,
                 source: 'both',
                 scope: 'Gameplay::Movement',
