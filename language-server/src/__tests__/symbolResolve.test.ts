@@ -168,3 +168,29 @@ test('ResolveSymbolAtPosition returns NotFound when there is no symbol at the re
 
     assert.equal(result.error.code, 'NotFound');
 });
+
+test('ResolveSymbolAtPosition ignores commented-out code lines when building documentation', () =>
+{
+    const content = [
+        'class UDocNoiseFixture',
+        '{',
+        '    // default MontageSlotName = n"OverrideFullBody";',
+        '    void ActivateAbility() {}',
+        '}',
+    ].join('\n');
+
+    const asmodule = createResolvedModule(content);
+    const result = ResolveSymbolAtPosition(
+        asmodule,
+        positionFor(content, 'ActivateAbility', 1, 1),
+        true
+    );
+
+    assert.equal(result.ok, true);
+    if (result.ok !== true)
+        return;
+
+    assert.equal(result.symbol.kind, 'method');
+    assert.equal(result.symbol.name, 'ActivateAbility');
+    assert.equal(result.symbol.doc, undefined);
+});

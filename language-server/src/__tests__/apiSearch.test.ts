@@ -1,5 +1,9 @@
 import * as assert from 'node:assert/strict';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import test = require('node:test');
+import { pathToFileURL } from 'node:url';
+import * as scriptfiles from '../as_parser';
 import {
     DBArg,
     DBMethod,
@@ -7,12 +11,15 @@ import {
     DBNamespaceDeclaration,
     DBProperty,
     DBType,
+    AddPrimitiveTypes,
     AddTypeToDatabase,
     GetRootNamespace,
     OnDirtyTypeCaches,
     ResetDatabaseForTests
 } from '../database';
 import { GetAPISearch, InvalidateAPISearchCache } from '../api_search';
+
+let moduleCounter = 0;
 
 function declareNamespace(qualifiedName: string, declaredModule?: string): DBNamespace
 {
@@ -114,6 +121,26 @@ function createType(
 
     AddTypeToDatabase(namespace, dbType);
     return dbType;
+}
+
+function createResolvedSearchModule(content: string): scriptfiles.ASModule
+{
+    ResetDatabaseForTests();
+    InvalidateAPISearchCache();
+    scriptfiles.ClearAllResolvedModules();
+    AddPrimitiveTypes(scriptfiles.GetScriptSettings().floatIsFloat64);
+    OnDirtyTypeCaches();
+
+    moduleCounter += 1;
+    const filePath = path.join(os.tmpdir(), `api-search-docs-${moduleCounter}.as`);
+    const uri = pathToFileURL(filePath).toString();
+    const moduleName = `Api.Search.Docs.${moduleCounter}`;
+    const asmodule = scriptfiles.GetOrCreateModule(moduleName, filePath, uri);
+    scriptfiles.UpdateModuleFromContent(asmodule, content);
+    scriptfiles.ParseModuleAndDependencies(asmodule);
+    scriptfiles.PostProcessModuleTypesAndDependencies(asmodule);
+    scriptfiles.ResolveModule(asmodule);
+    return asmodule;
 }
 
 function setupSearchFixture(): void
@@ -694,6 +721,29 @@ test('includeDocs enriches search results without changing ordering', () =>
     assert.equal(withoutDocs.matches[0]?.documentation, undefined);
     assert.equal(withDocs.matches[0]?.documentation, 'Opens the selected pawn data asset.');
     assert.equal(withDocs.matches[0]?.summary, 'Opens the selected pawn data asset.');
+});
+
+test('includeDocs ignores commented-out code lines collected as script documentation', () =>
+{
+    createResolvedSearchModule([
+        'class UDocNoiseFixture',
+        '{',
+        '    // default MontageSlotName = n"OverrideFullBody";',
+        '    void ActivateAbility() {}',
+        '}',
+    ].join('\n'));
+
+    const withDocs = GetAPISearch({
+        query: 'UDocNoiseFixture.ActivateAbility',
+        mode: 'smart',
+        limit: 10,
+        source: 'script',
+        includeDocs: true
+    });
+
+    assert.equal(withDocs.matches[0]?.qualifiedName, 'UDocNoiseFixture.ActivateAbility');
+    assert.equal(withDocs.matches[0]?.documentation, undefined);
+    assert.equal(withDocs.matches[0]?.summary, undefined);
 });
 
 test('namespace scope restricts results to declared descendants', () =>

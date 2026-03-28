@@ -2710,10 +2710,42 @@ export function RemoveTypeFromDatabase(dbtype : DBType)
 
 let re_comment_star_start = /^[ \t]*\*+([ \t]|\r?\n)/gi;
 let re_comment_star_end = /[\r\n]+[ \t]*\*+[ \t]*/gi;
+function IsCommentedOutCodeDocumentationLine(line : string) : boolean
+{
+    if (!line)
+        return false;
+    if (line.startsWith("@") || line.startsWith("-") || line.startsWith("*"))
+        return false;
+    if (/[.?!]\s*$/u.test(line) && !/;\s*$/u.test(line))
+        return false;
+    if (/^\s*[{}]\s*$/u.test(line))
+        return true;
+    if (/^(default|if|else|for|while|switch|case|return|break|continue|class|struct|enum|namespace|UFUNCTION|UPROPERTY|UCLASS|USTRUCT)\b/u.test(line))
+        return true;
+    if (/^(?:[A-Za-z_][\w:<>,\s*&]*\s+)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*|\[[^\]]+\])*(?:\s*=\s*.+)?;\s*$/u.test(line))
+        return true;
+    return false;
+}
+
+function IsCommentedOutCodeDocumentation(doc : string) : boolean
+{
+    let lines = doc
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length != 0);
+    if (lines.length == 0)
+        return false;
+    return lines.every((line) => IsCommentedOutCodeDocumentationLine(line));
+}
+
 export function FormatDocumentationComment(doc : string) : string
 {
+    if (!doc)
+        return "";
     doc = doc.replace(re_comment_star_end, "\n");
     doc = doc.replace(re_comment_star_start, " ");
     doc = doc.trim();
+    if (IsCommentedOutCodeDocumentation(doc))
+        return "";
     return doc;
 }

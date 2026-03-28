@@ -313,7 +313,12 @@ function isSuperAliasReferenceAtPosition(lineText: string, startCharacter: numbe
     if (startCharacter < 0)
         return false;
     const safeStartCharacter = Math.min(startCharacter, lineText.length);
-    return /\bSuper\s*::\s*$/u.test(lineText.slice(0, safeStartCharacter));
+    const prefix = lineText.slice(0, safeStartCharacter);
+    if (/\bSuper\s*::\s*$/u.test(prefix))
+        return true;
+
+    const suffix = lineText.slice(safeStartCharacter);
+    return /^\s*Super\s*::/u.test(suffix);
 }
 
 async function shouldFilterSuperAliasReference(
