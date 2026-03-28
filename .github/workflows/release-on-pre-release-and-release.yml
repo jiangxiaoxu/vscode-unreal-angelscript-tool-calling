@@ -44,7 +44,11 @@ jobs:
       - name: Package VSIX
         run: |
           mkdir -p dist
-          npx -y @vscode/vsce package --out "./dist/unreal-angelscript-tool-calling-fork-${{ steps.meta.outputs.version }}.vsix"
+          PACKAGE_ARGS=()
+          if [ "${GITHUB_REF_NAME}" = "pre-release" ]; then
+            PACKAGE_ARGS+=(--pre-release)
+          fi
+          npx -y @vscode/vsce package "${PACKAGE_ARGS[@]}" --out "./dist/unreal-angelscript-tool-calling-fork-${{ steps.meta.outputs.version }}.vsix"
 
       - name: Publish to VS Code Marketplace (pre-release)
         if: ${{ github.ref_name == 'pre-release' }}
