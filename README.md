@@ -13,6 +13,8 @@
 [Known Limits](#known-limits)
 [Fork Maintenance](#fork-maintenance)
 [Upstream](#upstream)
+
+## 目录
 [中文](#中文)
 [概览](#概览)
 [快速开始](#快速开始)
@@ -33,15 +35,17 @@ This extension provides language server and debugger support for UnrealEngine-An
 
 ### Quick Start
 1. Use an Unreal Editor build with Angelscript enabled.
-2. Open your project's `Script` folder in VS Code as the workspace root.
+2. Open either your project's `Script` folder itself, or its parent folder that contains `Script`, in VS Code.
 3. Start Unreal Editor. The extension connects automatically.
 
 Notes:
-- Core language features still follow the primary workspace.
+- Core language features run across all resolved `Script` roots from the current workspace folders.
 - LM tool `filePath` inputs and outputs use normalized absolute paths.
 - Supported workspace layouts are strict: the root must be `Script` itself, or contain `<workspace>/Script`.
 - Startup indexing scans only resolved `Script` roots (`Script/**/*.as`), not the entire workspace tree.
 - Runtime file watching and incremental parse/update handling are also restricted to resolved `Script` roots only.
+- Initial indexing honors `UnrealAngelscript.scriptIgnorePatterns`.
+- If workspace folders change after activation, reload the window to refresh Script-root watchers and indexing.
 - Unsupported workspace layouts fail fast with an error message and skip initial indexing.
 
 ### Core Features
@@ -98,7 +102,13 @@ Output rules:
 - Input and output `filePath` use normalized absolute paths.
 - For line-based results, text output includes source previews (max 20 lines, truncated with `... (truncated)`, fallback `<source unavailable>`).
 
-
+### Build
+- `npm install` installs the root dependencies and the nested `extension` and `language-server` packages via `postinstall`.
+- `npm run compile` builds both the extension bundle and the language server bundle.
+- `npm run watch` watches both bundles during development.
+- `npm test` runs the full test suite.
+- `npm run test:fork-boundary` runs the fork-boundary regression suite for LM tool contracts and workspace layout behavior.
+- `npm run sync:lm-tools` refreshes generated LM tool documentation in `README.md`, `package.json`, and `face-ai-report.md`.
 
 ### Known Limits
 - When engine is disconnected, details depend on cached DebugDatabase and available `doc` fields.
@@ -125,15 +135,17 @@ https://angelscript.hazelight.se
 
 ### 快速开始
 1. 使用启用 Angelscript 的 Unreal Editor 版本.
-2. 在 VS Code 中把项目 `Script` 文件夹作为工作区根目录打开.
+2. 在 VS Code 中打开项目的 `Script` 文件夹本身,或打开其上一级且包含 `Script` 的目录.
 3. 启动 Unreal Editor,扩展会自动连接.
 
 说明:
-- 核心语言功能仍按主工作区运行.
+- 核心语言功能会覆盖当前 workspace folders 中所有解析成功的 `Script` 根目录.
 - LM tool 的 `filePath` 输入和输出统一使用标准化后的绝对路径.
 - 工作区兼容策略为严格模式: 根目录必须是 `Script` 本身,或包含 `<workspace>/Script`.
 - 启动索引只扫描解析后的 `Script` 根目录(`Script/**/*.as`),不会全盘递归扫描工作区.
 - 运行期文件监听与增量解析/更新同样严格限制在解析后的 `Script` 根目录内.
+- 初始索引会遵守 `UnrealAngelscript.scriptIgnorePatterns`.
+- 如果激活后发生 workspace folders 变更,需要 reload window 才会刷新 `Script` watcher 和索引.
 - 对不受支持的工作区形态会快速报错并跳过初始索引.
 
 ### 核心功能
@@ -190,6 +202,13 @@ https://angelscript.hazelight.se
 - 输入和输出 `filePath` 统一使用标准化后的绝对路径.
 - 涉及行号/范围的结果会直接在文本中渲染源码片段(最多 20 行,超出追加 `... (truncated)`,不可读时为 `<source unavailable>`).
 
+### 构建
+- `npm install` 会安装根目录依赖,并通过 `postinstall` 安装嵌套的 `extension` 和 `language-server` 包依赖.
+- `npm run compile` 会同时构建 extension bundle 和 language server bundle.
+- `npm run watch` 会在开发时同时监听这两个 bundle.
+- `npm test` 会运行完整测试集.
+- `npm run test:fork-boundary` 会运行 fork boundary 回归测试,重点覆盖 LM tool contract 和 workspace layout 行为.
+- `npm run sync:lm-tools` 会刷新 `README.md`、`package.json` 和 `face-ai-report.md` 中生成的 LM tool 文档.
 
 ### 已知限制
 - 引擎断开时,详情能力依赖缓存 DebugDatabase 与 `doc` 字段可用性.
