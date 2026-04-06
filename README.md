@@ -9,6 +9,7 @@
 [Core Features](#core-features)
 [Offline Cache](#offline-cache)
 [Language Model Tools](#language-model-tools)
+[LM Tool Templates](#lm-tool-templates)
 [Build](#build)
 [Known Limits](#known-limits)
 [Fork Maintenance](#fork-maintenance)
@@ -21,6 +22,7 @@
 [核心功能](#核心功能)
 [离线缓存](#离线缓存)
 [Language Model Tools](#language-model-tools-1)
+[LM Tool Templates](#lm-tool-templates-1)
 [构建](#构建)
 [已知限制](#已知限制)
 [维护策略](#维护策略)
@@ -109,6 +111,15 @@ Output rules:
 - `npm test` runs the full test suite.
 - `npm run test:fork-boundary` runs the fork-boundary regression suite for LM tool contracts and workspace layout behavior.
 - `npm run sync:lm-tools` refreshes generated LM tool documentation in `README.md`, `package.json`, and `face-ai-report.md`.
+
+### LM Tool Templates
+Detailed per-tool input/output templates live in [lm-tool-templates.md](./lm-tool-templates.md).
+
+Use that document as the maintained reference for:
+- sample inputs
+- success `text` shape
+- success `json` shape
+- representative error outputs
 
 ### Known Limits
 - When engine is disconnected, details depend on cached DebugDatabase and available `doc` fields.
@@ -209,6 +220,15 @@ https://angelscript.hazelight.se
 - `npm test` 会运行完整测试集.
 - `npm run test:fork-boundary` 会运行 fork boundary 回归测试,重点覆盖 LM tool contract 和 workspace layout 行为.
 - `npm run sync:lm-tools` 会刷新 `README.md`、`package.json` 和 `face-ai-report.md` 中生成的 LM tool 文档.
+
+### LM Tool Templates
+逐 tool 的输入/输出模板文档见 [lm-tool-templates.md](./lm-tool-templates.md).
+
+该文档用于持续维护:
+- 输入示例
+- 成功 `text` 形态
+- 成功 `json` 形态
+- 代表性错误输出
 
 ### 已知限制
 - 引擎断开时,详情能力依赖缓存 DebugDatabase 与 `doc` 字段可用性.

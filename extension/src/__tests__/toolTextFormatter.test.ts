@@ -89,7 +89,8 @@ test('searchApi success is rendered as grouped code-first text', () =>
 
     assert.equal(text, [
         'Angelscript API search',
-        '// scope: class Gameplay::Movement::UMovementComponent',
+        '// query: MovementComponent | mode=smart | source=both',
+        '// scope: class Gameplay::Movement::UMovementComponent | inherited:on',
         '// notice [SCOPE_INHERITANCE_EMPTY]: Scope "Gameplay::Movement::UMovementComponent" has no inherited members to expand.',
         '',
         '// namespace Gameplay::Movement',
@@ -144,6 +145,7 @@ test('searchApi renders top-level returned count only when truncated', () =>
 
     assert.equal(text, [
         'Angelscript API search',
+        '// query: Movement | mode=smart | source=both',
         '// returned: 2/5',
         '',
         '// namespace Gameplay::Movement',
@@ -192,6 +194,9 @@ test('searchApi groups multiple members under the same owner header', () =>
 
     assert.equal(text, [
         'Angelscript API search',
+        '// query: StartMovement IsMoving | mode=smart | source=script',
+        '// scope: Gameplay::Movement::UMovementComponent',
+        '',
         '// Gameplay::Movement::UMovementComponent',
         '// match: boundary-ordered',
         'void StartMovement();',
@@ -233,6 +238,9 @@ test('searchApi renders mixin metadata in text output', () =>
 
     assert.equal(text, [
         'Angelscript API search',
+        '// query: UMovementDerived ApplyDerivedMovement | mode=smart | source=both',
+        '// scope: Gameplay::Movement::UMovementDerived | inherited:on',
+        '',
         '// Gameplay::Movement',
         '// match: ordered-wildcard',
         '// mixin from Gameplay::Movement',
@@ -272,6 +280,8 @@ test('searchApi renders type-level projection metadata in text output', () =>
 
     assert.equal(text, [
         'Angelscript API search',
+        '// query: TickMovement | mode=smart | source=both | symbolLevel=type',
+        '',
         '// namespace Gameplay::Movement',
         '// match: ordered-wildcard',
         '// matched by member: Gameplay::Movement::UMovementBase.TickMovement',
@@ -308,6 +318,8 @@ test('searchApi prefers full documentation over summary when includeDocs is enab
 
     assert.equal(text, [
         'Angelscript API search',
+        '// query: OpenPawnDataAIAsset( | mode=smart | source=both',
+        '',
         '// Gameplay::Characters::UCthuAICharacterExtension',
         '// match: exact-qualified',
         '/**',
@@ -404,6 +416,8 @@ test('searchApi renders merged same-name scope groups as separate sections', () 
 
     assert.equal(text, [
         'Angelscript API search',
+        '// query: Get | mode=smart | source=script',
+        '// scope: class UCthuBattleSet',
         '// returned: 2/3',
         '',
         '// scope: class UCthuBattleSet',
@@ -442,6 +456,8 @@ test('searchApi renders empty results as a code-style comment', () =>
 
     assert.equal(text, [
         'Angelscript API search',
+        '// query: DefinitelyMissingSymbol | mode=smart | source=both',
+        '',
         '// No matches found.'
     ].join('\n'));
 });
@@ -486,7 +502,8 @@ test('searchApi does not render ignored inherited-scope noise for auto namespace
 
     assert.equal(text, [
         'Angelscript API search',
-        '// scope: namespace Gameplay::Movement',
+        '// query: Movement | mode=smart | source=both',
+        '// scope: namespace Gameplay::Movement | inherited:auto',
         '',
         '// Gameplay::Movement',
         '// match: ordered-wildcard',
@@ -535,6 +552,8 @@ test('resolveSymbol success renders doc comment and preview-first output', () =>
 
     assert.equal(text, [
         'Angelscript resolve symbol',
+        '// input: G:/Project/Game/Characters/Hero.as:128:17 | docs:on',
+        '',
         '/**',
         ' * Moves the character toward the target actor.',
         ' */',
@@ -567,6 +586,8 @@ test('resolveSymbol normalizes markdown docs when falling back to declaration te
 
     assert.equal(text, [
         'Angelscript resolve symbol',
+        '// input: <unknown>:1:? | docs:off',
+        '',
         '/**',
         ' * Moves the target actor.',
         ' *',
@@ -594,6 +615,8 @@ test('resolveSymbol keeps non-public visibility when falling back to declaration
 
     assert.equal(text, [
         'Angelscript resolve symbol',
+        '// input: <unknown>:1:? | docs:off',
+        '',
         'protected bool IsMoving() const;'
     ].join('\n'));
 });
@@ -655,6 +678,8 @@ test('getTypeMembers success renders member list blocks', () =>
 
     assert.equal(text, [
         'Angelscript type members',
+        '// request: inherited:on | docs:on | kinds=both',
+        '// namespace: Gameplay',
         'type: Gameplay::UMovementComponent',
         '====',
         '/**',
@@ -708,6 +733,8 @@ test('getTypeMembers strips explicit public modifiers from declaration-style tex
 
     assert.equal(text, [
         'Angelscript type members',
+        '// request: kinds=both',
+        '// namespace: Gameplay',
         'type: Gameplay::UPlainComponent',
         '====',
         'FVector InternalOffset;'
@@ -744,6 +771,8 @@ test('getTypeMembers omits an empty target description block and empty member de
 
     assert.equal(text, [
         'Angelscript type members',
+        '// request: kinds=both',
+        '// namespace: Gameplay',
         'type: Gameplay::UPlainComponent',
         '====',
         'void StartMovement();'
@@ -796,6 +825,7 @@ test('getClassHierarchy success renders lineage comments and source blocks', () 
 
     assert.equal(text, [
         'Angelscript class hierarchy',
+        '// limits: super=3 | sub=2 | breadth=10',
         '// lineage: AActor <- APawn <- AHazeCharacter <- AMyHeroCharacter',
         '',
         '// derived:',
@@ -844,6 +874,8 @@ test('getClassHierarchy renders truncation comments only when hierarchy is clipp
 
     assert.equal(text, [
         'Angelscript class hierarchy',
+        '// limits: super=? | sub=? | breadth=?',
+        '// returned: truncated',
         '// lineage: AHazeCharacter <- AMyHeroCharacter',
         '',
         '// derived:',
@@ -901,6 +933,8 @@ test('findReferences success renders file comments and preview blocks', () =>
 
     assert.equal(text, [
         'Angelscript references',
+        '// input: G:/Project/Game/Characters/Hero.as:128:17 | limit=30',
+        '',
         '// G:/Project/Game/Characters/Hero.as',
         '// range: 128:5-128:17',
         '128:        JumpToTarget(TargetActor);',
@@ -955,6 +989,8 @@ test('findReferences keeps multiple references in the same file grouped without 
 
     assert.equal(text, [
         'Angelscript references',
+        '// input: G:/Project/Game/Characters/Hero.as:128:17 | limit=30',
+        '',
         '// G:/Project/Game/Characters/Hero.as',
         '// range: 128:5-128:17',
         '128:        JumpToTarget(TargetActor);',
@@ -1008,7 +1044,8 @@ test('findReferences renders truncation metadata and notice', () =>
 
     assert.equal(text, [
         'Angelscript references',
-        '// returned: 2/35',
+        '// input: G:/Project/Game/Characters/Hero.as:128:17 | limit=2',
+        '// returned: 2/35 | truncated=true',
         '',
         '// G:/Project/Game/Characters/Hero.as',
         '// range: 128:5-128:17',
@@ -1043,6 +1080,8 @@ test('findReferences renders empty results as a code-style comment', () =>
 
     assert.equal(text, [
         'Angelscript references',
+        '// input: G:/Project/Game/Characters/Hero.as:128:17 | limit=30',
+        '',
         '// No references found.'
     ].join('\n'));
 });
@@ -1078,6 +1117,7 @@ test('getClassHierarchy degrades unresolved script preview without failing text 
 
     assert.equal(text, [
         'Angelscript class hierarchy',
+        '// limits: super=3 | sub=2 | breadth=10',
         '// lineage: AMyHeroCharacter',
         '',
         '// derived:',

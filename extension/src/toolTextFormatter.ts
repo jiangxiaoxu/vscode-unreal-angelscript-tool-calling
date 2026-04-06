@@ -122,6 +122,168 @@ function getToolTitle(toolName: string): string
     return toolName;
 }
 
+function pushHeaderLine(lines: string[], parts: Array<string | null | undefined>): void
+{
+    const compactParts = parts
+        .map((part) => typeof part === 'string' ? part.trim() : '')
+        .filter((part) => part.length > 0);
+    if (compactParts.length === 0)
+        return;
+    lines.push(`// ${compactParts.join(' | ')}`);
+}
+
+function buildSearchApiHeaderLines(data: UnknownRecord): string[]
+{
+    const lines: string[] = [];
+    const request = asRecord(data.request);
+    const query = asString(request?.query) ?? '<unknown>';
+    const mode = asString(request?.mode);
+    const source = asString(request?.source);
+    const symbolLevel = asString(request?.symbolLevel);
+    pushHeaderLine(lines, [
+        `query: ${query}`,
+        mode ? `mode=${mode}` : null,
+        source ? `source=${source}` : null,
+        symbolLevel ? `symbolLevel=${symbolLevel}` : null
+    ]);
+
+    const scopeLookup = asRecord(data.scopeLookup);
+    const requestedScope = asString(request?.scope) ?? asString(scopeLookup?.requestedScope);
+    const resolvedKind = asString(scopeLookup?.resolvedKind);
+    const resolvedQualifiedName = asString(scopeLookup?.resolvedQualifiedName);
+    const inheritedMode = asString(request?.includeInheritedFromScopeMode);
+    const includeInherited = asBoolean(request?.includeInheritedFromScope);
+    if (resolvedKind && resolvedQualifiedName)
+    {
+        pushHeaderLine(lines, [
+            `scope: ${resolvedKind} ${resolvedQualifiedName}`,
+            inheritedMode === 'auto'
+                ? 'inherited:auto'
+                : includeInherited === true
+                    ? 'inherited:on'
+                    : null
+        ]);
+    }
+    else if (requestedScope)
+    {
+        pushHeaderLine(lines, [
+            `scope: ${requestedScope}`,
+            inheritedMode === 'auto'
+                ? 'inherited:auto'
+                : includeInherited === true
+                    ? 'inherited:on'
+                    : null
+        ]);
+    }
+
+    const ambiguousCandidates = asArray(scopeLookup?.ambiguousCandidates);
+    if (ambiguousCandidates && ambiguousCandidates.length > 0)
+    {
+        const candidates = ambiguousCandidates.map((item) => asString(item) ?? toDisplayValue(item));
+        pushHeaderLine(lines, [`scope candidates: ${candidates.join(' | ')}`]);
+    }
+
+    const matchCounts = asRecord(data.matchCounts);
+    const matches = asArray(data.matches) ?? [];
+    const totalMatches = Math.max(matches.length, asNumber(matchCounts?.total) ?? matches.length);
+    const returnedMatches = Math.max(0, asNumber(matchCounts?.returned) ?? matches.length);
+    const omittedMatches = asNumber(matchCounts?.omitted) ?? Math.max(0, totalMatches - returnedMatches);
+    if (omittedMatches > 0 || returnedMatches < totalMatches)
+        pushHeaderLine(lines, [`returned: ${returnedMatches}/${totalMatches}`]);
+
+    return lines;
+}
+
+function buildResolveSymbolHeaderLines(data: UnknownRecord): string[]
+{
+    const lines: string[] = [];
+    const request = asRecord(data.request);
+    const filePath = asString(request?.filePath) ?? '<unknown>';
+    const position = asRecord(request?.position);
+    const line = asValidLineNumber(position?.line) ?? 1;
+    const character = asNumber(position?.character);
+    const oneBasedCharacter = character !== null && character >= 0 ? character : '?';
+    const includeDocumentation = asBoolean(request?.includeDocumentation) ?? false;
+    pushHeaderLine(lines, [
+        `input: ${filePath}:${line}:${oneBasedCharacter}`,
+        `docs:${includeDocumentation ? 'on' : 'off'}`
+    ]);
+    return lines;
+}
+
+function buildTypeMembersHeaderLines(data: UnknownRecord): string[]
+{
+    const lines: string[] = [];
+    const request = asRecord(data.request);
+    const requestParts: string[] = [];
+    if ((asBoolean(request?.includeInherited) ?? false) === true)
+        requestParts.push('inherited:on');
+    if ((asBoolean(request?.includeDocs) ?? false) === true)
+        requestParts.push('docs:on');
+
+    const kinds = asString(request?.kinds);
+    requestParts.push(`kinds=${kinds && kinds.trim().length > 0 ? kinds : 'both'}`);
+    pushHeaderLine(lines, [`request: ${requestParts.join(' | ')}`]);
+
+    const namespace = asString(request?.namespace) ?? asString(asRecord(data.type)?.namespace);
+    if (namespace)
+        pushHeaderLine(lines, [`namespace: ${namespace}`]);
+
+    return lines;
+}
+
+function buildClassHierarchyHeaderLines(data: UnknownRecord): string[]
+{
+    const lines: string[] = [];
+    const limits = asRecord(data.limits);
+    const superDepth = asNumber(limits?.maxSuperDepth);
+    const subDepth = asNumber(limits?.maxSubDepth);
+    const breadth = asNumber(limits?.maxSubBreadth);
+    pushHeaderLine(lines, [
+        `limits: super=${superDepth ?? '?'}`,
+        `sub=${subDepth ?? '?'}`,
+        `breadth=${breadth ?? '?'}`
+    ]);
+
+    const truncated = asRecord(data.truncated);
+    const breadthByClass = asRecord(truncated?.derivedBreadthByClass);
+    const hasTruncation = (asBoolean(truncated?.supers) ?? false)
+        || (asBoolean(truncated?.derivedDepth) ?? false)
+        || (!!breadthByClass && Object.keys(breadthByClass).length > 0);
+    if (hasTruncation)
+        pushHeaderLine(lines, ['returned: truncated']);
+
+    return lines;
+}
+
+function buildFindReferencesHeaderLines(data: UnknownRecord): string[]
+{
+    const lines: string[] = [];
+    const request = asRecord(data.request);
+    const filePath = asString(request?.filePath) ?? '<unknown>';
+    const position = asRecord(request?.position);
+    const line = asValidLineNumber(position?.line) ?? 1;
+    const character = asNumber(position?.character);
+    const oneBasedCharacter = character !== null && character >= 0 ? character : '?';
+    const limit = asNumber(request?.limit) ?? asNumber(data.limit);
+    pushHeaderLine(lines, [
+        `input: ${filePath}:${line}:${oneBasedCharacter}`,
+        limit !== null ? `limit=${limit}` : null
+    ]);
+
+    const references = asArray(data.references) ?? [];
+    const total = Math.max(references.length, asNumber(data.total) ?? references.length);
+    const returned = asNumber(data.returned) ?? references.length;
+    const truncated = asBoolean(data.truncated) ?? false;
+    if (truncated || returned < total)
+        pushHeaderLine(lines, [
+            `returned: ${returned}/${total}`,
+            truncated ? 'truncated=true' : null
+        ]);
+
+    return lines;
+}
+
 function pushValue(lines: string[], key: string, value: unknown): void
 {
     if (value === undefined || value === null)
@@ -749,8 +911,8 @@ function formatError(toolName: string, payload: UnknownRecord): string
 function formatSearchApiSuccess(data: UnknownRecord): string
 {
     const lines: string[] = ['Angelscript API search'];
+    lines.push(...buildSearchApiHeaderLines(data));
     const request = asRecord(data.request);
-    const scope = asString(request?.scope);
     const matches = asArray(data.matches) ?? [];
     const matchCounts = asRecord(data.matchCounts);
     const scopeGroups = asArray(data.scopeGroups) ?? [];
@@ -765,10 +927,13 @@ function formatSearchApiSuccess(data: UnknownRecord): string
     {
         const resolvedKind = asString(scopeLookup.resolvedKind);
         const resolvedQualifiedName = asString(scopeLookup.resolvedQualifiedName);
-        if (resolvedKind && resolvedQualifiedName)
-            pushComment(lines, `scope: ${resolvedKind} ${resolvedQualifiedName}`);
-        else
-            pushComment(lines, scope ? 'scope: <unresolved>' : '');
+        if (!asString(request?.scope))
+        {
+            if (resolvedKind && resolvedQualifiedName)
+                pushComment(lines, `scope: ${resolvedKind} ${resolvedQualifiedName}`);
+            else
+                pushComment(lines, 'scope: <unresolved>');
+        }
 
         const ambiguousCandidates = asArray(scopeLookup.ambiguousCandidates);
         if (ambiguousCandidates && ambiguousCandidates.length > 0)
@@ -792,9 +957,6 @@ function formatSearchApiSuccess(data: UnknownRecord): string
             );
         }
     }
-
-    if (omittedMatches > 0)
-        pushComment(lines, `returned: ${returnedMatches}/${totalMatches}`);
 
     if (scopeGroups.length > 0)
     {
@@ -858,6 +1020,7 @@ function formatSearchApiSuccess(data: UnknownRecord): string
 function formatResolveSymbolSuccess(data: UnknownRecord): string
 {
     const lines: string[] = ['Angelscript resolve symbol'];
+    lines.push(...buildResolveSymbolHeaderLines(data));
     const symbol = asRecord(data.symbol);
 
     if (!symbol)
@@ -899,7 +1062,7 @@ function formatResolveSymbolSuccess(data: UnknownRecord): string
 function formatTypeMembersSuccess(data: UnknownRecord): string
 {
     const lines: string[] = ['Angelscript type members'];
-    const request = asRecord(data.request);
+    lines.push(...buildTypeMembersHeaderLines(data));
     const type = asRecord(data.type);
     const typeName = asString(type?.qualifiedName) ?? asString(type?.name) ?? '<unknown>';
 
@@ -956,6 +1119,7 @@ function formatTypeMembersSuccess(data: UnknownRecord): string
 function formatClassHierarchySuccess(data: UnknownRecord): string
 {
     const lines: string[] = ['Angelscript class hierarchy'];
+    lines.push(...buildClassHierarchyHeaderLines(data));
     const root = asString(data.root) ?? '<unknown>';
     const supers = asArray(data.supers)?.map((item) => asString(item) ?? toDisplayValue(item)) ?? [];
     const truncated = asRecord(data.truncated);
@@ -1009,6 +1173,7 @@ function toRangeLabel(range: UnknownRecord | null): string
 function formatFindReferencesSuccess(data: UnknownRecord): string
 {
     const lines: string[] = ['Angelscript references'];
+    lines.push(...buildFindReferencesHeaderLines(data));
     const references = asArray(data.references) ?? [];
     const total = Math.max(references.length, asNumber(data.total) ?? references.length);
     const returned = asNumber(data.returned) ?? references.length;
@@ -1018,9 +1183,6 @@ function formatFindReferencesSuccess(data: UnknownRecord): string
         appendSeparatedBlock(lines, ['// No references found.']);
         return finalize(lines);
     }
-
-    if (truncated || returned < total)
-        pushComment(lines, `returned: ${returned}/${total}`);
 
     const limited = limitArray(references);
     const grouped = new Map<string, UnknownRecord[]>();

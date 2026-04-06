@@ -30,6 +30,29 @@ Do not return only one of them.
 
 `README.md` must include a navigable table of contents with anchor links.
 
+## LM Tool Documentation
+
+Keep LM tool documentation in sync with implementation.
+
+- `README.md` remains the top-level entry for LM tool capabilities and must link to the dedicated LM tool template document.
+- `lm-tool-templates.md` stores the maintained input/output templates for implemented LM tools, including:
+  - input examples
+  - success `text` templates
+  - success `json` templates
+  - representative error templates
+  - shared formatting rules and path/position conventions
+- When changing LM tool behavior, update documentation in the same change whenever any of the following change:
+  - tool inputs or defaults
+  - tool outputs or output mode behavior
+  - human-readable `text` formatting
+  - structured `json` shape
+  - path, range, line, or position conventions
+- For contract-sensitive LM tool changes, keep these artifacts aligned together:
+  - `scripts/lmToolManifest.mjs`
+  - generated `README.md` LM tool blocks via `npm run sync:lm-tools`
+  - `lm-tool-templates.md`
+- Do not let documentation examples drift from current formatter behavior. If formatter snapshots or tests change, update the templates in the same change.
+
 ## Fork Maintenance
 
 Follow these rules to keep the fork mergeable against `upstream/master`:
