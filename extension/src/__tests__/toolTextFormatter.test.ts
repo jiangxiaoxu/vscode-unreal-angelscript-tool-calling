@@ -579,6 +579,25 @@ test('resolveSymbol normalizes markdown docs when falling back to declaration te
     ].join('\n'));
 });
 
+test('resolveSymbol keeps non-public visibility when falling back to declaration text', () =>
+{
+    const text = formatToolText('angelscript_resolveSymbolAtPosition', {
+        ok: true,
+        data: {
+            symbol: {
+                name: 'IsMoving',
+                kind: 'method',
+                signature: 'protected bool IsMoving() const'
+            }
+        }
+    });
+
+    assert.equal(text, [
+        'Angelscript resolve symbol',
+        'protected bool IsMoving() const;'
+    ].join('\n'));
+});
+
 test('getTypeMembers success renders member list blocks', () =>
 {
     const text = formatToolText('angelscript_getTypeMembers', {

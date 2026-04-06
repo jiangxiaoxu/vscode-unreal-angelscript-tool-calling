@@ -262,6 +262,19 @@ function normalizeDeclarationVisibility(declaration: string): string
     return declaration.replace(/^public\s+/, '').trim();
 }
 
+function stripDeclarationVisibility(declaration: string): string
+{
+    return declaration.replace(/^(?:public|protected|private)\s+/, '').trim();
+}
+
+function applyDeclarationVisibility(declaration: string, visibility?: string | null): string
+{
+    const normalizedDeclaration = stripDeclarationVisibility(declaration);
+    if (visibility === 'protected' || visibility === 'private')
+        return `${visibility} ${normalizedDeclaration}`;
+    return normalizedDeclaration;
+}
+
 function ensureDeclarationTerminator(declaration: string, kind?: string | null): string
 {
     if (kind === 'namespace')
@@ -283,7 +296,9 @@ function formatTypeMemberDeclaration(record: UnknownRecord): string
     const declaration = displayName
         ? stripQualifiedDisplayNamePrefix(stripOwnerPrefix(rawSignature, asString(record.declaredIn), displayName), displayName)
         : rawSignature;
-    return formatSignatureDeclaration(declaration, asString(record.kind));
+    const visibility = asString(record.visibility);
+    const visibilityDeclaration = applyDeclarationVisibility(declaration, visibility);
+    return ensureDeclarationTerminator(visibilityDeclaration, asString(record.kind));
 }
 
 function getTypeMemberOriginComment(record: UnknownRecord): string | null
