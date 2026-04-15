@@ -94,12 +94,10 @@ test('searchApi success is rendered as grouped code-first text', () =>
         '// notice [SCOPE_INHERITANCE_EMPTY]: Scope "Gameplay::Movement::UMovementComponent" has no inherited members to expand.',
         '',
         '// namespace Gameplay::Movement',
-        '// match: exact-qualified',
         '// native',
         'class UMovementComponent;',
         '====',
         '// Gameplay::Movement::UMovementComponent',
-        '// match: boundary-ordered',
         '/**',
         ' * Starts movement on the current actor.',
         ' */',
@@ -149,12 +147,10 @@ test('searchApi renders top-level returned count only when truncated', () =>
         '// returned: 2/5',
         '',
         '// namespace Gameplay::Movement',
-        '// match: exact-qualified',
         '// native',
         'class UMovementComponent;',
         '====',
         '// Gameplay::Movement::UMovementComponent',
-        '// match: boundary-ordered',
         'void StartMovement();'
     ].join('\n'));
 });
@@ -198,10 +194,8 @@ test('searchApi groups multiple members under the same owner header', () =>
         '// scope: Gameplay::Movement::UMovementComponent',
         '',
         '// Gameplay::Movement::UMovementComponent',
-        '// match: boundary-ordered',
         'void StartMovement();',
         '',
-        '// match: boundary-ordered',
         'protected bool IsMoving() const;'
     ].join('\n'));
 });
@@ -242,7 +236,6 @@ test('searchApi renders mixin metadata in text output', () =>
         '// scope: Gameplay::Movement::UMovementDerived | inherited:on',
         '',
         '// Gameplay::Movement',
-        '// match: ordered-wildcard',
         '// mixin from Gameplay::Movement',
         '/**',
         ' * Applies derived movement through a mixin.',
@@ -283,7 +276,6 @@ test('searchApi renders type-level projection metadata in text output', () =>
         '// query: TickMovement | mode=smart | source=both | symbolLevel=type',
         '',
         '// namespace Gameplay::Movement',
-        '// match: ordered-wildcard',
         '// matched by member: Gameplay::Movement::UMovementBase.TickMovement',
         'class UMovementBase;'
     ].join('\n'));
@@ -321,7 +313,6 @@ test('searchApi prefers full documentation over summary when includeDocs is enab
         '// query: OpenPawnDataAIAsset( | mode=smart | source=both',
         '',
         '// Gameplay::Characters::UCthuAICharacterExtension',
-        '// match: exact-qualified',
         '/**',
         ' * Full documentation line 1.',
         ' *',
@@ -422,14 +413,12 @@ test('searchApi renders merged same-name scope groups as separate sections', () 
         '',
         '// scope: class UCthuBattleSet',
         '// UCthuBattleSet',
-        '// match: boundary-ordered',
         'void GetOwnedGameplayTags();',
         '====',
         '// scope: namespace UCthuBattleSet',
         '// returned: 1/2',
         '',
         '// UCthuBattleSet',
-        '// match: boundary-ordered',
         'FGameplayAttribute GetManaAttr();'
     ].join('\n'));
 });
@@ -506,7 +495,6 @@ test('searchApi does not render ignored inherited-scope noise for auto namespace
         '// scope: namespace Gameplay::Movement | inherited:auto',
         '',
         '// Gameplay::Movement',
-        '// match: ordered-wildcard',
         'void BuildMovementPath(FVector Target);'
     ].join('\n'));
 });

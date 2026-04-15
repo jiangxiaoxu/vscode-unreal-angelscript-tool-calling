@@ -512,10 +512,6 @@ function formatSearchDeclaration(record: UnknownRecord): string
 function buildSearchMatchMetaComments(record: UnknownRecord, request: UnknownRecord | null): string[]
 {
     const comments: string[] = [];
-    const matchReason = asString(record.matchReason);
-    if (matchReason && matchReason.trim())
-        comments.push(`match: ${matchReason}`);
-
     const source = asString(record.source);
     const requestSource = asString(request?.source) ?? 'both';
     if (requestSource === 'both' && source === 'native')

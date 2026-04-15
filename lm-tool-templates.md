@@ -46,7 +46,6 @@ Angelscript API search
 // scope: class AActor | inherited:auto
 
 // AActor
-// match: exact-short
 // native
 /**
  * Called when play begins.
