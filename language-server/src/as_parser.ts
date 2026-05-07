@@ -357,7 +357,6 @@ export class ASVariable
     isPrivate : boolean = false;
     isProtected : boolean = false;
     isAuto : boolean = false;
-    isResolvingAuto : boolean = false;
     isLoopVariable : boolean = false;
     isIterator : boolean = false;
 
@@ -2907,18 +2906,15 @@ function UpdateLocalAutoVariableTypename(scope : ASScope, node : any, expression
     asvar.typename = CopyQualifiersToTypename(asvar.node_typename, typename);
 }
 
-function RetryResolveAutoVariableType(scope : ASScope, asvar : ASVariable) : typedb.DBType
+function ResolveAutos(scope : ASScope)
 {
-    if (!asvar.isAuto)
-        return null;
-    if (!asvar.node_expression)
-        return null;
-    if (asvar.isResolvingAuto)
-        return null;
-
-    asvar.isResolvingAuto = true;
-    try
+    for (let asvar of scope.variables)
     {
+        if (!asvar.isAuto)
+            continue;
+        if (!asvar.node_expression)
+            continue;
+
         let resolvedType = ResolveTypeFromExpression(scope, asvar.node_expression);
         if (resolvedType && asvar.isIterator)
             resolvedType = ResolveIteratorType(resolvedType);
@@ -2927,19 +2923,6 @@ function RetryResolveAutoVariableType(scope : ASScope, asvar : ASVariable) : typ
             let typename = resolvedType.getQualifiedTypenameInNamespace(scope.getNamespace());
             asvar.typename = CopyQualifiersToTypename(asvar.node_typename, typename);
         }
-        return resolvedType;
-    }
-    finally
-    {
-        asvar.isResolvingAuto = false;
-    }
-}
-
-function ResolveAutos(scope : ASScope)
-{
-    for (let asvar of scope.variables)
-    {
-        RetryResolveAutoVariableType(scope, asvar);
     }
 
     for (let subscope of scope.scopes)
@@ -3457,15 +3440,7 @@ function ResolveTypeFromIdentifier(scope : ASScope, identifier : string) : typed
     {
         let usedVariable = checkscope.variablesByName.get(identifier);
         if (usedVariable)
-        {
-            let dbType = typedb.LookupType(checkscope.getNamespace(), usedVariable.typename);
-            if (!dbType && usedVariable.isAuto)
-            {
-                RetryResolveAutoVariableType(checkscope, usedVariable);
-                dbType = typedb.LookupType(checkscope.getNamespace(), usedVariable.typename);
-            }
-            return dbType;
-        }
+            return typedb.LookupType(checkscope.getNamespace(), usedVariable.typename);
         checkscope = checkscope.parentscope;
     }
 
@@ -5119,11 +5094,6 @@ function DetectIdentifierSymbols(scope : ASScope, statement : ASStatement, node 
                 usedVariable.usages.push(varSymbol);
 
                 let dbType = typedb.LookupType(checkscope.getNamespace(), usedVariable.typename);
-                if (!dbType && usedVariable.isAuto)
-                {
-                    RetryResolveAutoVariableType(checkscope, usedVariable);
-                    dbType = typedb.LookupType(checkscope.getNamespace(), usedVariable.typename);
-                }
                 scope.module.markDependencyType(dbType);
                 return dbType;
             }

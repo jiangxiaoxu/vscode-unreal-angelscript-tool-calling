@@ -11,6 +11,7 @@ Maintenance rule:
 ### English
 
 #### Changed
+- Removed the lookup-time fallback retry for local `auto` variable inference. The removed fallback previously tried to re-infer an unresolved `auto` variable from its initializer during later identifier/member lookup; `auto` member access now relies on declaration-time synchronization of the resolved initializer type into the local variable model.
 - VS Code Marketplace pre-release publication now packages the VSIX with `vsce package --pre-release` on the `pre-release` branch before publishing, so package metadata stays aligned with the marketplace channel.
 - `angelscript_searchApi` and `GetAPISearch` now treat omitted `includeInheritedFromScope` as auto-on only for resolved class scopes, keep namespace/struct/enum or unresolved scopes silent, and add tool-layer request metadata for resolved inheritance mode/value.
 - `angelscript_getTypeMembers` now always returns the target type description as `type.description`, keeps member descriptions gated by `includeDocs=true`, and renders human-readable text as Angelscript-style declarations with comment-based docs/origin notes.
@@ -49,6 +50,7 @@ Maintenance rule:
 ### 中文
 
 #### 变更
+- 已移除 local `auto` 变量推断的 lookup 阶段 fallback retry. 被移除的 fallback 之前会在后续 identifier/member lookup 时,尝试从 initializer 重新推断尚未解析的 `auto` 变量; 现在 `auto` member access 改为依赖声明期同步,直接把已解析的 initializer 类型写回 local variable 模型.
 - VS Code Marketplace 的 pre-release 发布现在会在 `pre-release` 分支先用 `vsce package --pre-release` 生成 VSIX 再执行发布,确保包内 metadata 与 Marketplace 渠道标记保持一致.
 - `angelscript_searchApi` 与 `GetAPISearch` 现在会把省略的 `includeInheritedFromScope` 解释为仅在解析到 class scope 时自动开启,对 namespace/struct/enum 或未解析 scope 保持静默关闭,并在 tool 层 `request` 中补充解析后的继承模式和值.
 - `angelscript_getTypeMembers` 现在始终通过 `type.description` 返回目标类型自身描述,成员描述仍仅在 `includeDocs=true` 时返回,且可读文本会改为更接近 Angelscript 的声明式输出,通过注释补充文档和来源信息.
