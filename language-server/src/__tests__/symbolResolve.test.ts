@@ -48,6 +48,19 @@ function positionFor(content: string, snippet: string, offsetWithinSnippet: numb
     };
 }
 
+function assertNoUnknownSymbolAt(asmodule: scriptfiles.ASModule, content: string, snippet: string, offsetWithinSnippet: number)
+{
+    const position = positionFor(content, snippet, offsetWithinSnippet);
+    const offset = asmodule.getOffset(position);
+    const unknownSymbols = asmodule.semanticSymbols.filter((symbol) =>
+        symbol.type == scriptfiles.ASSymbolType.UnknownError
+        && offset >= symbol.start
+        && offset < symbol.end
+    );
+
+    assert.deepEqual(unknownSymbols, []);
+}
+
 function createFixture()
 {
     const content = [
@@ -151,6 +164,77 @@ test('ResolveSymbolAtPosition resolves type, namespace, local variable, method, 
     assert.equal(accessorResult.symbol.name, 'GetValue');
     assert.match(accessorResult.symbol.signature, /UTestMovement\.Value/);
     assert.match(accessorResult.symbol.doc?.text ?? '', /Accessor docs/);
+});
+
+test('ResolveSymbolAtPosition resolves method calls through auto local variables', () =>
+{
+    const content = [
+        'class UAutoComponent',
+        '{',
+        '    /** Tag removal docs. */',
+        '    void RemoveLooseGameplayTag() {}',
+        '}',
+        '',
+        'class UAutoOwner',
+        '{',
+        '    UAutoComponent CthuAbilitySystemComponent;',
+        '',
+        '    void Run()',
+        '    {',
+        '        auto ASC = CthuAbilitySystemComponent;',
+        '        ASC.RemoveLooseGameplayTag();',
+        '    }',
+        '}',
+    ].join('\n');
+
+    const asmodule = createResolvedModule(content);
+    const result = ResolveSymbolAtPosition(
+        asmodule,
+        positionFor(content, 'ASC.RemoveLooseGameplayTag();', 'ASC.'.length),
+        true
+    );
+
+    assert.equal(result.ok, true);
+    if (result.ok !== true)
+        return;
+
+    assert.equal(result.symbol.kind, 'method');
+    assert.equal(result.symbol.name, 'RemoveLooseGameplayTag');
+    assert.match(result.symbol.signature, /UAutoComponent\.RemoveLooseGameplayTag/);
+    assert.match(result.symbol.doc?.text ?? '', /Tag removal docs/);
+});
+
+test('auto local member calls do not emit UnknownError for inherited methods', () =>
+{
+    const content = [
+        'class UAngelscriptAbilitySystemComponent',
+        '{',
+        '    void RemoveLooseGameplayTag() {}',
+        '}',
+        '',
+        'class UCthuAbilitySystemComponent : UAngelscriptAbilitySystemComponent',
+        '{',
+        '}',
+        '',
+        'class UAutoOwner',
+        '{',
+        '    UCthuAbilitySystemComponent CthuAbilitySystemComponent;',
+        '',
+        '    void Run()',
+        '    {',
+        '        auto ASC = CthuAbilitySystemComponent;',
+        '        ASC.RemoveLooseGameplayTag();',
+        '    }',
+        '}',
+    ].join('\n');
+
+    const asmodule = createResolvedModule(content);
+    assertNoUnknownSymbolAt(
+        asmodule,
+        content,
+        'ASC.RemoveLooseGameplayTag();',
+        'ASC.'.length
+    );
 });
 
 test('ResolveSymbolAtPosition returns NotFound when there is no symbol at the requested position', () =>

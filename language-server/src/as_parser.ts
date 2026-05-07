@@ -357,6 +357,7 @@ export class ASVariable
     isPrivate : boolean = false;
     isProtected : boolean = false;
     isAuto : boolean = false;
+    isResolvingAuto : boolean = false;
     isLoopVariable : boolean = false;
     isIterator : boolean = false;
 
@@ -2860,36 +2861,64 @@ function AddAccessSpecifierSymbol(scope : ASScope, statement : ASStatement, node
     }
 }
 
+function GetDBTypeFromExpressionType(expressionType : typedb.DBSymbol | typedb.DBType) : typedb.DBType
+{
+    if (expressionType instanceof typedb.DBType)
+        return expressionType;
+    if (expressionType instanceof typedb.DBProperty)
+        return typedb.LookupType(expressionType.namespace, expressionType.typename);
+    if (expressionType instanceof typedb.DBMethod && expressionType.isProperty && expressionType.returnType)
+        return typedb.LookupType(expressionType.namespace, expressionType.returnType);
+    return null;
+}
+
 function UpdateAutoTypenameSymbol(symbol : ASSemanticSymbol, expressionType : typedb.DBSymbol | typedb.DBType)
 {
     if (!symbol)
         return;
 
     symbol.isAuto = true;
-    if (!expressionType)
+    let dbtype = GetDBTypeFromExpressionType(expressionType);
+    if (!dbtype)
         return;
 
-    if (expressionType instanceof typedb.DBType)
-    {
-        symbol.container_type = null;
-        symbol.symbol_name = expressionType.name;
-    }
-    else if(expressionType instanceof typedb.DBProperty)
-    {
-        symbol.container_type = null;
-        symbol.symbol_name = expressionType.typename;
-    }
+    symbol.container_type = null;
+    symbol.symbol_name = dbtype.name;
 }
 
-function ResolveAutos(scope : ASScope)
+function UpdateLocalAutoVariableTypename(scope : ASScope, node : any, expressionType : typedb.DBSymbol | typedb.DBType, isIterator : boolean = false)
 {
-    for (let asvar of scope.variables)
-    {
-        if (!asvar.isAuto)
-            continue;
-        if (!asvar.node_expression)
-            continue;
+    if (!scope.isInFunctionBody())
+        return;
+    if (!node || !node.name || !node.typename || node.typename.value != "auto")
+        return;
 
+    let asvar = scope.variablesByName.get(node.name.value);
+    if (!asvar || !asvar.isAuto || asvar.isMember || asvar.isGlobal)
+        return;
+
+    let dbtype = GetDBTypeFromExpressionType(expressionType);
+    if (dbtype && isIterator)
+        dbtype = ResolveIteratorType(dbtype);
+    if (!dbtype)
+        return;
+
+    let typename = dbtype.getQualifiedTypenameInNamespace(scope.getNamespace());
+    asvar.typename = CopyQualifiersToTypename(asvar.node_typename, typename);
+}
+
+function RetryResolveAutoVariableType(scope : ASScope, asvar : ASVariable) : typedb.DBType
+{
+    if (!asvar.isAuto)
+        return null;
+    if (!asvar.node_expression)
+        return null;
+    if (asvar.isResolvingAuto)
+        return null;
+
+    asvar.isResolvingAuto = true;
+    try
+    {
         let resolvedType = ResolveTypeFromExpression(scope, asvar.node_expression);
         if (resolvedType && asvar.isIterator)
             resolvedType = ResolveIteratorType(resolvedType);
@@ -2898,6 +2927,19 @@ function ResolveAutos(scope : ASScope)
             let typename = resolvedType.getQualifiedTypenameInNamespace(scope.getNamespace());
             asvar.typename = CopyQualifiersToTypename(asvar.node_typename, typename);
         }
+        return resolvedType;
+    }
+    finally
+    {
+        asvar.isResolvingAuto = false;
+    }
+}
+
+function ResolveAutos(scope : ASScope)
+{
+    for (let asvar of scope.variables)
+    {
+        RetryResolveAutoVariableType(scope, asvar);
     }
 
     for (let subscope of scope.scopes)
@@ -3415,7 +3457,15 @@ function ResolveTypeFromIdentifier(scope : ASScope, identifier : string) : typed
     {
         let usedVariable = checkscope.variablesByName.get(identifier);
         if (usedVariable)
-            return typedb.LookupType(checkscope.getNamespace(), usedVariable.typename);
+        {
+            let dbType = typedb.LookupType(checkscope.getNamespace(), usedVariable.typename);
+            if (!dbType && usedVariable.isAuto)
+            {
+                RetryResolveAutoVariableType(checkscope, usedVariable);
+                dbType = typedb.LookupType(checkscope.getNamespace(), usedVariable.typename);
+            }
+            return dbType;
+        }
         checkscope = checkscope.parentscope;
     }
 
@@ -4822,7 +4872,10 @@ function DetectNodeSymbols(scope : ASScope, statement : ASStatement, node : any,
 
                     // If this was an auto, we should update the typename symbol to match the expression
                     if (typenameSymbol && typenameSymbol.symbol_name == "auto")
+                    {
                         UpdateAutoTypenameSymbol(typenameSymbol, expressionType);
+                        UpdateLocalAutoVariableTypename(scope, node, expressionType);
+                    }
                 }
             }
         }
@@ -4955,7 +5008,8 @@ function DetectNodeSymbols(scope : ASScope, statement : ASStatement, node : any,
             // If this was an auto, we should update the typename symbol to match the expression
             if (typenameSymbol && typenameSymbol.symbol_name == "auto")
             {
-                UpdateAutoTypenameSymbol(typenameSymbol, ResolveIteratorType(GetTypeFromSymbol(expressionType)));
+                UpdateAutoTypenameSymbol(typenameSymbol, ResolveIteratorType(GetDBTypeFromExpressionType(expressionType)));
+                UpdateLocalAutoVariableTypename(scope, { name: node.children[1], typename: node.children[0] }, expressionType, true);
             }
         }
         break;
@@ -5065,6 +5119,11 @@ function DetectIdentifierSymbols(scope : ASScope, statement : ASStatement, node 
                 usedVariable.usages.push(varSymbol);
 
                 let dbType = typedb.LookupType(checkscope.getNamespace(), usedVariable.typename);
+                if (!dbType && usedVariable.isAuto)
+                {
+                    RetryResolveAutoVariableType(checkscope, usedVariable);
+                    dbType = typedb.LookupType(checkscope.getNamespace(), usedVariable.typename);
+                }
                 scope.module.markDependencyType(dbType);
                 return dbType;
             }
