@@ -21,7 +21,7 @@ import {
     TypeHierarchySupertypesParams, TypeHierarchySubtypesParams,
     WorkspaceSymbol, DocumentSymbol,
     InlayHint, InlayHintParams,
-    InlineValue, InlineValueParams,
+    InlineValue, InlineValueParams, WorkspaceFolder,
 } from 'vscode-languageserver/node';
 import { TextDocument, TextDocumentContentChangeEvent } from 'vscode-languageserver-textdocument';
 
@@ -54,8 +54,14 @@ import {
     buildDisconnect, buildOpenAssets, buildCreateBlueprint
 } from './unreal-buffers';
 
-// Create a connection for the server. The connection uses Node's IPC as a transport
-let connection: Connection = createConnection(new IPCMessageReader(process), new IPCMessageWriter(process));
+// Create a connection for the server.
+//
+// If we have a Node IPC send function available, use that, otherwise use stdio
+// to be used as a standalone lsp client.
+const ipcSendAvailble = typeof process.send === 'function';
+let connection: Connection = ipcSendAvailble
+    ? createConnection(new IPCMessageReader(process), new IPCMessageWriter(process))
+    : createConnection(process.stdin, process.stdout);
 
 // Create a connection to unreal
 let unreal : Socket;
@@ -349,6 +355,11 @@ function IsScriptUri(uri : string) : boolean
     return workspaceLayout.IsScriptUri(uri, ScriptRootPaths, getPathName);
 }
 
+// These should all be optional extras, i.e. the server should still function normally if it's undefined.
+type InitializationOptions = {
+    additionalScriptRootFolders?: WorkspaceFolder[]
+} | undefined;
+
 // After the server has started the client sends an initialize request. The server receives
 // in the passed params the rootPath of the workspace plus the client capabilities.
 connection.onInitialize((_params): InitializeResult => {
@@ -368,6 +379,17 @@ connection.onInitialize((_params): InitializeResult => {
     }
 
     let scriptRoots = ResolveScriptRoots(workspaceRoots);
+    const initializationOptions = _params.initializationOptions as InitializationOptions;
+
+    const additionalFolders = initializationOptions?.additionalScriptRootFolders;
+    if (additionalFolders) {
+        for (let scriptRootPath of additionalFolders) {
+            let additionalScriptRoot = URI.parse(scriptRootPath.uri).fsPath;
+            if (!workspaceLayout.IsPathWithinScriptRoots(additionalScriptRoot, scriptRoots))
+                scriptRoots.push(additionalScriptRoot);
+        }
+    }
+
     ScriptRootPaths = scriptRoots;
     RootUris = ResolveScriptRootUris(scriptRoots);
 
