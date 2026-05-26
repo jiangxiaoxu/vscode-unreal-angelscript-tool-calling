@@ -5,6 +5,7 @@ import * as fs from 'fs';
 
 import * as typedb from './database';
 import { ProcessScriptTypeGeneratedCode } from "./generated_code";
+import { GetPropertyAccessorInfo } from './accessor_utils';
 
 let PEGGY_GRAMMAR = require("../pegjs/angelscript.js")
 
@@ -3325,16 +3326,18 @@ function ResolvePropertyType(dbtype : typedb.DBType, name : string) : typedb.DBT
     let getAccessor = dbtype.findFirstSymbol("Get"+name, typedb.DBAllowSymbol.Functions);
     if (getAccessor && getAccessor instanceof typedb.DBMethod)
     {
-        if (getAccessor.isProperty)
-            return typedb.LookupType(dbtype.namespace, getAccessor.returnType);
+        let accessorInfo = GetPropertyAccessorInfo(getAccessor);
+        if (accessorInfo && accessorInfo.kind == "get" && accessorInfo.propertyName == name)
+            return typedb.LookupType(dbtype.namespace, accessorInfo.typename);
     }
 
     // Find set accessor
     let setAccessor = dbtype.findFirstSymbol("Set"+name, typedb.DBAllowSymbol.Functions);
     if (setAccessor && setAccessor instanceof typedb.DBMethod)
     {
-        if (setAccessor.isProperty && setAccessor.args.length != 0)
-            return typedb.LookupType(dbtype.namespace, setAccessor.args[0].typename);
+        let accessorInfo = GetPropertyAccessorInfo(setAccessor);
+        if (accessorInfo && accessorInfo.kind == "set" && accessorInfo.propertyName == name)
+            return typedb.LookupType(dbtype.namespace, accessorInfo.typename);
     }
 
     return null;
@@ -3408,8 +3411,9 @@ function ResolveNamespacePropertyType(dbnamespace : typedb.DBNamespace, nsPrefix
     let getAccessors = typedb.LookupGlobalSymbol(dbnamespace, getterName, typedb.DBAllowSymbol.Functions);
     if (getAccessors && getAccessors.length != 0 && getAccessors[0] instanceof typedb.DBMethod)
     {
-        if (getAccessors[0].isProperty)
-            return typedb.LookupType(getAccessors[0].namespace, getAccessors[0].returnType);
+        let accessorInfo = GetPropertyAccessorInfo(getAccessors[0]);
+        if (accessorInfo && accessorInfo.kind == "get" && accessorInfo.propertyName == name)
+            return typedb.LookupType(getAccessors[0].namespace, accessorInfo.typename);
     }
 
     // Find set accessor
@@ -3420,8 +3424,9 @@ function ResolveNamespacePropertyType(dbnamespace : typedb.DBNamespace, nsPrefix
     let setAccessors = typedb.LookupGlobalSymbol(dbnamespace, setterName, typedb.DBAllowSymbol.Functions);
     if (setAccessors && setAccessors.length != 0 && setAccessors[0] instanceof typedb.DBMethod)
     {
-        if (setAccessors[0].isProperty && setAccessors[0].args.length != 0)
-            return typedb.LookupType(dbnamespace, setAccessors[0].args[0].typename);
+        let accessorInfo = GetPropertyAccessorInfo(setAccessors[0]);
+        if (accessorInfo && accessorInfo.kind == "set" && accessorInfo.propertyName == name)
+            return typedb.LookupType(dbnamespace, accessorInfo.typename);
     }
 
     // Find a UObject typename to get a static reflection data class for

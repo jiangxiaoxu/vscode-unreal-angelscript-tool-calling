@@ -7,6 +7,7 @@ import * as typedb from './database';
 import * as scriptfiles from './as_parser';
 import * as specifiers from './specifiers';
 import { FormatFunctionDocumentation, FormatPropertyDocumentation } from './documentation';
+import { GetPropertyAccessorInfo } from './accessor_utils';
 import * as path from 'path';
 
 let CommonTypenames = new Set<string>([
@@ -1544,8 +1545,21 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
             let func : typedb.DBMethod = symbol;
             if (func.isMixin)
                 return;
-            if (!CanCompleteSymbol(context, func))
+
+            let accessorInfo = GetPropertyAccessorInfo(func);
+            let canCompleteCallable = CanCompleteSymbol(context, func);
+            let canCompleteAccessor = accessorInfo
+                ? CanCompletePropertyAccessor(context, func, accessorInfo.propertyName)
+                : false;
+            if (accessorInfo)
+            {
+                if (!canCompleteAccessor && !canCompleteCallable)
+                    return;
+            }
+            else if (!canCompleteCallable)
+            {
                 return;
+            }
             if (!isFunctionAccessibleFromScope(curtype, func, context.scope))
                 return;
             if (func.isOverride || func.isBlueprintOverride)
@@ -1559,22 +1573,22 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
             if (func.isConstructor && (context.maybeTypename || (expectedSubclassOf && !func.returnType.startsWith("TSubclassOf"))))
                 return;
 
-            if (func.isProperty)
+            if (accessorInfo && canCompleteAccessor)
             {
-                if (func.name.startsWith("Get"))
+                if (accessorInfo.kind == "get")
                 {
-                    let propname = func.name.substring(3);
-                    if(!props.has(propname) && func.args.length == 0)
+                    let propname = accessorInfo.propertyName;
+                    if(!props.has(propname))
                     {
                         let compl = <CompletionItem>{
                                 label: propname,
                                 kind: CompletionItemKind.Field,
                                 labelDetails: <CompletionItemLabelDetails>
                                 {
-                                    description: func.returnType,
+                                    description: accessorInfo.typename,
                                 },
                                 commitCharacters: [".", ";", ","],
-                                filterText: GetPropertyAccessorFilterText(context, func),
+                                filterText: GetPropertyAccessorFilterText(context, func, propname),
                         };
 
                         if (func.containingType)
@@ -1591,7 +1605,7 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                             compl.data = ["global_accessor", func.namespace.getQualifiedNamespace(), propname];
                         }
 
-                        if (context.isTypeExpected(func.returnType))
+                        if (context.isTypeExpected(accessorInfo.typename))
                         {
                             if (func.containingType || !func.namespace.isRootNamespace())
                                 context.completionsMatchingExpected.push(compl);
@@ -1611,20 +1625,20 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                     }
                 }
 
-                if (func.name.startsWith("Set"))
+                if (accessorInfo.kind == "set")
                 {
-                    let propname = func.name.substring(3);
-                    if(!props.has(propname) && func.args.length == 1 && func.returnType == "void")
+                    let propname = accessorInfo.propertyName;
+                    if(!props.has(propname))
                     {
                         let compl = <CompletionItem> {
                                 label: propname,
                                 kind: CompletionItemKind.Field,
                                 labelDetails: <CompletionItemLabelDetails>
                                 {
-                                    description: func.args[0].typename,
+                                    description: accessorInfo.typename,
                                 },
                                 commitCharacters: [".", ";", ","],
-                                filterText: GetPropertyAccessorFilterText(context, func),
+                                filterText: GetPropertyAccessorFilterText(context, func, propname),
                                 sortText: (func.containingType == preferInType) ? "a" : "b",
                         };
 
@@ -1642,7 +1656,7 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
                             compl.data = ["global_accessor", func.namespace.getQualifiedNamespace(), propname];
                         }
 
-                        if (context.isTypeExpected(func.args[0].typename))
+                        if (context.isTypeExpected(accessorInfo.typename))
                         {
                             if (func.containingType || !func.namespace.isRootNamespace())
                                 context.completionsMatchingExpected.push(compl);
@@ -1665,7 +1679,8 @@ export function AddCompletionsFromType(context : CompletionContext, curtype : ty
 
             if(!func.name.startsWith("op")
                 && (!func.isBlueprintEvent || showEvents)
-                && (!func.isProperty || !func.declaredModule))
+                && canCompleteCallable
+                && !(accessorInfo?.source == "metadata" || (func.isProperty && func.declaredModule)))
             {
                 let commitChars = ["("];
                 if (func.isConstructor)
@@ -2125,11 +2140,18 @@ function GetSymbolFilterText(context : CompletionContext, symbol : typedb.DBSymb
     return [symbol.name, ...symbol.keywords].join(" ");
 }
 
-function GetPropertyAccessorFilterText(context : CompletionContext, symbol : typedb.DBMethod) : string | undefined
+function CanCompletePropertyAccessor(context : CompletionContext, symbol : typedb.DBMethod, propertyName : string) : boolean
 {
-    if (!symbol.declaredModule)
-        return GetSymbolFilterText(context, symbol);
-    let propertyFilter = `${symbol.name} Get${symbol.name} Set${symbol.name}`;
+    if (CanCompleteTo(context, propertyName))
+        return true;
+    return CanCompleteTo(context, symbol.name);
+}
+
+function GetPropertyAccessorFilterText(context : CompletionContext, symbol : typedb.DBMethod, propertyName : string) : string | undefined
+{
+    let propertyFilter = `${propertyName} Get${propertyName} Set${propertyName}`;
+    if (symbol.name != `Get${propertyName}` && symbol.name != `Set${propertyName}`)
+        propertyFilter = `${propertyFilter} ${symbol.name}`;
     if (!symbol.keywords)
         return propertyFilter;
     return [propertyFilter, ...symbol.keywords].join(" ");
