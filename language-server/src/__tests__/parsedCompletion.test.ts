@@ -30,8 +30,8 @@ function createResolvedModule(content: string, setupDatabase?: () => void): scri
     const moduleName = `Parsed.Completion.${moduleCounter}`;
     const asmodule = scriptfiles.GetOrCreateModule(moduleName, filePath, uri);
     scriptfiles.UpdateModuleFromContent(asmodule, content);
-    scriptfiles.ParseModuleAndDependencies(asmodule);
-    scriptfiles.PostProcessModuleTypesAndDependencies(asmodule);
+    scriptfiles.LoadAndParseModule(asmodule);
+    scriptfiles.PostProcessModuleTypes(asmodule);
     scriptfiles.ResolveModule(asmodule);
     return asmodule;
 }

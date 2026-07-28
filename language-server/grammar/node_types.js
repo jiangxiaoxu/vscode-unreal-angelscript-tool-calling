@@ -36,8 +36,6 @@ module.exports = {
     IfStatement: indexed ? i++ : "IfStatement",
     ElseStatement: indexed ? i++ : "ElseStatement",
     ReturnStatement: indexed ? i++ : "ReturnStatement",
-    ImportStatement: indexed ? i++ : "ImportStatement",
-    ImportFunctionStatement: indexed ? i++ : "ImportFunctionStatement",
     DefaultStatement: indexed ? i++ : "DefaultStatement",
     SwitchStatement: indexed ? i++ : "SwitchStatement",
     CaseStatement: indexed ? i++ : "CaseStatement",

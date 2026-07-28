@@ -23,7 +23,6 @@ export function createUnrealCacheController() : UnrealCacheController
     {
         let scriptSettings = scriptfiles.GetScriptSettings();
         return {
-            automaticImports: scriptSettings.automaticImports,
             floatIsFloat64: scriptSettings.floatIsFloat64,
             useAngelscriptHaze: scriptSettings.useAngelscriptHaze,
             deprecateStaticClass: scriptSettings.deprecateStaticClass,
@@ -40,8 +39,6 @@ export function createUnrealCacheController() : UnrealCacheController
             return;
 
         let scriptSettings = scriptfiles.GetScriptSettings();
-        if (typeof settings.automaticImports === "boolean")
-            scriptSettings.automaticImports = settings.automaticImports;
         if (typeof settings.floatIsFloat64 === "boolean")
             scriptSettings.floatIsFloat64 = settings.floatIsFloat64;
         if (typeof settings.useAngelscriptHaze === "boolean")

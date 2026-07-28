@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import { performance } from "perf_hooks";
 
 let as_modules : parser.ASModule[] = [];
-glob(process.argv[2]+"\\**\\*.as", null, function(err : any, files : any)
+glob.glob(process.argv[2]+"\\**\\*.as", null, function(err : any, files : any)
 {
     for (let filename of files)
     //let filename = "D:\\Split\\Split\\Script\\Core\\Camera\\Modifiers\\CameraImpulseSettings.as";

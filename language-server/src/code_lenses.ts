@@ -191,6 +191,8 @@ export function AllowCreateBlueprintForClass(dbtype : typedb.DBType) : boolean
         return false;
     if (dbtype.macroSpecifiers && dbtype.macroSpecifiers.has("NotBlueprintable"))
         return false;
+    if (dbtype.inheritsFrom("AVolume"))
+        return false;
     return true;
 }
 

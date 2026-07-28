@@ -9,7 +9,7 @@ export let SemanticTypeList : Array<string> = [
     "local_variable", "member_variable", "member_accessor", "global_variable",
     "global_accessor", "member_function", "global_function", "unknown_error",
     "typename", "typename_actor", "typename_component", "typename_struct", "typename_event",
-    "typename_delegate", "typename_primitive", "unimported_symbol", "access_specifier"
+    "typename_delegate", "typename_primitive", "access_specifier"
 ];
 
 for (let i = 0, Count = SemanticTypeList.length; i < Count; ++i)
@@ -77,11 +77,7 @@ function BuildSymbols(asmodule : scriptfiles.ASModule, builder : SemanticTokensB
         let length = symbol.end - symbol.start;
 
         let type = -1;
-        if (symbol.isUnimported)
-        {
-            type = SemanticTypes.unimported_symbol;
-        }
-        else if (symbol.type == scriptfiles.ASSymbolType.Typename
+        if (symbol.type == scriptfiles.ASSymbolType.Typename
             || symbol.type == scriptfiles.ASSymbolType.Namespace)
         {
             let symName = symbol.symbol_name;

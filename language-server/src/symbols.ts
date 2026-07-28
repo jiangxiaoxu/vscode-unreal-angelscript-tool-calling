@@ -25,7 +25,7 @@ export function GetDefinition(asmodule : scriptfiles.ASModule, position : Positi
     let locations = new Array<Location>();
     let offset = asmodule.getOffset(position);
 
-    // If there is a symbol beneath the cursor, go to that symbol/
+    // If there is a symbol beneath the cursor, go to that symbol
     let findSymbol = asmodule.getSymbolAtOrBefore(offset);
     if (findSymbol)
     {
@@ -38,47 +38,7 @@ export function GetDefinition(asmodule : scriptfiles.ASModule, position : Positi
         return locations;
     }
 
-    // If the cursor is on an import statement, use that as the definition
-    let statement = asmodule.getStatementAt(offset);
-    if (statement && statement.ast && statement.ast.type == scriptfiles.node_types.ImportStatement)
-    {
-        if (statement.ast.children[0].value)
-        {
-            let importedModule = scriptfiles.GetModule(statement.ast.children[0].value);
-            if (importedModule)
-            {
-                locations.push(importedModule.getLocation(0));
-                return locations;
-            }
-        }
-    }
-
     return locations;
-}
-
-export function FindUnimportedSymbolOnLine(asmodule : scriptfiles.ASModule, position : Position) : scriptfiles.ASSemanticSymbol
-{
-    let offset = asmodule.getOffset(position);
-    let findSymbol = asmodule.getSymbolAtOrBefore(offset);
-    if (findSymbol && findSymbol.isUnimported)
-        return findSymbol;
-
-    let lineStartOffset = asmodule.getOffset(
-        Position.create(position.line, 0)
-    );
-    let lineEndOffset = asmodule.getOffset(
-        Position.create(position.line, 10000)
-    );
-
-    for (let sym of asmodule.semanticSymbols)
-    {
-        if (!sym.overlapsRange(lineStartOffset, lineEndOffset))
-            continue;
-        if (sym.isUnimported)
-            return sym;
-    }
-
-    return null;
 }
 
 export interface SymbolDeclaration

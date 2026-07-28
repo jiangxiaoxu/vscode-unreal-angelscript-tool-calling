@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export type CachedScriptSettings = {
-    automaticImports : boolean;
     floatIsFloat64 : boolean;
     useAngelscriptHaze : boolean;
     deprecateStaticClass : boolean;

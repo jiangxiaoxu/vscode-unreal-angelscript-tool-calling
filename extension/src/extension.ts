@@ -14,7 +14,6 @@ import { WorkspaceFolder, DebugConfiguration, ProviderResult, CancellationToken 
 import { ASDebugSession } from './debug';
 import * as Net from 'net';
 import {
-    GetModuleForSymbolRequest,
     ProvideInlineValuesRequest
 } from './apiRequests';
 import { registerApiPanel } from './apiPanel';

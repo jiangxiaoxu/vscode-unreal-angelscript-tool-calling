@@ -12,8 +12,8 @@ export function HighlightOccurances(uri : string, position : Position) : Array<D
         return null;
 
     // Make sure the module is parsed and resolved
-    scriptfiles.ParseModuleAndDependencies(asmodule);
-    scriptfiles.PostProcessModuleTypesAndDependencies(asmodule);
+    scriptfiles.LoadAndParseModule(asmodule);
+    scriptfiles.PostProcessModuleTypes(asmodule);
     scriptfiles.ResolveModule(asmodule);
 
     let offset = asmodule.getOffset(position);

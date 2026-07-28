@@ -77,12 +77,11 @@ namespace Sort
     export const Local = "4";
     export const Keyword_Expected = "8a";
     export const Keyword = "8b";
-    export const ImportModule = "8c";
     export const MemberProp_Direct = "a";
     export const MemberProp_Parent = "c";
-    export const MemberProp_Direct_Expected = "6";
+    export const MemberProp_Direct_Expected = "6a";
     export const MemberProp_Parent_Expected = "7";
-    export const Method_Direct_Expected = "8a";
+    export const Method_Direct_Expected = "6b";
     export const Method_Parent_Expected = "9";
     export const Method_Direct = "b";
     export const Method_Parent = "d";
@@ -98,7 +97,6 @@ namespace Sort
     export const Typename_CommonObject = "fd";
     export const Typename = "fe";
     export const Typename_Expected = "3";
-    export const Unimported = "x";
     export const Method_Override_Snippet = "0";
     export const Namespace_Unexpected = "z";
     export const Snippet = "z";
@@ -213,10 +211,6 @@ export function Complete(asmodule: scriptfiles.ASModule, position: Position): Ar
         AddCompletionsForNamingSomethingNew(context, completions);
         return completions;
     }
-
-    // Add completions from import statements
-    if (AddCompletionsFromImportStatement(context, completions))
-        return completions;
 
     // Add completions from unreal macro specifiers
     if (AddCompletionsFromUnrealMacro(context, completions))
@@ -427,7 +421,8 @@ function GenerateCompletionArguments(context: CompletionContext): CompletionArgu
                     }
                     else
                     {
-                        args.nodesForPositionalArguments.push(argnode);
+                        if (!args.isAfterNamedArgument)
+                            args.nodesForPositionalArguments.push(argnode);
                     }
                 }
             }
@@ -744,25 +739,80 @@ function AddCompletionsFromCallSignature(context: CompletionContext, completions
         }
         else
         {
-            for (let arg of activeMethod.args)
+            let argumentNames = [];
+            for (let func of context.subOuterFunctions)
             {
-                // Skip named arguments we've already seen
-                if (argContext.usedArgumentNames.indexOf(arg.name) != -1)
+                // Check if this is a valid overload to be completing arguments of,
+                // or if it's already excluded from previous arguments.
+                let argumentIndex = context.subOuterArgumentIndex;
+                let argumentOffset = 0;
+
+                if (func.isMixin)
+                {
+                    argumentOffset = 1;
+                    argumentIndex += 1;
+                }
+
+                let overloadIsValid = true;
+                for (let usedName of argContext.usedArgumentNames)
+                {
+                    let foundArg = -1;
+                    for (let argIndex = argumentOffset; argIndex < func.args.length; ++argIndex)
+                    {
+                        if (func.args[argIndex].name == usedName)
+                        {
+                            foundArg = argIndex;
+                            break;
+                        }
+                    }
+
+                    if (foundArg == -1)
+                    {
+                        overloadIsValid = false;
+                        break;
+                    }
+                }
+
+                if (!overloadIsValid)
                     continue;
 
-                let complStr = arg.name+" =";
-                if (CanCompleteTo(context, complStr))
+                for (let i = 0; i < func.args.length; ++i)
                 {
-                    completions.push({
-                        label: complStr,
-                        insertText: complStr+" ",
-                        documentation: <MarkupContent> {
-                            kind: MarkupKind.Markdown,
-                            value: "```angelscript_snippet\n"+complStr+"\n\n```"
-                        },
-                        kind: CompletionItemKind.Snippet,
-                        sortText: Sort.Snippet,
-                    });
+                    let arg = func.args[i];
+
+                    if (argumentIndex < argContext.nodesForPositionalArguments.length)
+                    {
+                        if (i < argumentIndex)
+                            continue;
+                    }
+                    else
+                    {
+                        if (i < argContext.nodesForPositionalArguments.length)
+                            continue;
+                    }
+
+                    // Skip named arguments we've already seen
+                    if (argContext.usedArgumentNames.indexOf(arg.name) != -1)
+                        continue;
+                    if (argumentNames.indexOf(arg.name) != -1)
+                        continue;
+
+                    let complStr = arg.name+" =";
+                    if (CanCompleteTo(context, complStr))
+                    {
+                        completions.push({
+                            label: complStr,
+                            insertText: complStr+" ",
+                            documentation: <MarkupContent> {
+                                kind: MarkupKind.Markdown,
+                                value: "```angelscript_snippet\n"+complStr+"\n\n```"
+                            },
+                            kind: CompletionItemKind.Snippet,
+                            sortText: Sort.Snippet,
+                        });
+                    }
+
+                    argumentNames.push(arg.name);
                 }
             }
         }
@@ -850,38 +900,6 @@ function AddCompletionsForNamingSomethingNew(context : CompletionContext, comple
     }
 
     return true;
-}
-
-function AddCompletionsFromImportStatement(context : CompletionContext, completions : Array<CompletionItem>) : boolean
-{
-    if (context.statement && context.statement.ast && context.statement.ast.type == scriptfiles.node_types.ImportStatement)
-    {
-        let complString = "";
-        if(context.completingSymbol)
-            complString = context.completingSymbol;
-
-        let untilDot = "";
-        let dotPos = complString.lastIndexOf(".");
-        if (dotPos != -1)
-            untilDot = complString.substr(0, dotPos+1);
-
-        for (let asmodule of scriptfiles.GetAllLoadedModules())
-        {
-            if (CanCompleteStringTo(complString, asmodule.modulename))
-            {
-                completions.push({
-                    label: asmodule.modulename,
-                    kind: CompletionItemKind.File,
-                    filterText: asmodule.modulename.substr(untilDot.length),
-                    insertText: asmodule.modulename.substr(untilDot.length),
-                    sortText: Sort.ImportModule,
-                });
-            }
-        }
-        return true;
-    }
-
-    return false;
 }
 
 function AddCompletionsFromUnrealMacro(context : CompletionContext, completions : Array<CompletionItem>) : boolean
@@ -1177,6 +1195,59 @@ function AddCompletionsFromKeywords(context : CompletionContext, completions : A
             "property"
         ], completions);
 
+        if (context.baseStatement && context.baseStatement.next
+            && context.baseStatement.next instanceof scriptfiles.ASStatement
+            && context.baseStatement.next.ast
+        )
+        {
+            let nextNode = context.baseStatement.next.ast;
+
+            // We might be typing UCLASS in front of a class
+            if (nextNode.type == scriptfiles.node_types.ClassDefinition && !nextNode.macro)
+            {
+                if (CanCompleteToOnlyStart(context, "UCLASS"))
+                {
+                    completions.push({
+                            label: "UCLASS()",
+                            kind: CompletionItemKind.Snippet,
+                            sortText: Sort.Keyword_Expected,
+                    });
+
+                    completions.push({
+                            label: "UCLASS(Abstract)",
+                            kind: CompletionItemKind.Snippet,
+                            sortText: Sort.Keyword_Expected,
+                    });
+                }
+            }
+
+            // We might be typing USTRUCT in front of a struct
+            if (nextNode.type == scriptfiles.node_types.StructDefinition && !nextNode.macro)
+            {
+                if (CanCompleteToOnlyStart(context, "USTRUCT"))
+                {
+                    completions.push({
+                            label: "USTRUCT()",
+                            kind: CompletionItemKind.Snippet,
+                            sortText: Sort.Keyword_Expected,
+                    });
+                }
+            }
+
+            // We might be typing UENUM in front of a struct
+            if (nextNode.type == scriptfiles.node_types.EnumDefinition && !nextNode.macro)
+            {
+                if (CanCompleteToOnlyStart(context, "UENUM"))
+                {
+                    completions.push({
+                            label: "UENUM()",
+                            kind: CompletionItemKind.Snippet,
+                            sortText: Sort.Keyword_Expected,
+                    });
+                }
+            }
+        }
+
         if (CanCompleteTo(context, "UCLASS"))
         {
             completions.push({
@@ -1281,6 +1352,37 @@ function AddCompletionsFromKeywords(context : CompletionContext, completions : A
                             sortText: Sort.Keyword,
                     });
                     context.forceCaseInsensitive = true;
+
+                    // Add some potentially helpful snippets for common UPROPERTY specifiers
+                    completions.push({
+                            label: "UPROPERTY()",
+                            kind: CompletionItemKind.Snippet,
+                            sortText: Sort.Keyword,
+                    });
+
+                    if (context.scope && context.scope.getDatabaseType() && context.scope.getDatabaseType().inheritsFrom("AActor"))
+                    {
+                        completions.push({
+                                label: "UPROPERTY(DefaultComponent)",
+                                kind: CompletionItemKind.Snippet,
+                                sortText: Sort.Keyword,
+                        });
+                    }
+
+                    if (context.scope && context.scope.getDatabaseType() && context.scope.getDatabaseType().inheritsFrom("UUserWidget"))
+                    {
+                        completions.push({
+                                label: "UPROPERTY(BindWidget)",
+                                kind: CompletionItemKind.Snippet,
+                                sortText: Sort.Keyword,
+                        });
+                    }
+
+                    completions.push({
+                            label: "UPROPERTY(EditAnywhere)",
+                            kind: CompletionItemKind.Snippet,
+                            sortText: Sort.Keyword,
+                    });
                 }
             }
         }
@@ -1302,6 +1404,19 @@ function AddCompletionsFromKeywords(context : CompletionContext, completions : A
                                 sortText: Sort.Keyword,
                         });
                         context.forceCaseInsensitive = true;
+
+                        // Add some potentially helpful snippets for common UFUNCTION specifiers
+                        completions.push({
+                                label: "UFUNCTION()",
+                                kind: CompletionItemKind.Snippet,
+                                sortText: Sort.Keyword,
+                        });
+
+                        completions.push({
+                                label: "UFUNCTION(BlueprintEvent)",
+                                kind: CompletionItemKind.Snippet,
+                                sortText: Sort.Keyword,
+                        });
                     }
                 }
             }
@@ -1328,6 +1443,13 @@ function AddCompletionsFromKeywords(context : CompletionContext, completions : A
                             sortText: Sort.Keyword,
                     });
                     context.forceCaseInsensitive = true;
+
+                    // Add some potentially helpful snippets for common UFUNCTION specifiers
+                    completions.push({
+                            label: "UFUNCTION()",
+                            kind: CompletionItemKind.Snippet,
+                            sortText: Sort.Keyword,
+                    });
                 }
             }
         }
@@ -1989,7 +2111,6 @@ export function AddMixinCompletions(context : CompletionContext, completions : A
     if (context.priorType instanceof typedb.DBNamespace)
         return;
 
-    // Not yet imported mixin functions
     let mixinsForType : typedb.DBType = context.priorType;
     if (!mixinsForType)
         mixinsForType = context.scope.getParentType();
@@ -2990,19 +3111,6 @@ function ExtractPriorExpressionAndSymbol(context : CompletionContext, node : any
                 context.completingSymbol = node.name.value;
             else
                 context.completingSymbol = "";
-            return true;
-        }
-        break;
-        case scriptfiles.node_types.ImportStatement:
-        {
-            context.priorExpression = null;
-            context.priorType = null;
-            context.isNamingSomethingNew = false;
-            if (node.children && node.children[0])
-            {
-                context.completingNode = node.children[0];
-                context.completingSymbol = node.children[0].value;
-            }
             return true;
         }
         break;
@@ -4177,7 +4285,7 @@ function AddMethodOverrideSnippets(context : CompletionContext, completions : Ar
             return;
         if (method.name && CanCompleteTo(context, method.name))
             includeParamsOnly = true;
-        if (method.returnType && CanCompleteTo(context, method.returnType))
+        if (method.returnType && CanCompleteToOnlyStart(context, method.returnType))
             includeReturnType = true;
         if (method.isPrivate)
             return;
@@ -4220,6 +4328,7 @@ function AddMethodOverrideSnippets(context : CompletionContext, completions : Ar
 
         if (includeParamsOnly)
         {
+            let filterText = method.name;
             if (!hasReturnType)
             {
                 complEdits = complEdits.concat(
@@ -4231,11 +4340,14 @@ function AddMethodOverrideSnippets(context : CompletionContext, completions : Ar
                         currentIndent + method.returnType+" "
                     )
                 );
+
+                if (includeReturnType)
+                    filterText = method.returnType+" "+filterText;
             }
 
             completions.push({
                 label: method.returnType+" "+method.name+"(...)",
-                filterText: method.name,
+                filterText: filterText,
                 insertText: complStr+"{\n"+currentIndent+superStr,
                 kind: CompletionItemKind.Snippet,
                 data: ["decl_snippet", method.containingType.name, method.name, method.id],
@@ -4719,7 +4831,7 @@ function AddCompletionsFromAccessSpecifiers(context : CompletionContext, complet
                         kind: CompletionItemKind.Method,
                         data: ["global_func", sym.namespace.getQualifiedNamespace(), sym.name, sym.id],
                         commitCharacters: [",", ";"],
-                        sortText: Sort.Unimported,
+                        sortText: Sort.Snippet,
                     };
 
                     compl.labelDetails = <CompletionItemLabelDetails>

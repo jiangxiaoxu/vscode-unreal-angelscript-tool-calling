@@ -623,16 +623,6 @@
                 "command": "angelscript.goToSymbol",
                 "key": "alt+g",
                 "when": "editorTextFocus"
-            },
-            {
-                "command": "angelscript.addImportTo",
-                "key": "alt+shift+i",
-                "when": "editorTextFocus"
-            },
-            {
-                "command": "angelscript.quickOpenImport",
-                "key": "alt+e",
-                "when": "editorTextFocus"
             }
         ],
         "semanticTokenScopes": [

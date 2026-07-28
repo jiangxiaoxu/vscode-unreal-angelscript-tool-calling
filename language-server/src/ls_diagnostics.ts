@@ -81,9 +81,6 @@ export function UpdateScriptModuleDiagnostics(asmodule : scriptfiles.ASModule, i
     // Add diagnostics for delegate function bind verification
     VerifyDelegateBinds(asmodule, diagnostics);
 
-    // Add diagnostics for symbols that aren't imported
-    AddSymbolDiagnostics(asmodule, diagnostics);
-
     // Add diagnostics for variables that don't confirm to the naming convention
     AddNamingConventionDiagnostics(asmodule, diagnostics);
 
@@ -286,7 +283,8 @@ function VerifyDelegateBinds(asmodule : scriptfiles.ASModule, diagnostics : Arra
                 let boundArg = foundFunc.args[i].typename;
 
                 // If this was the wildcard parameter, make sure the types match now
-                if (wildcardParameterName && providedWildcardType && delegateType.delegateArgs[i].name == wildcardParameterName)
+                let isWildcard = wildcardParameterName && providedWildcardType && delegateType.delegateArgs[i].name == wildcardParameterName;
+                if (isWildcard)
                     signatureArg = typedb.TransferTypeQualifiers(signatureArg, providedWildcardType.name);
 
                 let leftTypename = typedb.CleanTypeName(signatureArg);
@@ -295,8 +293,22 @@ function VerifyDelegateBinds(asmodule : scriptfiles.ASModule, diagnostics : Arra
                 {
                     if (!typedb.ArePrimitiveTypesEquivalent(leftTypename, rightTypename))
                     {
-                        signatureMatches = false;
-                        break;
+                        if (isWildcard)
+                        {
+                            // Wildcard object parameters are allowed to bind to objects of child classes
+                            let argumentType = typedb.GetTypeByName(leftTypename);
+                            let boundType = typedb.GetTypeByName(rightTypename);
+                            if (!argumentType || !boundType || boundType.isValueType() || !argumentType.inheritsFrom(boundType.name))
+                            {
+                                signatureMatches = false;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            signatureMatches = false;
+                            break;
+                        }
                     }
                 }
 
@@ -489,34 +501,6 @@ function AreDiagnosticsEqual(oldList : Array<Diagnostic>, newList : Array<Diagno
     }
 
     return true;
-}
-
-function AddSymbolDiagnostics(asmodule : scriptfiles.ASModule, diagnostics : Array<Diagnostic>)
-{
-    // No symbol diagnostics if the file isn't open at the moment
-    if (!asmodule.isOpened)
-        return;
-
-    for (let symbol of asmodule.semanticSymbols)
-    {
-        if (!symbol.isUnimported)
-            continue;
-
-        let displayName = symbol.symbol_name;
-        if (displayName.startsWith("__"))
-            displayName = displayName.substr(2);
-
-        diagnostics.push(<Diagnostic> {
-            severity: DiagnosticSeverity.Information,
-            range: asmodule.getRange(symbol.start, symbol.end),
-            message: displayName+" must be imported.",
-            source: "angelscript",
-            data: {
-                type: "import",
-                symbol: [symbol.type, symbol.container_type, symbol.symbol_name],
-            }
-        });
-    }
 }
 
 function AddFunctionDiagnostics(scope : scriptfiles.ASScope, dbfunc : typedb.DBMethod, diagnostics : Array<Diagnostic>)

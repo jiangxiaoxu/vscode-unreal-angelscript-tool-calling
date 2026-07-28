@@ -13,8 +13,8 @@ export function* FindReferences(uri : string, position : Position) : any
         return references;
 
     // Make sure the module is parsed and resolved
-    scriptfiles.ParseModuleAndDependencies(asmodule);
-    scriptfiles.PostProcessModuleTypesAndDependencies(asmodule);
+    scriptfiles.LoadAndParseModule(asmodule);
+    scriptfiles.PostProcessModuleTypes(asmodule);
     scriptfiles.ResolveModule(asmodule);
 
     let offset = asmodule.getOffset(position);
@@ -72,7 +72,7 @@ export function* FindReferences(uri : string, position : Position) : any
     if (findSymbol.type == scriptfiles.ASSymbolType.AccessSpecifier)
         considerModules = [asmodule];
     else
-        considerModules = scriptfiles.GetModulesPotentiallyImportingSymbol(asmodule, findSymbol);
+        considerModules = scriptfiles.GetModulesPotentiallyDependentOnSymbol(asmodule, findSymbol);
 
     // If we're looking for a method, we should also include any overrides from derived types
     let searchForTypes = new Set<string>();
@@ -101,7 +101,7 @@ export function* FindReferences(uri : string, position : Position) : any
         if (checkParent && checkParent.name != findSymbol.container_type)
         {
             if (checkParent.declaredModule)
-                considerModules = scriptfiles.GetModulesPotentiallyImporting(checkParent.declaredModule);
+                considerModules = scriptfiles.GetModulesPotentiallyDependentOn(checkParent.declaredModule);
             else
                 considerModules = scriptfiles.GetAllLoadedModules();
         }
@@ -163,8 +163,8 @@ export function* FindReferences(uri : string, position : Position) : any
         parseCount += 1;
 
         // Make sure the module is parsed and resolved
-        scriptfiles.ParseModuleAndDependencies(checkmodule);
-        scriptfiles.PostProcessModuleTypesAndDependencies(checkmodule);
+        scriptfiles.LoadAndParseModule(checkmodule);
+        scriptfiles.PostProcessModuleTypes(checkmodule);
         scriptfiles.ResolveModule(checkmodule);
 
         // Find symbols that match the symbol we're trying to find
@@ -235,8 +235,8 @@ export function PrepareRename(uri : string, position : Position) : Range | Respo
         return null;
 
     // Make sure the module is parsed and resolved
-    scriptfiles.ParseModuleAndDependencies(asmodule);
-    scriptfiles.PostProcessModuleTypesAndDependencies(asmodule);
+    scriptfiles.LoadAndParseModule(asmodule);
+    scriptfiles.PostProcessModuleTypes(asmodule);
     scriptfiles.ResolveModule(asmodule);
 
     let offset = asmodule.getOffset(position);
@@ -340,8 +340,8 @@ export function* PerformRename(uri : string, position : Position, baseReplaceWit
         return edits;
 
     // Make sure the module is parsed and resolved
-    scriptfiles.ParseModuleAndDependencies(asmodule);
-    scriptfiles.PostProcessModuleTypesAndDependencies(asmodule);
+    scriptfiles.LoadAndParseModule(asmodule);
+    scriptfiles.PostProcessModuleTypes(asmodule);
     scriptfiles.ResolveModule(asmodule);
 
     let offset = asmodule.getOffset(position);
@@ -515,7 +515,7 @@ export function* PerformRename(uri : string, position : Position, baseReplaceWit
         if (findSymbol.type == scriptfiles.ASSymbolType.AccessSpecifier)
             considerModules = [asmodule];
         else
-            considerModules = scriptfiles.GetModulesPotentiallyImportingSymbol(asmodule, findSymbol);
+            considerModules = scriptfiles.GetModulesPotentiallyDependentOnSymbol(asmodule, findSymbol);
 
         // Look in all considered modules (Slow!)
         for (let checkmodule of considerModules)
@@ -527,8 +527,8 @@ export function* PerformRename(uri : string, position : Position, baseReplaceWit
             parseCount += 1;
 
             // Make sure the module is parsed and resolved
-            scriptfiles.ParseModuleAndDependencies(checkmodule);
-            scriptfiles.PostProcessModuleTypesAndDependencies(checkmodule);
+            scriptfiles.LoadAndParseModule(checkmodule);
+            scriptfiles.PostProcessModuleTypes(checkmodule);
             scriptfiles.ResolveModule(checkmodule);
 
             // Find symbols that match the symbol we're trying to find

@@ -7,6 +7,8 @@
 [Overview](#overview)
 [Quick Start](#quick-start)
 [Core Features](#core-features)
+[More Language Features](#more-language-features)
+[Semantic Symbol Colors](#semantic-symbol-colors)
 [Offline Cache](#offline-cache)
 [Build](#build)
 [Known Limits](#known-limits)
@@ -18,6 +20,8 @@
 [概览](#概览)
 [快速开始](#快速开始)
 [核心功能](#核心功能)
+[更多语言功能](#更多语言功能)
+[语义符号颜色](#语义符号颜色)
 [离线缓存](#离线缓存)
 [构建](#构建)
 [已知限制](#已知限制)
@@ -52,6 +56,31 @@ Notes:
 - Context commands: `Go to Symbol`, `Wrap with //#region`.
 
 Some features degrade when Unreal Editor is disconnected.
+
+### More Language Features
+The language server also provides signature help, code actions and quick fixes. Some of these features require an active Unreal Editor connection.
+
+### Semantic Symbol Colors
+Themes do not always distinguish every AngelScript semantic scope. Add `editor.tokenColorCustomizations` to the workspace settings when extra visual distinction is useful. Common scopes include `support.type.component.angelscript`, `support.type.actor.angelscript`, `variable.parameter.angelscript`, `variable.other.local.angelscript`, `variable.other.global.angelscript`, and `entity.name.function.angelscript`.
+
+```json
+{
+    "editor.tokenColorCustomizations": {
+        "[Default Dark+]": {
+            "textMateRules": [
+                {
+                    "scope": "support.type.component.angelscript",
+                    "settings": { "foreground": "#4ec962" }
+                },
+                {
+                    "scope": "support.type.actor.angelscript",
+                    "settings": { "foreground": "#2eb0c9" }
+                }
+            ]
+        }
+    }
+}
+```
 
 ### Offline Cache
 The extension restores cache data at startup to provide baseline capabilities without an active engine connection.
@@ -114,6 +143,12 @@ https://angelscript.hazelight.se
 - 右键命令: `Go to Symbol`、`Wrap with //#region`.
 
 部分能力依赖 Unreal Editor 连接,断开时会降级.
+
+### 更多语言功能
+Language server 还提供 signature help、code actions 和 quick fixes. 部分功能需要 Unreal Editor 保持连接.
+
+### 语义符号颜色
+Color theme 不一定能区分所有 AngelScript semantic scope. 如需更明显的视觉区分,可在 workspace settings 中配置 `editor.tokenColorCustomizations`;常用 scope 与上方 English 示例相同.
 
 ### 离线缓存
 扩展启动时会恢复缓存,在未连接引擎时提供基础能力.

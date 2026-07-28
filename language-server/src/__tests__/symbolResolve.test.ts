@@ -21,8 +21,8 @@ function createResolvedModule(content: string): scriptfiles.ASModule
     const moduleName = `Resolve.Symbol.${moduleCounter}`;
     const asmodule = scriptfiles.GetOrCreateModule(moduleName, filePath, uri);
     scriptfiles.UpdateModuleFromContent(asmodule, content);
-    scriptfiles.ParseModuleAndDependencies(asmodule);
-    scriptfiles.PostProcessModuleTypesAndDependencies(asmodule);
+    scriptfiles.LoadAndParseModule(asmodule);
+    scriptfiles.PostProcessModuleTypes(asmodule);
     scriptfiles.ResolveModule(asmodule);
     return asmodule;
 }

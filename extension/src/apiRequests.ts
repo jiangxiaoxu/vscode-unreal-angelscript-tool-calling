@@ -1,7 +1,5 @@
 import { RequestType, RequestType0 } from 'vscode-languageserver-protocol/node';
 import type { TextDocumentPositionParams } from 'vscode-languageserver-protocol';
-
-export const GetModuleForSymbolRequest = new RequestType<TextDocumentPositionParams, string, void>('angelscript/getModuleForSymbol');
 export const GetUnrealConnectionStatusRequest = new RequestType0<boolean, void>('angelscript/getUnrealConnectionStatus');
 export const ProvideInlineValuesRequest = new RequestType<TextDocumentPositionParams, any[], void>('angelscript/provideInlineValues');
 export const GetAPIRequest = new RequestType<any, any[], void>('angelscript/getAPI');

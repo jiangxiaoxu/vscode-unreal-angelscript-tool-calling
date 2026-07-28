@@ -58,10 +58,6 @@ export function GetCodeActions(asmodule : scriptfiles.ASModule, range : Range, d
         context.last_symbol = 0;
     }
 
-    // Actions for adding missing imports
-    if (!scriptfiles.GetScriptSettings().automaticImports)
-        AddImportActions(context);
-
     // Actions for autos
     AddAutoActions(context);
 
@@ -104,9 +100,7 @@ export function GetCodeActions(asmodule : scriptfiles.ASModule, range : Range, d
 
 export function ResolveCodeAction(asmodule : scriptfiles.ASModule, action : CodeAction, data : any) : CodeAction
 {
-    if (data.type == "import")
-        ResolveImportAction(asmodule, action, data);
-    else if (data.type == "delegateBind")
+    if (data.type == "delegateBind")
         ResolveGenerateDelegateFunctionAction(asmodule, action, data);
     else if (data.type == "methodOverride")
         ResolveMethodOverrideSnippet(asmodule, action, data);
@@ -129,124 +123,6 @@ export function ResolveCodeAction(asmodule : scriptfiles.ASModule, action : Code
     else if (data.type == "createDeactivationParameters")
         ResolveCreateDeactivationParameters(asmodule, action, data);
     return action;
-}
-
-function AddImportActions(context : CodeActionContext)
-{
-    for (let symbol of context.module.semanticSymbols)
-    {
-        if (!symbol.isUnimported)
-            continue;
-        if (!symbol.overlapsRange(context.range_start, context.range_end))
-            continue;
-
-        let appliedTo = new Array<Diagnostic>();
-        for (let diag of context.diagnostics)
-        {
-            if (diag.data)
-            {
-                let data = diag.data as any;
-                if (data.type && data.type == "import")
-                {
-                    if (data.symbol[0] == symbol.type
-                        && data.symbol[1] == symbol.container_type
-                        && data.symbol[2] == symbol.symbol_name)
-                    {
-                        appliedTo.push(diag);
-                    }
-                }
-            }
-        }
-
-        let symbolDisplayName = symbol.symbol_name;
-        if (symbolDisplayName.startsWith("__"))
-            symbolDisplayName = symbolDisplayName.substr(2);
-
-        context.actions.push(<CodeAction> {
-            kind: CodeActionKind.QuickFix,
-            title: "Import "+symbolDisplayName,
-            source: "angelscript",
-            diagnostics: appliedTo,
-            isPreferred: true,
-            data: {
-                "uri": context.module.uri,
-                "type": "import",
-                "symbol": {
-                    "type": symbol.type,
-                    "container_type": symbol.container_type,
-                    "symbol_name": symbol.symbol_name,
-                    "start": symbol.start,
-                    "end": symbol.end,
-                    "isWriteAccess": symbol.isWriteAccess,
-                    "isUnimported": symbol.isUnimported,
-                    "isAuto": symbol.isAuto,
-                    "noColor": symbol.noColor,
-                },
-            }
-        });
-    }
-}
-
-function ResolveImportAction(asmodule : scriptfiles.ASModule, action : CodeAction, data : any)
-{
-    let definitions = scriptsymbols.GetSymbolDefinition(asmodule, data.symbol);
-    if (!definitions || definitions.length == 0)
-        return action;
-
-    let moduleName = definitions[0].module.modulename;
-    if (asmodule.isModuleImported(moduleName))
-        return action;
-
-    // Find the first line to insert on
-    let lastImportLine = 0;
-
-    // Find if the module is already imported, or the position to append the new import
-    let lineCount = asmodule.textDocument.lineCount;
-    let hasEmptyLine = false;
-    let alreadyImported = false;
-    let importRegex = /\s*import\s+([A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*);/;
-
-    for(let i = 0; i < lineCount; ++i)
-    {
-        let line = asmodule.textDocument.getText(
-            Range.create(Position.create(i, 0), Position.create(i, 10000))
-        );
-
-        let match = importRegex.exec(line);
-        if (match)
-        {
-            if (match[1] == moduleName)
-            {
-                alreadyImported = true;
-                break;
-            }
-
-            lastImportLine = i + 1;
-            hasEmptyLine = false;
-        }
-        else if (line.trim().length != 0)
-        {
-            // Break if we find a line that's not empty, signalling the end of the import-block
-            break;
-        }
-        else
-        {
-            hasEmptyLine = true;
-        }
-    }
-
-    action.edit = <WorkspaceEdit> {};
-    action.edit.changes = {};
-    if (alreadyImported)
-        return;
-
-    let insertString = "import "+moduleName+";\n";
-    if (!hasEmptyLine)
-        insertString += "\n";
-
-    action.edit.changes[asmodule.displayUri] = [
-        TextEdit.insert(Position.create(lastImportLine, 0), insertString)
-    ];
 }
 
 function AddGenerateDelegateFunctionActions(context : CodeActionContext)
@@ -1121,7 +997,6 @@ function AddAutoActions(context : CodeActionContext)
                     "start": symbol.start,
                     "end": symbol.end,
                     "isWriteAccess": symbol.isWriteAccess,
-                    "isUnimported": symbol.isUnimported,
                     "isAuto": symbol.isAuto,
                     "noColor": symbol.noColor,
                 },

@@ -71,8 +71,7 @@ start = _ @statement _
     / _ { return null; }
 
 start_global
-     = _ @global_statement _
-     / comment:comment_documentation decl:global_declaration _
+     = comment:comment_documentation decl:global_declaration _
      {
         if (comment)
             decl.documentation = comment;
@@ -162,10 +161,6 @@ op_compound_assignment
 op_unary
     = @"!" !"="
     / @"~" !"="
-
-global_statement
-    = import_statement
-    / import_function_statement
 
 global_declaration
     = delegate_decl
@@ -1057,25 +1052,6 @@ identifier_rest
     = [A-Za-z_0-9]*
 identifier_char
     = [A-Za-z_0-9]
-
-import_statement
-    = &"i" "import" _ head:identifier tail:("." @identifier)*
-    {
-        let identifier = InnerCompound(range(), n.Identifier, [head].concat(tail));
-        identifier.value = head.value;
-        for (let child of tail)
-            identifier.value += "." + child.value;
-        return Compound(range(), n.ImportStatement, [identifier]);
-    }
-
-import_function_statement
-    = &"i" "import" _ sig:function_signature _ "from" _ str:(
-        (string_literal / char_literal)
-        { let value = text(); return Identifier(range(), value.substring(1, value.length-1)); }
-    )
-    {
-        return Compound(range(), n.ImportFunctionStatement, [sig, str]);
-    }
 
 comment_documentation
     = [ \t\r\n]* docs:(&[/#] @$comment [ \t\r\n]*)*
