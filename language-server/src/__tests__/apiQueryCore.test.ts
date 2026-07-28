@@ -176,6 +176,16 @@ test('GetAPIQuery supports core kinds, visibility, accessor projection, and dedu
 {
     const namespaceResult = GetAPIQuery({ query: 'Core', kinds: ['namespace'], source: 'both', limit: 10 });
     assert.equal(namespaceResult.data.matches[0]?.source, 'both');
+    const nativeNamespaceResult = GetAPIQuery({ query: 'Core', kinds: ['namespace'], source: 'native', limit: 10 });
+    const scriptNamespaceResult = GetAPIQuery({ query: 'Core', kinds: ['namespace'], source: 'script', limit: 10 });
+    assert.deepEqual(
+        nativeNamespaceResult.data.matches.filter((match) => match.qualifiedName === 'Core').map((match) => [match.qualifiedName, match.source]),
+        [['Core', 'both']]
+    );
+    assert.deepEqual(
+        scriptNamespaceResult.data.matches.filter((match) => match.qualifiedName === 'Core').map((match) => [match.qualifiedName, match.source]),
+        [['Core', 'both']]
+    );
 
     const accessor = GetAPIQuery({ query: 'GetValue', kinds: ['property'], limit: 10 });
     assert.deepEqual(accessor.data.matches.map((match) => match.kind), ['property']);

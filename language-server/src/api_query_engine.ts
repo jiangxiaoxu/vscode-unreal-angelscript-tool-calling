@@ -1353,7 +1353,7 @@ function createNamespaceEntry(namespace: typedb.DBNamespace, qualifiedNamespace:
 {
     let documentation = normalizeSearchDocumentation(namespace.documentation);
     let docSource = (namespace as typedb.DBNamespace & { docSource?: ApiSearchDocSource }).docSource;
-    let declaredModule = namespace.declarations.find((declaration) => declaration.declaredModule)?.declaredModule ?? null;
+    let namespaceSource = getNamespaceSource(namespace);
     return createSearchEntry({
         qualifiedName: qualifiedNamespace,
         kind: 'namespace',
@@ -1362,8 +1362,8 @@ function createNamespaceEntry(namespace: typedb.DBNamespace, qualifiedNamespace:
         summary: extractSummary(documentation),
         documentation,
         docSource,
-        source: getDeclaredSource(declaredModule),
-        filterSource: getDeclaredSource(declaredModule),
+        source: namespaceSource.source,
+        filterSource: namespaceSource.filterSource,
         detailsData: ['namespace', qualifiedNamespace],
         namespaceQualifiedName: qualifiedNamespace
     });
