@@ -56,35 +56,27 @@ const highConflictFiles = [
 ];
 
 const boundaryFiles = [
-    'extension/src/toolRegistry.ts',
-    'extension/src/toolShared.ts',
-    'extension/src/toolTextFormatter.ts',
-    'extension/src/toolResultTransport.ts',
-    'extension/src/toolContractUtils.ts',
-    'extension/src/angelscriptApiSearch.ts',
     'extension/src/apiRequests.ts',
+    'language-server/src/apiRequestHandlers.ts',
+    'language-server/src/api_docs.ts',
+    'language-server/src/api_query_engine.ts',
     'language-server/src/api_search.ts',
-    'scripts/lmToolManifest.mjs',
-    'scripts/sync-lm-tools.mjs',
 ];
 
 const contractSensitiveFiles = [
     'package.json',
-    'extension/src/toolRegistry.ts',
-    'extension/src/toolShared.ts',
-    'extension/src/angelscriptApiSearch.ts',
     'extension/src/apiRequests.ts',
+    'language-server/src/apiRequestHandlers.ts',
+    'language-server/src/api_docs.ts',
+    'language-server/src/api_query_engine.ts',
     'language-server/src/api_search.ts',
     'language-server/src/server.ts',
-    'scripts/lmToolManifest.mjs',
-    'scripts/sync-lm-tools.mjs',
 ];
 
 const docsFiles = [
     'README.md',
     'CHANGELOG.md',
     'MAINTAINING.md',
-    'face-ai-report.md',
 ];
 
 const highConflictChanges = listMatches(changedFiles, highConflictFiles);
@@ -94,9 +86,9 @@ const docsChanges = listMatches(changedFiles, docsFiles);
 
 const schemaChanged = changedFiles.some((file) =>
     file === 'package.json'
-    || file === 'extension/src/toolRegistry.ts'
     || file === 'extension/src/apiRequests.ts'
-    || file === 'scripts/lmToolManifest.mjs'
+    || file === 'language-server/src/api_query_engine.ts'
+    || file === 'language-server/src/api_docs.ts'
 );
 
 const activationChanged = changedFiles.some((file) =>
@@ -106,10 +98,10 @@ const activationChanged = changedFiles.some((file) =>
 
 const searchPayloadChanged = changedFiles.some((file) =>
     file === 'language-server/src/api_search.ts'
+    || file === 'language-server/src/api_query_engine.ts'
+    || file === 'language-server/src/api_docs.ts'
     || file === 'extension/src/apiRequests.ts'
-    || file === 'extension/src/angelscriptApiSearch.ts'
-    || file === 'extension/src/toolRegistry.ts'
-    || file === 'extension/src/toolShared.ts'
+    || file === 'language-server/src/apiRequestHandlers.ts'
     || file === 'language-server/src/server.ts'
 );
 

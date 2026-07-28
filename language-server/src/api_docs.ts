@@ -1,6 +1,13 @@
 import * as scriptfiles from './as_parser';
 import * as typedb from './database';
 import * as documentation from './documentation';
+import {
+    GetAPIExactSymbols,
+    ProjectConstructor,
+    type ApiQueryMatch,
+    type ApiConstructorArgument,
+    type ApiConstructorProjection,
+} from './api_search';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'node:url';
@@ -9,17 +16,10 @@ type ApiSearchSource = "native" | "script" | "both";
 
 type TypeMemberVisibility = "public" | "protected" | "private";
 
-type TypeMembersParams = {
+type CollectedTypeMember = {
+    kind: "constructor" | "method" | "property";
     name: string;
-    namespace?: string;
-    includeInherited?: boolean;
-    includeDocs?: boolean;
-    kinds?: "both" | "method" | "property";
-};
-
-type TypeMemberInfo = {
-    kind: "method" | "property";
-    name: string;
+    qualifiedName?: string;
     signature: string;
     description: string;
     declaredIn: string;
@@ -30,61 +30,12 @@ type TypeMemberInfo = {
     accessorKind?: "get" | "set";
     propertyName?: string;
     visibility: TypeMemberVisibility;
-};
-
-type TypeMembersResult = {
-    ok: true;
-    type: {
-        name: string;
-        namespace: string;
-        qualifiedName: string;
-        description: string;
-    };
-    members: TypeMemberInfo[];
-} | {
-    ok: false;
-    error: {
-        code: "NotFound" | "InvalidParams";
-        message: string;
-    };
-};
-
-type TypeHierarchyParams = {
-    name: string;
-    maxSuperDepth?: number;
-    maxSubDepth?: number;
-    maxSubBreadth?: number;
-};
-
-type TypeHierarchyResult = {
-    ok: true;
-    root: string;
-    supers: string[];
-    derivedByParent: Record<string, string[]>;
-    sourceByClass: Record<string, {
-        source: "cpp";
-    } | {
-        source: "as";
-        filePath: string;
-        startLine: number;
-        endLine: number;
-    }>;
-    limits: {
-        maxSuperDepth: number;
-        maxSubDepth: number;
-        maxSubBreadth: number;
-    };
-    truncated: {
-        supers: boolean;
-        derivedDepth: boolean;
-        derivedBreadthByClass: Record<string, number>;
-    };
-} | {
-    ok: false;
-    error: {
-        code: "NotFound" | "InvalidParams";
-        message: string;
-    };
+    ownerQualifiedName?: string;
+    args?: ApiConstructorArgument[];
+    source?: ApiSearchSource;
+    isCallable?: boolean;
+    symbolId?: string;
+    requiredArgumentCount?: number;
 };
 
 function normalizeSearchSource(raw: unknown) : ApiSearchSource
@@ -109,80 +60,11 @@ function matchesSearchSource(declaredModule: string | null | undefined, source: 
     return source == "script" ? isScript : !isScript;
 }
 
-function normalizeNamespaceName(raw: unknown) : string | null
-{
-    if (typeof raw !== "string")
-        return null;
-    let trimmed = raw.trim();
-    return trimmed.length > 0 ? trimmed : "";
-}
-
-function normalizeTypeMemberKinds(raw: unknown) : "both" | "method" | "property"
-{
-    if (typeof raw !== "string")
-        return "both";
-    let value = raw.trim().toLowerCase();
-    if (value == "method" || value == "property" || value == "both")
-        return value as "both" | "method" | "property";
-    return "both";
-}
-
-function splitQualifiedTypeName(name: string) : { typeName: string; namespaceName: string | null }
-{
-    let separatorIndex = name.lastIndexOf("::");
-    if (separatorIndex <= 0)
-        return { typeName: name, namespaceName: null };
-    let namespaceName = name.substring(0, separatorIndex);
-    let typeName = name.substring(separatorIndex + 2);
-    if (!typeName)
-        return { typeName: name, namespaceName: null };
-    return { typeName, namespaceName };
-}
-
-function resolveTypeByName(rawName: unknown, rawNamespace: unknown) : typedb.DBType | null
-{
-    if (typeof rawName !== "string")
-        return null;
-    let name = rawName.trim();
-    if (name.length == 0)
-        return null;
-
-    let namespaceName = normalizeNamespaceName(rawNamespace);
-    if (!namespaceName)
-    {
-        let split = splitQualifiedTypeName(name);
-        if (split.namespaceName)
-        {
-            namespaceName = split.namespaceName;
-            name = split.typeName;
-        }
-    }
-
-    let namespace : typedb.DBNamespace = null;
-    if (namespaceName !== null)
-    {
-        if (namespaceName.length == 0)
-            namespace = typedb.GetRootNamespace();
-        else
-            namespace = typedb.LookupNamespace(null, namespaceName);
-    }
-
-    let dbType = namespace ? typedb.LookupType(namespace, name) : typedb.GetTypeByName(name);
-    if (!dbType && namespace)
-        dbType = typedb.GetTypeByName(name);
-    return dbType;
-}
-
 function isClassType(dbType: typedb.DBType) : boolean
 {
     if (!dbType)
         return false;
     return !dbType.isPrimitive && !dbType.isEnum && !dbType.isStruct && !dbType.isDelegate && !dbType.isEvent;
-}
-
-function buildTypeHierarchyEntry(dbType: typedb.DBType) : "cpp" | "as"
-{
-    return dbType.isUnrealType() ? "cpp" : "as";
 }
 
 function getLineFromOffset(content: string, offset: number) : number
@@ -377,100 +259,6 @@ function resolveHierarchySuperType(dbType: typedb.DBType) : typedb.DBType | null
     return null;
 }
 
-function buildSubtypeIndex() : Map<string, Array<typedb.DBType>>
-{
-    let index = new Map<string, Array<typedb.DBType>>();
-    for (let [_, checkType] of typedb.GetAllTypesById())
-    {
-        if (!isClassType(checkType))
-            continue;
-        let parents: Array<string> = [];
-        if (checkType.supertype)
-            parents.push(checkType.supertype);
-        if (checkType.unrealsuper && checkType.unrealsuper != checkType.supertype)
-            parents.push(checkType.unrealsuper);
-
-        for (let parentName of parents)
-        {
-            let parentType = typedb.LookupType(checkType.namespace, parentName) ?? typedb.GetTypeByName(parentName);
-            if (parentType && !isClassType(parentType))
-                continue;
-            let bucket = index.get(parentName);
-            if (!bucket)
-            {
-                bucket = [];
-                index.set(parentName, bucket);
-            }
-            if (!bucket.includes(checkType))
-                bucket.push(checkType);
-        }
-    }
-    return index;
-}
-
-function buildDerivedEdges(
-    dbType: typedb.DBType,
-    maxDepth: number,
-    maxBreadth: number,
-    index: Map<string, Array<typedb.DBType>>,
-    visited: Set<typedb.DBType>,
-    derivedByParent: Record<string, string[]>,
-    sourceByClass: Record<string, {
-        source: "cpp";
-    } | {
-        source: "as";
-        filePath: string;
-        startLine: number;
-        endLine: number;
-    }>,
-    breadthTruncatedByClass: Record<string, number>
-) : boolean
-{
-    let children = (index.get(dbType.name) ?? []).slice();
-    children.sort((left, right) =>
-    {
-        if (left.name < right.name)
-            return -1;
-        if (left.name > right.name)
-            return 1;
-        return 0;
-    });
-
-    let visibleChildren = new Array<typedb.DBType>();
-    for (let child of children)
-    {
-        if (!visited.has(child))
-            visibleChildren.push(child);
-    }
-
-    if (maxDepth <= 0)
-    {
-        return visibleChildren.length > 0;
-    }
-
-    let keptChildren = visibleChildren;
-    if (visibleChildren.length > maxBreadth)
-    {
-        breadthTruncatedByClass[dbType.name] = visibleChildren.length - maxBreadth;
-        keptChildren = visibleChildren.slice(0, maxBreadth);
-    }
-
-    if (keptChildren.length > 0)
-        derivedByParent[dbType.name] = [];
-
-    let depthTruncated = false;
-    for (let child of keptChildren)
-    {
-        visited.add(child);
-        sourceByClass[child.name] = getScriptClassSourceInfo(child);
-        derivedByParent[dbType.name].push(child.name);
-        if (buildDerivedEdges(child, maxDepth - 1, maxBreadth, index, visited, derivedByParent, sourceByClass, breadthTruncatedByClass))
-            depthTruncated = true;
-    }
-
-    return depthTruncated;
-}
-
 function getTypeVisibility(isPrivate: boolean, isProtected: boolean) : TypeMemberVisibility
 {
     if (isPrivate)
@@ -583,6 +371,33 @@ function buildAccessorSignature(method: typedb.DBMethod, prefix: string, accesso
     return `${method.returnType} ${prefix}${propertyName}`;
 }
 
+function getPropertyAccessorInfo(method: typedb.DBMethod) : {
+    isAccessor: boolean;
+    accessorKind?: "get" | "set";
+    propertyName?: string;
+}
+{
+    if (!method.isProperty || method.isConstructor)
+        return { isAccessor: false };
+
+    let implicitArgumentCount = method.isMixin ? 1 : 0;
+    let argumentCount = method.args?.length ?? 0;
+    if (method.name.startsWith("Get"))
+    {
+        let propertyName = method.name.substring(3);
+        if (propertyName.length > 0 && argumentCount == implicitArgumentCount && method.returnType != "void")
+            return { isAccessor: true, accessorKind: "get", propertyName };
+    }
+    else if (method.name.startsWith("Set"))
+    {
+        let propertyName = method.name.substring(3);
+        if (propertyName.length > 0 && argumentCount == implicitArgumentCount + 1 && method.returnType == "void")
+            return { isAccessor: true, accessorKind: "set", propertyName };
+    }
+
+    return { isAccessor: false };
+}
+
 function buildMethodSignature(method: typedb.DBMethod, declaredInName: string, isAccessor: boolean, accessorKind: "get" | "set" | null, propertyName: string | null) : string
 {
     let prefix = "";
@@ -693,6 +508,30 @@ export function GetAPIDetails(data: any): any
         {
             return namespace.documentation ?? "";
         }
+    }
+    else if (data[0] == "constructor")
+    {
+        let namespaceName = typeof data[2] == "string" ? data[2] : "";
+        let namespace = namespaceName ? typedb.LookupNamespace(null, namespaceName) : typedb.GetRootNamespace();
+        let owner = namespace ? typedb.LookupType(namespace, data[1]) : typedb.GetTypeByName(data[1]);
+        if (!owner)
+            return "";
+        let requestedSymbolId = typeof data[3] == "string" ? data[3] : "";
+        let selected: ApiConstructorProjection | null = null;
+        owner.forEachSymbol((symbol: typedb.DBSymbol) =>
+        {
+            if (selected || !(symbol instanceof typedb.DBMethod))
+                return;
+            let constructor = ProjectConstructor(symbol, owner);
+            if (constructor && (!requestedSymbolId || constructor.symbolId == requestedSymbolId))
+                selected = constructor;
+        }, false);
+        if (!selected)
+            return "";
+        let details = "```angelscript_snippet\n" + selected.declaration + "\n```\n";
+        if (selected.documentation)
+            details += selected.documentation;
+        return details;
     }
     else if (data[0] == "function" || data[0] == "method")
     {
@@ -913,31 +752,18 @@ export function GetAPIDetailsBatch(dataList: any[]): any
     return dataList.map((data) => GetAPIDetails(data));
 }
 
-export function GetTypeMembers(params: TypeMembersParams) : TypeMembersResult
+function collectTypeMemberRecords(
+    dbType: typedb.DBType,
+    categories: ApiMemberCategory[],
+    includeInherited: boolean,
+    includeDocs: boolean,
+    includeNonPublic: boolean
+) : CollectedTypeMember[]
 {
-    if (!params || typeof params !== "object")
-        return { ok: false, error: { code: "InvalidParams", message: "Invalid params. Provide { name: string, namespace?: string, includeInherited?: boolean, includeDocs?: boolean, kinds?: 'both' | 'method' | 'property' }." } };
-
-    let name = typeof params.name === "string" ? params.name.trim() : "";
-    if (name.length == 0)
-        return { ok: false, error: { code: "InvalidParams", message: "Invalid params. 'name' must be a non-empty string." } };
-
-    let includeInherited = params.includeInherited === true;
-    let includeDocs = params.includeDocs === true;
-    let kinds = normalizeTypeMemberKinds(params.kinds);
-    let allowMethods = kinds != "property";
-    let allowProperties = kinds != "method";
-    let dbType = resolveTypeByName(name, params.namespace);
-    if (!dbType)
-        return { ok: false, error: { code: "NotFound", message: "Type not found." } };
-
-    let typeNamespace = dbType.namespace && !dbType.namespace.isRootNamespace()
-        ? dbType.namespace.getQualifiedNamespace()
-        : "";
-    let qualifiedName = dbType.getQualifiedTypenameInNamespace(null);
-    let typeDescription = formatPropertyDocumentationPlain(dbType.documentation);
-
-    let members: TypeMemberInfo[] = [];
+    let allowConstructors = categories.includes('constructor');
+    let allowMethods = categories.includes('callable') || categories.includes('data');
+    let allowProperties = categories.includes('data');
+    let members: CollectedTypeMember[] = [];
     let seenMembers = new Set<string>();
     let typeList = includeInherited ? dbType.getExtendTypesList() : [dbType];
 
@@ -950,32 +776,48 @@ export function GetTypeMembers(params: TypeMembersParams) : TypeMembersResult
         {
             if (symbol instanceof typedb.DBMethod)
             {
+                if (symbol.isConstructor)
+                {
+                    if (!allowConstructors || isInherited)
+                        return;
+                    let constructor = ProjectConstructor(symbol, checkType);
+                    if (!constructor || seenMembers.has(`constructor|${constructor.symbolId}`))
+                        return;
+                    seenMembers.add(`constructor|${constructor.symbolId}`);
+                    let visibility = getTypeVisibility(symbol.isPrivate, symbol.isProtected);
+                    members.push({
+                        kind: "constructor",
+                        name: constructor.name,
+                        qualifiedName: constructor.qualifiedName,
+                        signature: getVisibilityPrefix(visibility) + constructor.declaration,
+                        description: includeDocs ? (constructor.documentation ?? "") : "",
+                        declaredIn: constructor.ownerQualifiedName,
+                        declaredInKind: "type",
+                        isInherited: false,
+                        isMixin: false,
+                        isAccessor: false,
+                        visibility,
+                        ownerQualifiedName: constructor.ownerQualifiedName,
+                        args: constructor.args,
+                        source: constructor.source,
+                        isCallable: true,
+                        symbolId: constructor.symbolId,
+                        requiredArgumentCount: constructor.requiredArgumentCount,
+                    });
+                    return;
+                }
                 if (!allowMethods)
                     return;
-                if (symbol.isConstructor)
+                if (isInternalApiSymbolName(symbol.name))
                     return;
                 if (isInherited && symbol.isPrivate)
                     return;
 
                 let visibility = getTypeVisibility(symbol.isPrivate, symbol.isProtected);
-                let accessorKind : "get" | "set" | null = null;
-                let propertyName : string | null = null;
-                let isAccessor = false;
-                if (symbol.isProperty)
-                {
-                    if (symbol.name.startsWith("Get"))
-                    {
-                        accessorKind = "get";
-                        propertyName = symbol.name.substring(3);
-                        isAccessor = propertyName.length > 0;
-                    }
-                    else if (symbol.name.startsWith("Set"))
-                    {
-                        accessorKind = "set";
-                        propertyName = symbol.name.substring(3);
-                        isAccessor = propertyName.length > 0;
-                    }
-                }
+                let accessor = getPropertyAccessorInfo(symbol);
+                let accessorKind = accessor.accessorKind ?? null;
+                let propertyName = accessor.propertyName ?? null;
+                let isAccessor = accessor.isAccessor;
 
                 let signature = buildMethodSignature(symbol, declaredInName, isAccessor, accessorKind, propertyName);
                 let description = "";
@@ -1002,11 +844,14 @@ export function GetTypeMembers(params: TypeMembersParams) : TypeMembersResult
                     accessorKind: accessorKind ?? undefined,
                     propertyName: propertyName ?? undefined,
                     visibility: visibility,
+                    isCallable: symbol.isCallable !== false,
                 });
             }
             else if (symbol instanceof typedb.DBProperty)
             {
                 if (!allowProperties)
+                    return;
+                if (isInternalApiSymbolName(symbol.name))
                     return;
                 if (isInherited && symbol.isPrivate)
                     return;
@@ -1050,6 +895,8 @@ export function GetTypeMembers(params: TypeMembersParams) : TypeMembersResult
                 return;
             if (!symbol.isMixin)
                 return;
+            if (isInternalApiSymbolName(symbol.name))
+                return;
             if (!symbol.args || symbol.args.length == 0)
                 return;
             if (!dbType.inheritsFrom(symbol.args[0].typename))
@@ -1061,24 +908,10 @@ export function GetTypeMembers(params: TypeMembersParams) : TypeMembersResult
 
             let namespaceName = namespace.isRootNamespace() ? "" : namespace.getQualifiedNamespace();
             let visibility = getTypeVisibility(symbol.isPrivate, symbol.isProtected);
-            let accessorKind : "get" | "set" | null = null;
-            let propertyName : string | null = null;
-            let isAccessor = false;
-            if (symbol.isProperty)
-            {
-                if (symbol.name.startsWith("Get"))
-                {
-                    accessorKind = "get";
-                    propertyName = symbol.name.substring(3);
-                    isAccessor = propertyName.length > 0;
-                }
-                else if (symbol.name.startsWith("Set"))
-                {
-                    accessorKind = "set";
-                    propertyName = symbol.name.substring(3);
-                    isAccessor = propertyName.length > 0;
-                }
-            }
+            let accessor = getPropertyAccessorInfo(symbol);
+            let accessorKind = accessor.accessorKind ?? null;
+            let propertyName = accessor.propertyName ?? null;
+            let isAccessor = accessor.isAccessor;
 
             let signature = buildMethodSignature(symbol, "", isAccessor, accessorKind, propertyName);
             let description = "";
@@ -1099,6 +932,7 @@ export function GetTypeMembers(params: TypeMembersParams) : TypeMembersResult
                 accessorKind: accessorKind ?? undefined,
                 propertyName: propertyName ?? undefined,
                 visibility: visibility,
+                isCallable: symbol.isCallable !== false,
             });
         });
 
@@ -1108,623 +942,602 @@ export function GetTypeMembers(params: TypeMembersParams) : TypeMembersResult
 
     visitNamespace(typedb.GetRootNamespace());
 
+    if (!includeNonPublic)
+        members = members.filter((member) => member.visibility == "public");
+
+    return members;
+}
+
+export type ApiMemberCategory = 'callable' | 'data' | 'constructor' | 'type';
+export type ApiMemberOwnerKind = 'all' | 'namespace' | 'type';
+
+export type GetAPISymbolMembersParams = {
+    name: string;
+    source?: ApiSearchSource;
+    ownerKind?: ApiMemberOwnerKind;
+    members: ApiMemberCategory[] | ['all'];
+    includeInherited?: boolean;
+    includeDocs?: boolean;
+    includeNonPublic?: boolean;
+    limit?: number;
+    offset?: number;
+};
+
+export type ApiSymbolMember = {
+    name: string;
+    qualifiedName: string;
+    kind: 'constructor' | 'method' | 'function' | 'property' | 'globalVariable' | 'class' | 'struct' | 'enum';
+    declaration: string;
+    ownerQualifiedName: string;
+    source: 'native' | 'script';
+    visibility: TypeMemberVisibility;
+    documentation?: string;
+    inheritedFrom?: string;
+    isMixin?: boolean;
+    isCallable?: boolean;
+    symbolId?: string;
+    args?: ApiConstructorArgument[];
+    requiredArgumentCount?: number;
+};
+
+export type ApiMembersPage = {
+    items: ApiSymbolMember[];
+    total: number;
+    returned: number;
+    limit: number;
+    offset: number;
+    omitted: number;
+    truncated: boolean;
+};
+
+export type GetAPISymbolMembersResult = {
+    ok: true;
+    data: {
+        requestedName: string;
+        found: true;
+        symbols: ApiQueryMatch[];
+        groups: Array<{
+            owner: 'namespace' | 'type';
+            ownerQualifiedName: string;
+            ownerKind: 'namespace' | 'class' | 'struct' | 'enum';
+            ownerSource: ApiSearchSource;
+            members: ApiMembersPage;
+        }>;
+    };
+} | {
+    ok: false;
+    error: {
+        code: 'InvalidParams' | 'NotFound';
+        message: string;
+    };
+};
+
+function invalidMembers(message: string) : GetAPISymbolMembersResult
+{
+    return { ok: false, error: { code: 'InvalidParams', message } };
+}
+
+function normalizeStrictSource(value: unknown) : ApiSearchSource
+{
+    if (value === undefined)
+        return 'both';
+    if (typeof value != 'string')
+        throw new Error("Invalid params. 'source' must be 'native', 'script', or 'both'.");
+    let source = value.trim().toLowerCase();
+    if (source != 'native' && source != 'script' && source != 'both')
+        throw new Error("Invalid params. 'source' must be 'native', 'script', or 'both'.");
+    return source as ApiSearchSource;
+}
+
+function normalizeStrictBoolean(value: unknown, name: string) : boolean
+{
+    if (value === undefined)
+        return false;
+    if (typeof value != 'boolean')
+        throw new Error(`Invalid params. '${name}' must be a boolean.`);
+    return value;
+}
+
+function normalizeMemberCategories(value: unknown) : ApiMemberCategory[]
+{
+    if (!Array.isArray(value) || value.length == 0)
+        throw new Error("Invalid params. 'members' must be a non-empty array.");
+    if (value.includes('all'))
+    {
+        if (value.length != 1)
+            throw new Error("Invalid params. 'all' must be used alone in 'members'.");
+        return ['callable', 'data', 'constructor', 'type'];
+    }
+    let order: ApiMemberCategory[] = ['callable', 'data', 'constructor', 'type'];
+    for (let item of value)
+    {
+        if (typeof item != 'string' || !order.includes(item as ApiMemberCategory))
+            throw new Error("Invalid params. 'members' supports callable, data, constructor, type, or all.");
+    }
+    let requested = new Set(value as ApiMemberCategory[]);
+    return order.filter((category) => requested.has(category));
+}
+
+function normalizeOwnerKind(value: unknown) : ApiMemberOwnerKind
+{
+    if (value === undefined)
+        return 'all';
+    if (typeof value != 'string')
+        throw new Error("Invalid params. 'ownerKind' must be all, namespace, or type.");
+    let owner = value.trim().toLowerCase();
+    if (owner != 'all' && owner != 'namespace' && owner != 'type')
+        throw new Error("Invalid params. 'ownerKind' must be all, namespace, or type.");
+    return owner as ApiMemberOwnerKind;
+}
+
+function normalizeMembersLimit(value: unknown) : number
+{
+    if (value === undefined)
+        return 20;
+    if (typeof value != 'number' || !Number.isInteger(value) || value < 0 || value > 200)
+        throw new Error("Invalid params. 'limit' must be an integer between 0 and 200.");
+    return value;
+}
+
+function normalizeMembersOffset(value: unknown) : number
+{
+    if (value === undefined)
+        return 0;
+    if (typeof value != 'number' || !Number.isInteger(value) || value < 0)
+        throw new Error("Invalid params. 'offset' must be a non-negative integer.");
+    return value;
+}
+
+function sourceOfType(dbType: typedb.DBType) : 'native' | 'script'
+{
+    return dbType.declaredModule ? 'script' : 'native';
+}
+
+function qualifiedTypeLookup(qualifiedName: string) : typedb.DBType | null
+{
+    let shadowNamespace = typedb.LookupNamespace(null, qualifiedName);
+    let shadowedType = shadowNamespace?.getShadowedType();
+    if (shadowedType && shadowedType.getQualifiedTypenameInNamespace(null) == qualifiedName)
+        return shadowedType;
+    let separator = qualifiedName.lastIndexOf('::');
+    let namespaceName = separator >= 0 ? qualifiedName.substring(0, separator) : '';
+    let typeName = separator >= 0 ? qualifiedName.substring(separator + 2) : qualifiedName;
+    let namespace = namespaceName ? typedb.LookupNamespace(null, namespaceName) : typedb.GetRootNamespace();
+    return namespace ? typedb.LookupType(namespace, typeName) : null;
+}
+
+function memberVisibility(symbol: typedb.DBSymbol) : TypeMemberVisibility
+{
+    let visibleSymbol = symbol as typedb.DBSymbol & { isPrivate?: boolean; isProtected?: boolean };
+    return getTypeVisibility(visibleSymbol.isPrivate === true, visibleSymbol.isProtected === true);
+}
+
+function normalizeMemberDocumentation(value: string | null | undefined) : string | undefined
+{
+    let text = String(value ?? '').trim();
+    return text ? text : undefined;
+}
+
+function projectCollectedMember(member: CollectedTypeMember, ownerSource: 'native' | 'script') : ApiSymbolMember
+{
+    let ownerQualifiedName = member.ownerQualifiedName ?? member.declaredIn;
+    let kind: ApiSymbolMember['kind'] = member.kind;
+    let qualifiedName = member.qualifiedName ?? `${ownerQualifiedName}.${member.name}`;
     return {
-        ok: true,
-        type: {
-            name: dbType.name,
-            namespace: typeNamespace,
-            qualifiedName: qualifiedName,
-            description: typeDescription,
-        },
-        members: members,
+        name: member.name,
+        qualifiedName,
+        kind,
+        declaration: member.signature,
+        ownerQualifiedName,
+        source: member.source == 'script' ? 'script' : member.source == 'native' ? 'native' : ownerSource,
+        visibility: member.visibility,
+        ...(member.description ? { documentation: member.description } : {}),
+        ...(member.isInherited ? { inheritedFrom: member.declaredIn } : {}),
+        ...(member.isMixin ? { isMixin: true } : {}),
+        ...(member.isCallable !== undefined ? { isCallable: member.isCallable } : {}),
+        ...(member.symbolId ? { symbolId: member.symbolId } : {}),
+        ...(member.args ? { args: member.args } : {}),
+        ...(member.requiredArgumentCount !== undefined ? { requiredArgumentCount: member.requiredArgumentCount } : {})
     };
 }
 
-export function GetTypeHierarchy(params: TypeHierarchyParams) : TypeHierarchyResult
+function projectNestedType(dbType: typedb.DBType, ownerQualifiedName: string, includeDocs: boolean) : ApiSymbolMember
 {
-    if (!params || typeof params !== "object")
-        return { ok: false, error: { code: "InvalidParams", message: "Invalid params. Provide { name: string, maxSuperDepth?: number, maxSubDepth?: number, maxSubBreadth?: number }." } };
-
-    let name = typeof params.name === "string" ? params.name.trim() : "";
-    if (name.length == 0)
-        return { ok: false, error: { code: "InvalidParams", message: "Invalid params. 'name' must be a non-empty string." } };
-
-    let dbType = resolveTypeByName(name, undefined);
-    if (!dbType)
-        return { ok: false, error: { code: "NotFound", message: "Type not found." } };
-    if (!isClassType(dbType))
-        return { ok: false, error: { code: "InvalidParams", message: `Type "${name}" is not a class. Provide a class name such as "APawn".` } };
-
-    let maxSuperDepth = 3;
-    if (params.maxSuperDepth !== undefined)
-    {
-        if (typeof params.maxSuperDepth !== "number" || !Number.isInteger(params.maxSuperDepth) || params.maxSuperDepth < 0)
-            return { ok: false, error: { code: "InvalidParams", message: "Invalid params. 'maxSuperDepth' must be a non-negative integer." } };
-        maxSuperDepth = params.maxSuperDepth;
-    }
-
-    let maxSubDepth = 2;
-    if (params.maxSubDepth !== undefined)
-    {
-        if (typeof params.maxSubDepth !== "number" || !Number.isInteger(params.maxSubDepth) || params.maxSubDepth < 0)
-            return { ok: false, error: { code: "InvalidParams", message: "Invalid params. 'maxSubDepth' must be a non-negative integer." } };
-        maxSubDepth = params.maxSubDepth;
-    }
-
-    let maxSubBreadth = 10;
-    if (params.maxSubBreadth !== undefined)
-    {
-        if (typeof params.maxSubBreadth !== "number" || !Number.isInteger(params.maxSubBreadth) || params.maxSubBreadth < 0)
-            return { ok: false, error: { code: "InvalidParams", message: "Invalid params. 'maxSubBreadth' must be a non-negative integer." } };
-        maxSubBreadth = params.maxSubBreadth;
-    }
-
-    if (maxSuperDepth == 0 && maxSubDepth == 0)
-        return { ok: false, error: { code: "InvalidParams", message: "Invalid params. 'maxSuperDepth' and 'maxSubDepth' cannot both be 0." } };
-
-    let sourceByClass: Record<string, {
-        source: "cpp";
-    } | {
-        source: "as";
-        filePath: string;
-        startLine: number;
-        endLine: number;
-    }> = {};
-    sourceByClass[dbType.name] = getScriptClassSourceInfo(dbType);
-
-    let supers: string[] = [];
-    let superVisited = new Set<typedb.DBType>();
-    let current = dbType;
-    let superDepth = 0;
-    while (superDepth < maxSuperDepth)
-    {
-        let next = resolveHierarchySuperType(current);
-        if (!next || superVisited.has(next))
-            break;
-        superVisited.add(next);
-        sourceByClass[next.name] = getScriptClassSourceInfo(next);
-        supers.push(next.name);
-        current = next;
-        superDepth += 1;
-    }
-
-    let supersTruncated = false;
-    if (superDepth >= maxSuperDepth)
-    {
-        let next = resolveHierarchySuperType(current);
-        if (next && !superVisited.has(next))
-            supersTruncated = true;
-    }
-
-    let subtypeIndex = buildSubtypeIndex();
-    let subtypeVisited = new Set<typedb.DBType>();
-    subtypeVisited.add(dbType);
-    let derivedByParent: Record<string, string[]> = {};
-    let derivedBreadthByClass: Record<string, number> = {};
-    let derivedDepthTruncated = buildDerivedEdges(
-        dbType,
-        maxSubDepth,
-        maxSubBreadth,
-        subtypeIndex,
-        subtypeVisited,
-        derivedByParent,
-        sourceByClass,
-        derivedBreadthByClass
-    );
-
+    let kind: 'class' | 'struct' | 'enum' = dbType.isEnum ? 'enum' : dbType.isStruct ? 'struct' : 'class';
+    let qualifiedName = dbType.getQualifiedTypenameInNamespace(null);
     return {
-        ok: true,
-        root: dbType.name,
-        supers: supers,
-        derivedByParent: derivedByParent,
-        sourceByClass: sourceByClass,
-        limits: {
-            maxSuperDepth,
-            maxSubDepth,
-            maxSubBreadth,
-        },
-        truncated: {
-            supers: supersTruncated,
-            derivedDepth: derivedDepthTruncated,
-            derivedBreadthByClass: derivedBreadthByClass,
-        },
+        name: dbType.name,
+        qualifiedName,
+        kind,
+        declaration: `${kind} ${qualifiedName}`,
+        ownerQualifiedName,
+        source: sourceOfType(dbType),
+        visibility: 'public',
+        ...(includeDocs && normalizeMemberDocumentation(dbType.documentation) ? { documentation: normalizeMemberDocumentation(dbType.documentation) } : {})
     };
 }
 
-export function GetAPISearch(filter: string, source?: string): any
+function compareMembers(left: ApiSymbolMember, right: ApiSymbolMember) : number
 {
-    let list: any[] = [];
-    let sourceFilter = normalizeSearchSource(source);
-    type SearchToken = {
-        value: string;
-        isSeparator: boolean;
-        tightPrev: boolean;
+    let kindOrder: Record<ApiSymbolMember['kind'], number> = {
+        constructor: 0, method: 1, function: 2, property: 3, globalVariable: 4, class: 5, struct: 6, enum: 7
     };
-    let phraseGroups: Array<Array<SearchToken>> = [];
-    let tokenRegex = /::|\.|[A-Za-z0-9_]+/g;
-    for (let rawGroup of filter.split("|"))
+    let kind = kindOrder[left.kind] - kindOrder[right.kind];
+    if (kind != 0)
+        return kind;
+    return `${left.qualifiedName}\u0000${left.source}\u0000${left.declaration}\u0000${left.symbolId ?? ''}`
+        .localeCompare(`${right.qualifiedName}\u0000${right.source}\u0000${right.declaration}\u0000${right.symbolId ?? ''}`);
+}
+
+function paginateMemberItems(items: ApiSymbolMember[], offset: number, limit: number) : ApiMembersPage
+{
+    let page = items.slice(offset, offset + limit);
+    return {
+        items: page,
+        total: items.length,
+        returned: page.length,
+        limit,
+        offset,
+        omitted: Math.max(0, items.length - page.length),
+        truncated: offset + page.length < items.length
+    };
+}
+
+function collectTypeMembers(
+    owner: typedb.DBType,
+    categories: ApiMemberCategory[],
+    includeInherited: boolean,
+    includeDocs: boolean,
+    includeNonPublic: boolean
+) : ApiSymbolMember[]
+{
+    let members = collectTypeMemberRecords(owner, categories, includeInherited, includeDocs, includeNonPublic)
+        .map((member) => projectCollectedMember(member, sourceOfType(owner)));
+    members = members.filter((member) =>
     {
-        let group = new Array<SearchToken>();
-        let regex = new RegExp(tokenRegex.source, "g");
-        let prevEnd = -1;
-        let match: RegExpExecArray;
-        while ((match = regex.exec(rawGroup)) !== null)
+        if (member.kind == 'constructor')
+            return categories.includes('constructor');
+        if (member.kind == 'method' || member.kind == 'function')
+            return member.isCallable === false ? categories.includes('data') : categories.includes('callable');
+        return member.kind == 'property' || member.kind == 'globalVariable' ? categories.includes('data') : false;
+    });
+    if (categories.includes('type'))
+    {
+        owner.forEachSymbol((symbol) =>
         {
-            let token = match[0];
-            let start = match.index ?? 0;
-            let end = start + token.length;
-            let hasSpaceBefore = false;
-            if (prevEnd >= 0)
-            {
-                let gap = rawGroup.substring(prevEnd, start);
-                hasSpaceBefore = /\s/.test(gap);
-            }
-
-            let isSeparator = token == "." || token == "::";
-            group.push({
-                value: isSeparator ? token : token.toLowerCase(),
-                isSeparator: isSeparator,
-                tightPrev: prevEnd >= 0 && !hasSpaceBefore,
-            });
-            prevEnd = end;
-        }
-
-        if (group.length > 0)
-            phraseGroups.push(group);
-    }
-
-    if (phraseGroups.length == 0)
-        return [];
-
-    let groupMatches = function (name: string, group: Array<SearchToken>)
-    {
-        if (group.length == 0)
-            return false;
-
-        let lowerName = name.toLowerCase();
-        let searchIndex = 0;
-        for (let token of group)
-        {
-            if (token.isSeparator)
-            {
-                let matchIndex = name.indexOf(token.value, searchIndex);
-                if (matchIndex == -1)
-                    return false;
-                if (token.tightPrev && matchIndex != searchIndex)
-                    return false;
-                searchIndex = matchIndex + token.value.length;
-                continue;
-            }
-
-            let matchIndex = lowerName.indexOf(token.value, searchIndex);
-            if (matchIndex == -1)
-                return false;
-            searchIndex = matchIndex + token.value.length;
-        }
-
-        return true;
-    }
-
-    let canComplete = function (name: string)
-    {
-        for (let group of phraseGroups)
-        {
-            if (groupMatches(name, group))
-                return true;
-        }
-        return false;
-    }
-
-    let isWordChar = function (char: string) : boolean
-    {
-        let code = char.charCodeAt(0);
-        return (code >= 48 && code <= 57)
-            || (code >= 65 && code <= 90)
-            || (code >= 97 && code <= 122)
-            || code == 95;
-    }
-
-    let isUpper = function (char: string) : boolean
-    {
-        let code = char.charCodeAt(0);
-        return code >= 65 && code <= 90;
-    }
-
-    let isLower = function (char: string) : boolean
-    {
-        let code = char.charCodeAt(0);
-        return code >= 97 && code <= 122;
-    }
-
-    let scoreUppercase = function (name: string, index: number, length: number) : number
-    {
-        let score = 0;
-        let end = Math.min(name.length, index + length);
-        for (let i = index; i < end; ++i)
-        {
-            if (isUpper(name[i]))
-                score += 25;
-        }
-        if (index < name.length && isUpper(name[index]))
-            score += 40;
-        return score;
-    }
-
-    let isBoundary = function (name: string, index: number) : boolean
-    {
-        if (index <= 0)
-            return true;
-        let prev = name[index - 1];
-        let curr = name[index];
-        if (!isWordChar(prev))
-            return true;
-        if (isLower(prev) && isUpper(curr))
-            return true;
-        return false;
-    }
-
-    let scoreToken = function (name: string, index: number, length: number) : number
-    {
-        let score = 0;
-        if (index == 0)
-            score += 200;
-        if (isBoundary(name, index))
-            score += 150;
-        score += scoreUppercase(name, index, length);
-        score += Math.max(0, 100 - index);
-        score += Math.max(0, 20 - length);
-        return score;
-    }
-
-    let scoreGroup = function (name: string, lowerName: string, group: Array<SearchToken>) : number
-    {
-        if (group.length == 0)
-            return -1;
-
-        let searchIndex = 0;
-        let score = 0;
-        for (let token of group)
-        {
-            if (token.isSeparator)
-            {
-                let matchIndex = name.indexOf(token.value, searchIndex);
-                if (matchIndex == -1)
-                    return -1;
-                if (token.tightPrev && matchIndex != searchIndex)
-                    return -1;
-                score += token.value == "::" ? 60 : 40;
-                searchIndex = matchIndex + token.value.length;
-                continue;
-            }
-
-            let matchIndex = lowerName.indexOf(token.value, searchIndex);
-            if (matchIndex == -1)
-                return -1;
-            score += scoreToken(name, matchIndex, token.value.length);
-            searchIndex = matchIndex + token.value.length;
-        }
-
-        if (group.length == 1 && !group[0].isSeparator && lowerName == group[0].value)
-            score += 300;
-
-        score += Math.max(0, 50 - name.length);
-        return score;
-    }
-
-    let scoreName = function (name: string) : number
-    {
-        if (!name)
-            return -1;
-
-        let lowerName = name.toLowerCase();
-        let best = -1;
-        for (let group of phraseGroups)
-        {
-            let groupScore = scoreGroup(name, lowerName, group);
-            if (groupScore > best)
-                best = groupScore;
-        }
-        return best;
-    }
-
-    let seenIds = new Set<string>();
-    let typeResults: any[] = [];
-
-    let searchType = function (type: typedb.DBType | typedb.DBNamespace)
-    {
-        let typePrefix: string = "";
-        let typeMatches = false;
-        if (type instanceof typedb.DBNamespace)
-        {
-            for (let [_, childNamespace] of type.childNamespaces)
-            {
-                searchType(childNamespace);
-            }
-
-            if (!type.isRootNamespace())
-            {
-                typePrefix = type.getQualifiedNamespace() + "::";
-                // Check both the namespace name and the full qualified namespace (including "::")
-                typeMatches = canComplete(type.name) || canComplete(typePrefix);
-            }
-        }
-        else
-        {
-            typePrefix = type.getQualifiedTypenameInNamespace(null) + ".";
-            // Check both the type name and the full qualified type name (including ".")
-            typeMatches = canComplete(type.name) || canComplete(typePrefix);
-        }
-
-        if (!(type instanceof typedb.DBNamespace))
-        {
-            if (typeMatches && !type.isDelegate && !type.isEvent && !type.isPrimitive && !type.isTemplateInstantiation)
-            {
-                if (matchesSearchSource(type.declaredModule, sourceFilter))
-                {
-                    let displayName = type.name;
-                    if (type.isTemplateType() && type.templateSubTypes && type.templateSubTypes.length > 0)
-                        displayName = typedb.FormatTemplateTypename(type.name, type.templateSubTypes);
-
-                    let typeNamespace = type.namespace && !type.namespace.isRootNamespace()
-                        ? type.namespace.getQualifiedNamespace()
-                        : "";
-
-                    let typeKind = "class";
-                    if (type.isEnum)
-                        typeKind = "enum";
-                    else if (type.isStruct)
-                        typeKind = "struct";
-
-                    let uniqueId = ["type", type.name, typeNamespace].join("|");
-                    if (!seenIds.has(uniqueId))
-                    {
-                        seenIds.add(uniqueId);
-                        typeResults.push({
-                            "type": "type",
-                            "label": displayName,
-                            "id": uniqueId,
-                            "data": ["type", type.name, typeNamespace, typeKind],
-                        });
-                    }
-                }
-            }
-        }
-
-        let getConstructorOwnerType = function (symbol: typedb.DBMethod): typedb.DBType | null
-        {
-            if (symbol.containingType)
-                return symbol.containingType;
-
-            if (symbol.namespace)
-            {
-                let shadowed = symbol.namespace.getShadowedType();
-                if (shadowed)
-                    return shadowed;
-            }
-
-            if (symbol.returnType)
-            {
-                let lookupNamespace = symbol.namespace;
-                if (lookupNamespace && lookupNamespace.isRootNamespace())
-                    lookupNamespace = null;
-                let found = typedb.LookupType(lookupNamespace, symbol.returnType);
-                if (found)
-                    return found;
-                found = typedb.GetTypeByName(symbol.returnType);
-                if (found)
-                    return found;
-            }
-
-            if (symbol.name)
-            {
-                let found = typedb.GetTypeByName(symbol.name);
-                if (found)
-                    return found;
-            }
-
-            return null;
-        }
-
-        type.forEachSymbol(function (symbol: typedb.DBSymbol)
-        {
-            if (symbol instanceof typedb.DBMethod)
-            {
-                if (!matchesSearchSource(symbol.declaredModule, sourceFilter))
-                    return;
-                if (symbol.isConstructor && (!symbol.args || symbol.args.length == 0))
-                    return;
-                if (symbol.isConstructor && symbol.args && symbol.args.length == 1)
-                    return;
-                if (symbol.isConstructor)
-                {
-                    let ctorType = getConstructorOwnerType(symbol);
-                    if (ctorType && (ctorType.isDelegate || ctorType.isEvent))
-                        return;
-                }
-                if (symbol.name.startsWith("op"))
-                    return;
-                if (shouldSkipApiFunction(symbol))
-                    return;
-                // Also check the full qualified name (prefix + symbol name)
-                let fullName = typePrefix + symbol.name;
-                if (typeMatches || canComplete(symbol.name) || canComplete(fullName))
-                {
-                    let symbol_id;
-                    if (symbol.containingType)
-                    {
-                        let methodNamespace = symbol.containingType.namespace
-                            ? symbol.containingType.namespace.getQualifiedNamespace()
-                            : "";
-                        let methodArgs = symbol.args ? symbol.args.map((arg) => arg.typename) : [];
-                        symbol_id = ["method", symbol.containingType.name, symbol.name, symbol.id, methodNamespace, methodArgs];
-                    }
-                    else if (symbol.namespace && !symbol.namespace.isRootNamespace())
-                    {
-                        let methodArgs = symbol.args ? symbol.args.map((arg) => arg.typename) : [];
-                        symbol_id = ["function", symbol.namespace.getQualifiedNamespace() + "::" + symbol.name, symbol.id, methodArgs];
-                    }
-                    else
-                    {
-                        let methodArgs = symbol.args ? symbol.args.map((arg) => arg.typename) : [];
-                        symbol_id = ["function", symbol.name, symbol.id, methodArgs];
-                    }
-
-                    let label = typePrefix + symbol.name + "()";
-                    if (symbol.isConstructor)
-                    {
-                        let ctorArgs = "";
-                        if (symbol.args && symbol.args.length > 0)
-                        {
-                            ctorArgs = symbol.args.map((arg) =>
-                            {
-                                if (arg.name)
-                                    return arg.typename + " " + arg.name;
-                                return arg.typename;
-                            }).join(", ");
-                        }
-                        let ctorTypeName = "";
-                        let ctorType = getConstructorOwnerType(symbol);
-                        if (ctorType)
-                        {
-                            ctorTypeName = ctorType.getQualifiedTypenameInNamespace(null);
-                        }
-                        else if (symbol.returnType)
-                        {
-                            if (symbol.namespace && !symbol.namespace.isRootNamespace())
-                                ctorTypeName = symbol.namespace.getQualifiedNamespace() + "::" + symbol.returnType;
-                            else
-                                ctorTypeName = symbol.returnType;
-                        }
-                        else if (symbol.name)
-                        {
-                            ctorTypeName = symbol.name;
-                        }
-
-                        if (!ctorTypeName && typePrefix)
-                        {
-                            if (typePrefix.endsWith("."))
-                                ctorTypeName = typePrefix.substring(0, typePrefix.length - 1);
-                            else if (typePrefix.endsWith("::"))
-                                ctorTypeName = typePrefix.substring(0, typePrefix.length - 2);
-                        }
-                        label = "<ctor>" + ctorTypeName + "(" + ctorArgs + ")";
-                    }
-                    else if (symbol.isMixin)
-                    {
-                        label = symbol.args[0].typename + "." + symbol.name + "()";
-                    }
-
-                    let uniqueId = symbol_id.join("|");
-                    if (!seenIds.has(uniqueId))
-                    {
-                        seenIds.add(uniqueId);
-                        list.push({
-                            "type": "function",
-                            "label": label,
-                            "id": symbol.id.toString(),
-                            "data": symbol_id,
-                        });
-                    }
-                }
-            }
-            else if (symbol instanceof typedb.DBProperty)
-            {
-                if (!matchesSearchSource(symbol.declaredModule, sourceFilter))
-                    return;
-                // Also check the full qualified name (prefix + symbol name)
-                let fullName = typePrefix + symbol.name;
-                if (typeMatches || canComplete(symbol.name) || canComplete(fullName))
-                {
-                    let symbol_id;
-                    if (symbol.containingType)
-                        symbol_id = ["property", symbol.containingType.name, symbol.name];
-                    else if (symbol.namespace && !symbol.namespace.isRootNamespace())
-                        symbol_id = ["global", symbol.namespace.getQualifiedNamespace() + "::" + symbol.name];
-                    else
-                        symbol_id = ["global", symbol.name];
-
-                    let uniqueId = symbol_id.join("|");
-                    if (!seenIds.has(uniqueId))
-                    {
-                        seenIds.add(uniqueId);
-                        list.push({
-                            "type": "property",
-                            "label": typePrefix + symbol.name,
-                            "id": typePrefix + symbol.name,
-                            "data": symbol_id,
-                        });
-                    }
-                }
-            }
-            else if (symbol instanceof typedb.DBType)
-            {
-                if (!symbol.isTemplateInstantiation && !symbol.isTemplateType() && !symbol.isDelegate && !symbol.isEvent)
-                    searchType(symbol);
-            }
+            if (symbol instanceof typedb.DBType)
+                members.push(projectNestedType(symbol, owner.getQualifiedTypenameInNamespace(null), includeDocs));
         }, false);
     }
+    return members.sort(compareMembers);
+}
 
-    searchType(typedb.GetRootNamespace());
-
-    if (typeResults.length > 0)
-        list = typeResults.concat(list);
-
-    let getSearchName = function (item: any) : string
+function collectNamespaceMembers(
+    namespace: typedb.DBNamespace,
+    ownerQualifiedName: string,
+    source: ApiSearchSource,
+    categories: ApiMemberCategory[],
+    includeDocs: boolean,
+    includeNonPublic: boolean
+) : ApiSymbolMember[]
+{
+    let members = new Array<ApiSymbolMember>();
+    namespace.forEachSymbol((symbol) =>
     {
-        if (item && item.type == "type" && Array.isArray(item.data))
+        if (symbol instanceof typedb.DBMethod)
         {
-            let name = item.data[1] as string;
-            let typeNamespace = item.data[2] as string;
-            if (typeNamespace)
-                return typeNamespace + "::" + name;
-            return name;
+            if (!matchesSearchSource(symbol.declaredModule, source))
+                return;
+            let visibility = memberVisibility(symbol);
+            if (!includeNonPublic && visibility != 'public')
+                return;
+            if (symbol.isConstructor)
+            {
+                if (!categories.includes('constructor'))
+                    return;
+                let constructor = ProjectConstructor(symbol);
+                if (!constructor)
+                    return;
+                members.push({
+                    name: constructor.name,
+                    qualifiedName: constructor.qualifiedName,
+                    kind: 'constructor',
+                    declaration: constructor.declaration,
+                    ownerQualifiedName: constructor.ownerQualifiedName,
+                    source: constructor.source,
+                    visibility,
+                    ...(includeDocs && constructor.documentation ? { documentation: constructor.documentation } : {}),
+                    isCallable: true,
+                    symbolId: constructor.symbolId,
+                    args: constructor.args,
+                    requiredArgumentCount: constructor.requiredArgumentCount
+                });
+                return;
+            }
+            let isCallable = symbol.isCallable !== false;
+            if (isCallable ? !categories.includes('callable') : !categories.includes('data'))
+                return;
+            let namespaceName = namespace.isRootNamespace() ? '' : namespace.getQualifiedNamespace();
+            members.push({
+                name: symbol.name,
+                qualifiedName: namespaceName ? `${namespaceName}::${symbol.name}` : symbol.name,
+                kind: isCallable ? 'function' : 'property',
+                declaration: buildMethodSignature(symbol, '', false, null, null),
+                ownerQualifiedName,
+                source: symbol.declaredModule ? 'script' : 'native',
+                visibility,
+                ...(includeDocs && normalizeMemberDocumentation(symbol.findAvailableDocumentation()) ? { documentation: normalizeMemberDocumentation(symbol.findAvailableDocumentation()) } : {}),
+                ...(symbol.isMixin ? { isMixin: true } : {}),
+                isCallable
+            });
+            return;
         }
-        return item && item.label ? String(item.label) : "";
-    }
-
-    let scoreCache = new Map<any, number>();
-    let getItemScore = function (item: any) : number
-    {
-        if (scoreCache.has(item))
-            return scoreCache.get(item);
-        let score = scoreName(getSearchName(item));
-        scoreCache.set(item, score);
-        return score;
-    }
-
-    let getTypeOrder = function (item: any) : number
-    {
-        let kind = item && item.data ? item.data[0] : "";
-        if (kind == "type")
-            return 0;
-        if (kind == "function")
-            return 1;
-        if (kind == "property")
-            return 2;
-        return 3;
-    }
-
-    list.sort(function (a, b)
-    {
-        let orderA = getTypeOrder(a);
-        let orderB = getTypeOrder(b);
-        if (orderA != orderB)
-            return orderA - orderB;
-
-        let scoreA = getItemScore(a);
-        let scoreB = getItemScore(b);
-        if (scoreA != scoreB)
-            return scoreB - scoreA;
-
-        if (a.label < b.label)
-            return -1;
-        else if (a.label > b.label)
-            return 1;
-
-        return 0;
+        if (symbol instanceof typedb.DBProperty)
+        {
+            if (!categories.includes('data') || !matchesSearchSource(symbol.declaredModule, source))
+                return;
+            let visibility = memberVisibility(symbol);
+            if (!includeNonPublic && visibility != 'public')
+                return;
+            let namespaceName = namespace.isRootNamespace() ? '' : namespace.getQualifiedNamespace();
+            members.push({
+                name: symbol.name,
+                qualifiedName: namespaceName ? `${namespaceName}::${symbol.name}` : symbol.name,
+                kind: 'globalVariable',
+                declaration: symbol.format(namespaceName ? `${namespaceName}::` : ''),
+                ownerQualifiedName,
+                source: symbol.declaredModule ? 'script' : 'native',
+                visibility,
+                ...(includeDocs && normalizeMemberDocumentation(symbol.documentation) ? { documentation: normalizeMemberDocumentation(symbol.documentation) } : {}),
+                isCallable: false
+            });
+            return;
+        }
+        if (symbol instanceof typedb.DBType && categories.includes('type') && matchesSearchSource(symbol.declaredModule, source))
+            members.push(projectNestedType(symbol, ownerQualifiedName, includeDocs));
     });
+    return members.sort(compareMembers);
+}
 
-    return list;
+export function GetAPISymbolMembers(payload: unknown) : GetAPISymbolMembersResult
+{
+    if (!payload || typeof payload != 'object' || Array.isArray(payload))
+        return invalidMembers('Invalid params. Provide a member query object.');
+    let record = payload as Record<string, unknown>;
+    let name = typeof record.name == 'string' ? record.name.trim() : '';
+    if (!name)
+        return invalidMembers("Invalid params. 'name' must be a non-empty string.");
+    try
+    {
+        let source = normalizeStrictSource(record.source);
+        let ownerKind = normalizeOwnerKind(record.ownerKind);
+        let categories = normalizeMemberCategories(record.members);
+        let includeInherited = normalizeStrictBoolean(record.includeInherited, 'includeInherited');
+        let includeDocs = normalizeStrictBoolean(record.includeDocs, 'includeDocs');
+        let includeNonPublic = normalizeStrictBoolean(record.includeNonPublic, 'includeNonPublic');
+        let limit = normalizeMembersLimit(record.limit);
+        let offset = normalizeMembersOffset(record.offset);
+        if (categories.length == 1 && categories[0] == 'constructor' && ownerKind == 'namespace')
+            return invalidMembers('Invalid params. constructor members require a type owner.');
+
+        let exact = GetAPIExactSymbols({ name, source, includeDocs: false, includeNonPublic: true });
+        if ('error' in exact)
+            return exact.error.code == 'InvalidParams' ? invalidMembers(exact.error.message) : { ok: false, error: exact.error };
+        let owners = exact.data.symbols.filter((symbol) =>
+            (ownerKind != 'type' && symbol.kind == 'namespace' && !(categories.length == 1 && categories[0] == 'constructor'))
+            || (ownerKind != 'namespace' && (symbol.kind == 'class' || symbol.kind == 'struct' || symbol.kind == 'enum'))
+        );
+        if (owners.length == 0)
+            return invalidMembers(`API member target is not an eligible namespace or type owner: ${name}`);
+        let qualifiedNames = [...new Set(owners.map((owner) => owner.qualifiedName))];
+        if (qualifiedNames.length > 1)
+        {
+            return { ok: true, data: { requestedName: name, found: true, symbols: owners, groups: [] } };
+        }
+
+        let groups: Extract<GetAPISymbolMembersResult, { ok: true }>['data']['groups'] = [];
+        for (let owner of owners)
+        {
+            if (owner.kind == 'namespace')
+            {
+                let namespace = typedb.LookupNamespace(null, owner.qualifiedName);
+                if (!namespace)
+                    continue;
+                let items = collectNamespaceMembers(namespace, owner.qualifiedName, source, categories, includeDocs, includeNonPublic);
+                groups.push({
+                    owner: 'namespace',
+                    ownerQualifiedName: owner.qualifiedName,
+                    ownerKind: 'namespace',
+                    ownerSource: owner.source,
+                    members: paginateMemberItems(items, offset, limit)
+                });
+                continue;
+            }
+            let dbType = qualifiedTypeLookup(owner.qualifiedName);
+            if (!dbType)
+                continue;
+            let items = collectTypeMembers(dbType, categories, includeInherited, includeDocs, includeNonPublic);
+            groups.push({
+                owner: 'type',
+                ownerQualifiedName: owner.qualifiedName,
+                ownerKind: owner.kind as 'class' | 'struct' | 'enum',
+                ownerSource: owner.source,
+                members: paginateMemberItems(items, offset, limit)
+            });
+        }
+        if (groups.length != owners.length)
+            return { ok: false, error: { code: 'NotFound', message: `API member owner could not be resolved: ${name}; resolved ${groups.map((group) => group.owner).join(',')} from ${owners.map((owner) => owner.kind).join(',')}.` } };
+        return { ok: true, data: { requestedName: name, found: true, symbols: owners, groups } };
+    }
+    catch (error)
+    {
+        return invalidMembers(error instanceof Error ? error.message : String(error));
+    }
+}
+
+export type GetAPIClassHierarchyParams = {
+    name: string;
+    source?: ApiSearchSource;
+    maxSuperDepth?: number;
+    maxSubDepth?: number;
+    maxSubBreadth?: number;
+};
+
+type ApiHierarchySource = ReturnType<typeof getScriptClassSourceInfo>;
+
+export type GetAPIClassHierarchyResult = {
+    ok: true;
+    data: {
+        requestedName: string;
+        found: true;
+        root: string;
+        qualifiedName: string;
+        superClasses: string[];
+        derivedByParent: Record<string, string[]>;
+        sourceByClass: Record<string, ApiHierarchySource>;
+        limits: { maxSuperDepth: number; maxSubDepth: number; maxSubBreadth: number };
+        truncated: { superDepth: boolean; subDepth: boolean; subBreadth: boolean };
+        omitted: { superDepth: number; subDepth: number; subBreadth: number; subBreadthByClass: Record<string, number> };
+    };
+} | {
+    ok: false;
+    error: { code: 'InvalidParams' | 'NotFound'; message: string };
+};
+
+function normalizeHierarchyLimit(value: unknown, fallback: number, name: string) : number
+{
+    if (value === undefined)
+        return fallback;
+    if (typeof value != 'number' || !Number.isInteger(value) || value < 0)
+        throw new Error(`Invalid params. '${name}' must be a non-negative integer.`);
+    return value;
+}
+
+function hierarchyId(dbType: typedb.DBType) : string
+{
+    return `${sourceOfType(dbType)}:${dbType.getQualifiedTypenameInNamespace(null)}`;
+}
+
+export function GetAPIClassHierarchy(payload: unknown) : GetAPIClassHierarchyResult
+{
+    if (!payload || typeof payload != 'object' || Array.isArray(payload))
+        return { ok: false, error: { code: 'InvalidParams', message: 'Invalid params. Provide a hierarchy query object.' } };
+    let record = payload as Record<string, unknown>;
+    let name = typeof record.name == 'string' ? record.name.trim() : '';
+    if (!name)
+        return { ok: false, error: { code: 'InvalidParams', message: "Invalid params. 'name' must be a non-empty string." } };
+    try
+    {
+        let source = normalizeStrictSource(record.source);
+        let maxSuperDepth = normalizeHierarchyLimit(record.maxSuperDepth, 3, 'maxSuperDepth');
+        let maxSubDepth = normalizeHierarchyLimit(record.maxSubDepth, 2, 'maxSubDepth');
+        let maxSubBreadth = normalizeHierarchyLimit(record.maxSubBreadth, 10, 'maxSubBreadth');
+        let exact = GetAPIExactSymbols({ name, kind: 'class', source, includeNonPublic: true });
+        if ('error' in exact)
+            return { ok: false, error: exact.error };
+        let qualifiedNames = [...new Set(exact.data.symbols.map((symbol) => symbol.qualifiedName))];
+        if (qualifiedNames.length != 1)
+            return { ok: false, error: { code: 'InvalidParams', message: `Ambiguous class name: ${name}. Use a qualified name.` } };
+        let root = qualifiedTypeLookup(qualifiedNames[0]);
+        if (!root || !isClassType(root))
+            return { ok: false, error: { code: 'InvalidParams', message: `Type is not a concrete class: ${name}` } };
+        if (source != 'both' && sourceOfType(root) != source)
+            return { ok: false, error: { code: 'NotFound', message: `Class not found for source '${source}': ${name}` } };
+
+        let allTypes = [...typedb.GetAllTypesById().values()].filter(isClassType);
+        let childrenByParent = new Map<typedb.DBType, typedb.DBType[]>();
+        for (let candidate of allTypes)
+        {
+            let parent = resolveHierarchySuperType(candidate);
+            if (!parent)
+                continue;
+            let bucket = childrenByParent.get(parent);
+            if (!bucket)
+            {
+                bucket = [];
+                childrenByParent.set(parent, bucket);
+            }
+            if (!bucket.includes(candidate))
+                bucket.push(candidate);
+        }
+        for (let bucket of childrenByParent.values())
+            bucket.sort((left, right) => hierarchyId(left).localeCompare(hierarchyId(right)));
+
+        let sourceByClass: Record<string, ApiHierarchySource> = {};
+        sourceByClass[hierarchyId(root)] = getScriptClassSourceInfo(root);
+        let supers = new Array<string>();
+        let superSeen = new Set<typedb.DBType>([root]);
+        let current = root;
+        for (let depth = 0; depth < maxSuperDepth; depth += 1)
+        {
+            let parent = resolveHierarchySuperType(current);
+            if (!parent || superSeen.has(parent))
+                break;
+            superSeen.add(parent);
+            let id = hierarchyId(parent);
+            supers.push(id);
+            sourceByClass[id] = getScriptClassSourceInfo(parent);
+            current = parent;
+        }
+        let nextSuper = resolveHierarchySuperType(current);
+        let superTruncated = !!nextSuper && !superSeen.has(nextSuper);
+
+        let derivedByParent: Record<string, string[]> = {};
+        let breadthByClass: Record<string, number> = {};
+        let visited = new Set<typedb.DBType>([root]);
+        let depthTruncated = false;
+        let visit = (parent: typedb.DBType, depth: number) =>
+        {
+            let children = (childrenByParent.get(parent) ?? []).filter((child) => !visited.has(child));
+            if (depth <= 0)
+            {
+                if (children.length > 0)
+                    depthTruncated = true;
+                return;
+            }
+            let parentId = hierarchyId(parent);
+            if (children.length > maxSubBreadth)
+                breadthByClass[parentId] = children.length - maxSubBreadth;
+            let kept = children.slice(0, maxSubBreadth);
+            if (kept.length > 0)
+                derivedByParent[parentId] = [];
+            for (let child of kept)
+            {
+                visited.add(child);
+                let childId = hierarchyId(child);
+                derivedByParent[parentId].push(childId);
+                sourceByClass[childId] = getScriptClassSourceInfo(child);
+                visit(child, depth - 1);
+            }
+        };
+        visit(root, maxSubDepth);
+        let breadthOmitted = Object.values(breadthByClass).reduce((sum, count) => sum + count, 0);
+        let rootId = hierarchyId(root);
+        return {
+            ok: true,
+            data: {
+                requestedName: name,
+                found: true,
+                root: rootId,
+                qualifiedName: root.getQualifiedTypenameInNamespace(null),
+                superClasses: supers,
+                derivedByParent,
+                sourceByClass,
+                limits: { maxSuperDepth, maxSubDepth, maxSubBreadth },
+                truncated: { superDepth: superTruncated, subDepth: depthTruncated, subBreadth: breadthOmitted > 0 },
+                omitted: {
+                    superDepth: superTruncated ? 1 : 0,
+                    subDepth: depthTruncated ? 1 : 0,
+                    subBreadth: breadthOmitted,
+                    subBreadthByClass: breadthByClass
+                }
+            }
+        };
+    }
+    catch (error)
+    {
+        return { ok: false, error: { code: 'InvalidParams', message: error instanceof Error ? error.message : String(error) } };
+    }
 }
 
 function isNamespaceApiEmpty(nsType : typedb.DBNamespace) : boolean
@@ -1739,4 +1552,9 @@ function isNamespaceApiEmpty(nsType : typedb.DBNamespace) : boolean
 function shouldSkipApiFunction(func : typedb.DBMethod) : boolean
 {
     return false;
+}
+
+function isInternalApiSymbolName(name: string | undefined | null) : boolean
+{
+    return typeof name == "string" && name.startsWith("__");
 }

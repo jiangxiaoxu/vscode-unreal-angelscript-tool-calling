@@ -20,10 +20,10 @@
 
 ## English
 
-This fork keeps LM tools and related contract/formatter features, while reducing long-term merge cost against `upstream/master`.
+This fork keeps a reusable language-server API query core while reducing long-term merge cost against `upstream/master`.
 
 The default strategy is layered compatibility:
-- keep fork-only behavior near adapter, contract, formatter, and query boundaries
+- keep fork-only behavior near request, contract, and query boundaries
 - keep upstream-sensitive entrypoints thin
 - prefer additive public API evolution over replacement
 
@@ -48,20 +48,15 @@ Cautious / change deliberately:
 Boundary / preferred expansion area:
 - `extension/src/apiPanel.ts`
 - `extension/src/scriptRoots.ts`
-- `extension/src/toolRegistry.ts`
-- `extension/src/toolShared.ts`
-- `extension/src/toolTextFormatter.ts`
-- `extension/src/toolResultTransport.ts`
-- `extension/src/toolContractUtils.ts`
-- `extension/src/angelscriptApiSearch.ts`
 - `language-server/src/apiRequestHandlers.ts`
 - `language-server/src/workspaceLayout.ts`
 - `language-server/src/unrealCacheController.ts`
 - `language-server/src/symbolResolve.ts`
+- `language-server/src/api_query_engine.ts`
 - `language-server/src/api_search.ts`
 - `language-server/src/api_docs.ts`
+- `language-server/src/__tests__/apiQueryCore.test.ts`
 - `language-server/src/__tests__/apiSearch.test.ts`
-- `language-server/src/__tests__/getTypeMembers.test.ts`
 - `language-server/src/__tests__/symbolResolve.test.ts`
 - `language-server/src/__tests__/workspaceLayout.test.ts`
 
@@ -72,25 +67,23 @@ Parser/database/core files should not be modified for fork-only features by defa
 - `language-server/src/references.ts`
 
 ### Public Contract Rules
-All `angelscript_*` tool contracts should evolve additively by default:
+Fork-owned API query requests should evolve additively by default:
 - add optional request fields
 - add optional response fields
-- add optional notices or output modes
+- add optional notices
 
 Do not make these changes in place unless a new opt-in path exists:
 - rename or remove public fields
 - flip default behavior for `filePath`, line/character indexing, or default search mode
-- replace structured output with text-only output, or the reverse
+- replace structured output with an incompatible shape
 
 If a semantic break is unavoidable, add either:
 - a new opt-in flag, or
-- a new `v2`-style tool name
+- a new versioned request method
 
 ### Commit Hygiene
 Keep each commit focused on one dimension only:
 - contract
-- formatter
-- transport
 - search behavior
 - docs
 - CI
@@ -113,7 +106,7 @@ Run these checks before risky maintenance work:
 Use this quick checklist during review:
 - Did new fork work stay in boundary files when possible?
 - Were frozen files touched only for bugfixes or unavoidable integration?
-- Did any `angelscript_*` schema or activation/config behavior change?
+- Did any fork-owned request schema or activation/config behavior change?
 - Do `README.md` and `CHANGELOG.md` still match the current contract?
 
 ### Upstream Merge Routine
@@ -143,10 +136,10 @@ If a change looks generally useful and low-coupling, consider extracting it into
 
 ## 中文
 
-这个 fork 会继续保留 LM tools 及其 contract/formatter 能力,同时尽量降低与 `upstream/master` 的长期合并成本.
+这个 fork 会继续保留可复用的 language-server API query core,同时尽量降低与 `upstream/master` 的长期合并成本.
 
 默认采用分层兼容策略:
-- 把 fork 专属行为尽量留在 adapter、contract、formatter、query 边界层
+- 把 fork 专属行为尽量留在 request、contract、query 边界层
 - 保持 upstream 敏感入口足够薄
 - 公开 API 优先采用加法式演进,不要直接替换旧语义
 
@@ -171,20 +164,15 @@ Cautious / 谨慎改:
 Boundary / 可继续扩展:
 - `extension/src/apiPanel.ts`
 - `extension/src/scriptRoots.ts`
-- `extension/src/toolRegistry.ts`
-- `extension/src/toolShared.ts`
-- `extension/src/toolTextFormatter.ts`
-- `extension/src/toolResultTransport.ts`
-- `extension/src/toolContractUtils.ts`
-- `extension/src/angelscriptApiSearch.ts`
 - `language-server/src/apiRequestHandlers.ts`
 - `language-server/src/workspaceLayout.ts`
 - `language-server/src/unrealCacheController.ts`
 - `language-server/src/symbolResolve.ts`
+- `language-server/src/api_query_engine.ts`
 - `language-server/src/api_search.ts`
 - `language-server/src/api_docs.ts`
+- `language-server/src/__tests__/apiQueryCore.test.ts`
 - `language-server/src/__tests__/apiSearch.test.ts`
-- `language-server/src/__tests__/getTypeMembers.test.ts`
 - `language-server/src/__tests__/symbolResolve.test.ts`
 - `language-server/src/__tests__/workspaceLayout.test.ts`
 
@@ -195,25 +183,23 @@ parser/database/core 文件默认不要为了 fork-only 功能去改,包括但�
 - `language-server/src/references.ts`
 
 ### 公开契约规则
-所有 `angelscript_*` tool contract 默认只允许加法式演进:
+fork-owned API query request 默认只允许加法式演进:
 - 新增 optional 请求字段
 - 新增 optional 响应字段
-- 新增 optional notice 或 output mode
+- 新增 optional notice
 
 以下变化不要直接原地修改,除非已经提供新的 opt-in 路径:
 - 重命名或删除公开字段
 - 修改 `filePath`、line/character 基准、默认 search mode 这类默认行为
-- 把 structured output 改成 text-only,或反过来
+- 把 structured output 改成不兼容的结构
 
 如果确实必须引入语义破坏,请优先采用:
 - 新增显式 opt-in 开关,或
-- 新增 `v2` 风格 tool 名称
+- 新增 versioned request method
 
 ### 提交卫生
 每个 commit 只覆盖一个维度:
 - contract
-- formatter
-- transport
 - search behavior
 - docs
 - CI
@@ -236,7 +222,7 @@ fork-only 提交推荐前缀:
 评审时至少快速确认:
 - 新的 fork 能力是否尽量留在 boundary 文件?
 - Frozen 文件是否只因 bugfix 或无法避免的集成需求而被修改?
-- `angelscript_*` schema 或 activation/config 行为是否发生变化?
+- fork-owned request schema 或 activation/config 行为是否发生变化?
 - `README.md` 和 `CHANGELOG.md` 是否仍与当前 contract 一致?
 
 ### 上游合并流程

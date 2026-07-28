@@ -8,8 +8,6 @@
 [Quick Start](#quick-start)
 [Core Features](#core-features)
 [Offline Cache](#offline-cache)
-[Language Model Tools](#language-model-tools)
-[LM Tool Templates](#lm-tool-templates)
 [Build](#build)
 [Known Limits](#known-limits)
 [Fork Maintenance](#fork-maintenance)
@@ -21,8 +19,6 @@
 [快速开始](#快速开始)
 [核心功能](#核心功能)
 [离线缓存](#离线缓存)
-[Language Model Tools](#language-model-tools-1)
-[LM Tool Templates](#lm-tool-templates-1)
 [构建](#构建)
 [已知限制](#已知限制)
 [维护策略](#维护策略)
@@ -33,7 +29,7 @@
 ## English
 
 ### Overview
-This extension provides language server and debugger support for UnrealEngine-Angelscript, with additional LM tools in this fork.
+This extension provides language server and debugger support for UnrealEngine-Angelscript.
 
 ### Quick Start
 1. Use an Unreal Editor build with Angelscript enabled.
@@ -42,7 +38,6 @@ This extension provides language server and debugger support for UnrealEngine-An
 
 Notes:
 - Core language features run across all resolved `Script` roots from the current workspace folders.
-- LM tool `filePath` inputs and outputs use normalized absolute paths.
 - Supported workspace layouts are strict: the root must be `Script` itself, or contain `<workspace>/Script`.
 - Startup indexing scans only resolved `Script` roots (`Script/**/*.as`), not the entire workspace tree.
 - Runtime file watching and incremental parse/update handling are also restricted to resolved `Script` roots only.
@@ -68,58 +63,12 @@ The extension restores cache data at startup to provide baseline capabilities wi
 - Corrupt or version-mismatched cache is ignored safely
 - Write strategy: temp file + fsync + rename
 
-### Language Model Tools
-<!-- BEGIN GENERATED:LM_TOOLS_EN -->
-Exposed tools:
-- `angelscript_searchApi`
-- `angelscript_resolveSymbolAtPosition`
-- `angelscript_getTypeMembers`
-- `angelscript_getClassHierarchy`
-- `angelscript_findReferences`
-
-Tool notes:
-- `angelscript_searchApi`: Requires `query`. Default `mode` is `smart`; use `regex` only with `/pattern/flags`. `kinds` is a hard filter. `symbolLevel=type` still lets members or mixins match, but only returns owner `class|struct|enum` results. `scope` narrows a known namespace or type before ranking, `includeInheritedFromScope` only changes class scopes, and `includeDocs=true` adds docs without changing ranking.
-- `angelscript_resolveSymbolAtPosition`: Requires absolute `filePath` plus 1-based `position`. `includeDocumentation` defaults to `true`.
-- `angelscript_getTypeMembers`: Requires exact `name`; `namespace` only disambiguates collisions. `type.description` is always returned, while member docs need `includeDocs=true`.
-- `angelscript_getClassHierarchy`: Requires exact class `name`. `maxSuperDepth`, `maxSubDepth`, and `maxSubBreadth` bound the returned tree and default to `3/2/10`.
-- `angelscript_findReferences`: Requires absolute `filePath` plus 1-based `position`. `limit` defaults to `30` and caps results at `200`.
-<!-- END GENERATED:LM_TOOLS_EN -->
-
-Output rules:
-- This repository now implements VS Code `Language Model Tool` only.
-- There is no built-in MCP server/runtime in this repository.
-- LM tools always return human-readable text. Structured JSON is optional.
-- `UnrealAngelscript.languageModelTools.outputMode` controls LM output mode:
-  - `text-only` (default)
-  - `text+structured`
-- Human-readable success text now defaults to a code-first style:
-  - stable title line
-  - declarations/snippets as the primary body
-  - `/** ... */` for normalized docs
-  - `// ...` comments for owner, origin, range, scope, and truncation metadata
-  - source previews rendered as `lineNumber + ':'/'-' + 4 spaces + source text`
-- Human-readable text is always returned.
-- Structured JSON is returned only when `UnrealAngelscript.languageModelTools.outputMode=text+structured`.
-- `text+structured` and `text-only` do not change the text style.
-- Input and output `filePath` use normalized absolute paths.
-- For line-based results, text output includes source previews (max 20 lines, truncated with `... (truncated)`, fallback `<source unavailable>`).
-
 ### Build
 - `npm install` installs the root dependencies and the nested `extension` and `language-server` packages via `postinstall`.
 - `npm run compile` builds both the extension bundle and the language server bundle.
 - `npm run watch` watches both bundles during development.
 - `npm test` runs the full test suite.
-- `npm run test:fork-boundary` runs the fork-boundary regression suite for LM tool contracts and workspace layout behavior.
-- `npm run sync:lm-tools` refreshes generated LM tool documentation in `README.md`, `package.json`, and `face-ai-report.md`.
-
-### LM Tool Templates
-Detailed per-tool input/output templates live in [lm-tool-templates.md](./lm-tool-templates.md).
-
-Use that document as the maintained reference for:
-- sample inputs
-- success `text` shape
-- success `json` shape
-- representative error outputs
+- `npm run test:fork-boundary` runs the fork-boundary regression suite for the language-server API query core and workspace layout behavior.
 
 ### Known Limits
 - When engine is disconnected, details depend on cached DebugDatabase and available `doc` fields.
@@ -142,7 +91,7 @@ https://angelscript.hazelight.se
 ## 中文
 
 ### 概览
-这是 UnrealEngine-Angelscript 的 VS Code 扩展分支版本,提供语言服务与调试能力,并新增 LM tools 支持.
+这是 UnrealEngine-Angelscript 的 VS Code 扩展分支版本,提供语言服务与调试能力.
 
 ### 快速开始
 1. 使用启用 Angelscript 的 Unreal Editor 版本.
@@ -151,7 +100,6 @@ https://angelscript.hazelight.se
 
 说明:
 - 核心语言功能会覆盖当前 workspace folders 中所有解析成功的 `Script` 根目录.
-- LM tool 的 `filePath` 输入和输出统一使用标准化后的绝对路径.
 - 工作区兼容策略为严格模式: 根目录必须是 `Script` 本身,或包含 `<workspace>/Script`.
 - 启动索引只扫描解析后的 `Script` 根目录(`Script/**/*.as`),不会全盘递归扫描工作区.
 - 运行期文件监听与增量解析/更新同样严格限制在解析后的 `Script` 根目录内.
@@ -177,58 +125,12 @@ https://angelscript.hazelight.se
 - 缓存损坏或版本不匹配会被安全忽略
 - 写入策略: 临时文件 + fsync + rename
 
-### Language Model Tools
-<!-- BEGIN GENERATED:LM_TOOLS_ZH -->
-提供以下工具:
-- `angelscript_searchApi`
-- `angelscript_resolveSymbolAtPosition`
-- `angelscript_getTypeMembers`
-- `angelscript_getClassHierarchy`
-- `angelscript_findReferences`
-
-工具说明:
-- `angelscript_searchApi`: 需要 `query`. `mode` 默认是 `smart`, 只有明确提供 `/pattern/flags` 时才使用 `regex`. `kinds` 是硬过滤. `symbolLevel=type` 允许成员或 mixin 参与命中, 但最终只返回 owner `class|struct|enum`. `scope` 会在排序前收窄已知 namespace 或 type, `includeInheritedFromScope` 只改变 class scope, `includeDocs=true` 只补全文档而不改变排序.
-- `angelscript_resolveSymbolAtPosition`: 需要绝对路径 `filePath` 和 1-based 的 `position`. `includeDocumentation` 默认是 `true`.
-- `angelscript_getTypeMembers`: 需要精确 `name`; `namespace` 只用于消除重名歧义. `type.description` 始终返回, 成员文档需要 `includeDocs=true`.
-- `angelscript_getClassHierarchy`: 需要精确 class `name`. `maxSuperDepth`, `maxSubDepth` 和 `maxSubBreadth` 用来裁剪返回层级, 默认值是 `3/2/10`.
-- `angelscript_findReferences`: 需要绝对路径 `filePath` 和 1-based 的 `position`. `limit` 默认 `30`, 最大 `200`.
-<!-- END GENERATED:LM_TOOLS_ZH -->
-
-输出规则:
-- 当前仓库只实现 VS Code `Language Model Tool`.
-- 仓库内不再提供内建 MCP server/runtime.
-- LM tool 始终返回可读文本,结构化 JSON 为可选附加内容.
-- `UnrealAngelscript.languageModelTools.outputMode` 用于控制 LM 输出模式:
-  - `text-only`(默认)
-  - `text+structured`
-- 可读成功文本默认采用 code-first 风格:
-  - 稳定标题行
-  - 以声明式文本或源码片段作为主体
-  - 文档统一归一化后渲染为 `/** ... */`
-  - owner、来源、range、scope、truncation 等元信息统一使用 `// ...` 注释
-  - 源码预览仍使用 `行号 + ':'/'-' + 4 个空格 + 源码`
-- LM tool 始终返回可读文本.
-- 只有在 `UnrealAngelscript.languageModelTools.outputMode=text+structured` 时才会附带结构化 JSON.
-- `text+structured` 和 `text-only` 不会改变文本风格.
-- 输入和输出 `filePath` 统一使用标准化后的绝对路径.
-- 涉及行号/范围的结果会直接在文本中渲染源码片段(最多 20 行,超出追加 `... (truncated)`,不可读时为 `<source unavailable>`).
-
 ### 构建
 - `npm install` 会安装根目录依赖,并通过 `postinstall` 安装嵌套的 `extension` 和 `language-server` 包依赖.
 - `npm run compile` 会同时构建 extension bundle 和 language server bundle.
 - `npm run watch` 会在开发时同时监听这两个 bundle.
 - `npm test` 会运行完整测试集.
-- `npm run test:fork-boundary` 会运行 fork boundary 回归测试,重点覆盖 LM tool contract 和 workspace layout 行为.
-- `npm run sync:lm-tools` 会刷新 `README.md`、`package.json` 和 `face-ai-report.md` 中生成的 LM tool 文档.
-
-### LM Tool Templates
-逐 tool 的输入/输出模板文档见 [lm-tool-templates.md](./lm-tool-templates.md).
-
-该文档用于持续维护:
-- 输入示例
-- 成功 `text` 形态
-- 成功 `json` 形态
-- 代表性错误输出
+- `npm run test:fork-boundary` 会运行 fork boundary 回归测试,重点覆盖 language-server API query core 和 workspace layout 行为.
 
 ### 已知限制
 - 引擎断开时,详情能力依赖缓存 DebugDatabase 与 `doc` 字段可用性.
@@ -245,4 +147,3 @@ https://angelscript.hazelight.se
 ### 上游
 Language Server and Debug Adapter for UnrealEngine-Angelscript:
 https://angelscript.hazelight.se
-

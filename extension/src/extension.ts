@@ -17,7 +17,6 @@ import {
     GetModuleForSymbolRequest,
     ProvideInlineValuesRequest
 } from './apiRequests';
-import { registerLmTools } from './toolRegistry';
 import { registerApiPanel } from './apiPanel';
 import { createScriptFileEventWatchers } from './scriptRoots';
 
@@ -265,8 +264,6 @@ export function activate(context: ExtensionContext)
 
     console.log("Done activating angelscript extension");
     registerApiPanel(context, client);
-    registerLmTools(context, client, startedClient);
-
 }
 
 class ASConfigurationProvider implements vscode.DebugConfigurationProvider

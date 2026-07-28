@@ -1199,8 +1199,6 @@ connection.onRequest("angelscript/getModuleForSymbol", (...params: any[]) : stri
 
 registerApiRequestHandlers({
     connection,
-    getAndParseModule: GetAndParseModule,
-    getModuleName: getModuleName,
     isUnrealConnected: () => UnrealConnected
 });
 

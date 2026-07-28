@@ -1,13 +1,20 @@
 import * as typedb from './database';
+import { createHash } from 'node:crypto';
 
 export type ApiSearchMode = 'smart' | 'regex';
 export type ApiSearchSource = 'native' | 'script' | 'both';
 export type ApiSearchMatchSource = 'native' | 'script';
-export type ApiSearchKind = 'class' | 'struct' | 'enum' | 'method' | 'function' | 'property' | 'globalVariable';
+export type ApiSearchKind = 'namespace' | 'class' | 'struct' | 'enum' | 'constructor' | 'method' | 'function' | 'property' | 'globalVariable';
+export type ApiSearchVisibility = 'public' | 'protected' | 'private';
 export type ApiSearchScopeKind = 'namespace' | 'class' | 'struct' | 'enum';
 export type ApiSearchScopeRelationship = 'declared' | 'inherited' | 'mixin';
 export type ApiSearchSymbolLevel = 'all' | 'type';
 export type ApiSearchMatchedBy = 'self' | 'member' | 'mixin';
+
+export type ApiSearchDocSource = {
+    kind: 'nativeClass';
+    name: string;
+};
 
 export type GetAPISearchParams = {
     query: string;
@@ -17,8 +24,10 @@ export type GetAPISearchParams = {
     kinds?: ApiSearchKind[];
     source?: ApiSearchSource;
     scope?: string;
+    declaredOnly?: boolean;
     includeInheritedFromScope?: boolean;
     includeDocs?: boolean;
+    includePrivateOrProtectedMembers?: boolean;
     symbolLevel?: ApiSearchSymbolLevel;
 };
 
@@ -49,13 +58,18 @@ export type GetAPISearchResolvedScope = {
 
 export type GetAPISearchMatch = {
     qualifiedName: string;
+    shortName: string;
+    namespaceQualifiedName: string;
     kind: ApiSearchKind;
     signature: string;
     matchReason?: SearchMatchReason;
     summary?: string;
     documentation?: string;
+    docSource?: ApiSearchDocSource;
     containerQualifiedName?: string;
     source: ApiSearchMatchSource;
+    visibility: ApiSearchVisibility;
+    isCallable?: boolean;
     isMixin?: boolean;
     scopeRelationship?: ApiSearchScopeRelationship;
     scopeDistance?: number;
@@ -63,6 +77,35 @@ export type GetAPISearchMatch = {
     matchedByQualifiedName?: string;
     matchedByKind?: ApiSearchKind;
     detailsData?: unknown;
+    ownerQualifiedName?: string;
+    symbolId?: string;
+    args?: ApiConstructorArgument[];
+    requiredArgumentCount?: number;
+};
+
+export type ApiConstructorArgument = {
+    type: string;
+    name?: string;
+    defaultValue?: string;
+};
+
+export type ConstructorDBArgMetadata = {
+    constructorConst?: boolean;
+    constructorModifier?: 'in' | 'out' | 'inout';
+};
+
+export type ApiConstructorProjection = {
+    kind: 'constructor';
+    name: string;
+    qualifiedName: string;
+    ownerQualifiedName: string;
+    declaration: string;
+    args: ApiConstructorArgument[];
+    source: ApiSearchMatchSource;
+    isCallable: true;
+    symbolId: string;
+    requiredArgumentCount: number;
+    documentation?: string;
 };
 
 export type GetAPISearchMatchCounts = {
@@ -116,6 +159,7 @@ type NormalizedSearchParams = {
     scope?: string;
     includeInheritedFromScopeMode: ScopeInheritanceMode;
     includeDocs: boolean;
+    includePrivateOrProtectedMembers: boolean;
     symbolLevel: ApiSearchSymbolLevel;
     typeResultKinds?: Set<ApiSearchTypeKind>;
     smartQueries?: ParsedSmartQuery[];
@@ -151,9 +195,11 @@ type SearchIndexEntry = {
     signature: string;
     summary?: string;
     documentation?: string;
+    docSource?: ApiSearchDocSource;
     containerQualifiedName?: string;
     source: ApiSearchMatchSource;
     filterSource: ApiSearchSource;
+    visibility: ApiSearchVisibility;
     detailsData?: unknown;
     shortName: string;
     shortNameLower: string;
@@ -166,6 +212,10 @@ type SearchIndexEntry = {
     mixinTargetQualifiedName?: string;
     qualifiedAliasTexts: SearchTextVariant[];
     overrideKey?: string;
+    ownerQualifiedName?: string;
+    symbolId?: string;
+    args?: ApiConstructorArgument[];
+    requiredArgumentCount?: number;
 };
 
 type SearchIndex = {
@@ -253,11 +303,13 @@ type SearchMatchOutcome = {
 };
 
 const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 1000;
+// Public CLI 仍限制 1000; cache adapter 需要完整排序结果以依次完成 public projection, 去重和 offset 分页.
+const MAX_LIMIT = 1_000_000;
 const DEFAULT_OFFSET = 0;
 const QUERY_TOO_SHORT_THRESHOLD = 2;
 
 const allKinds = new Set<ApiSearchKind>([
+    'namespace',
     'class',
     'struct',
     'enum',
@@ -273,32 +325,227 @@ const typeOnlyKinds = new Set<ApiSearchTypeKind>([
 ]);
 
 const kindOrder: Record<ApiSearchKind, number> = {
-    class: 0,
-    struct: 1,
-    enum: 2,
-    method: 3,
-    function: 4,
-    property: 5,
-    globalVariable: 6
+    namespace: 0,
+    class: 1,
+    struct: 2,
+    enum: 3,
+    constructor: 4,
+    method: 5,
+    function: 6,
+    property: 7,
+    globalVariable: 8
 };
 
-const kindAliases: Record<string, ApiSearchKind> = {
-    class: 'class',
-    struct: 'struct',
-    enum: 'enum',
-    method: 'method',
-    function: 'function',
-    property: 'property',
-    globalvariable: 'globalVariable'
-};
+const kindAliases = new Map<string, ApiSearchKind>([
+    ['namespace', 'namespace'],
+    ['class', 'class'],
+    ['struct', 'struct'],
+    ['enum', 'enum'],
+    ['constructor', 'constructor'],
+    ['method', 'method'],
+    ['function', 'function'],
+    ['property', 'property'],
+    ['globalvariable', 'globalVariable']
+]);
 
 let cachedSearchIndex: SearchIndex | null = null;
 let cachedDirtyTypeCacheId = -1;
+
+function normalizeSearchText(value: string) : string
+{
+    return String(value ?? '').toLocaleLowerCase('und');
+}
 
 export function InvalidateAPISearchCache()
 {
     cachedSearchIndex = null;
     cachedDirtyTypeCacheId = -1;
+}
+
+export function ResolveConstructorOwnerType(method: typedb.DBMethod) : typedb.DBType | null
+{
+    if (method.containingType)
+        return method.containingType;
+
+    if (method.namespace)
+    {
+        let shadowed = method.namespace.getShadowedType();
+        if (shadowed)
+            return shadowed;
+    }
+
+    if (method.returnType && method.returnType != 'void')
+    {
+        let lookupNamespace = method.namespace;
+        if (lookupNamespace && lookupNamespace.isRootNamespace())
+            lookupNamespace = null;
+        let found = typedb.LookupType(lookupNamespace, method.returnType) ?? typedb.GetTypeByName(method.returnType);
+        if (found)
+            return found;
+    }
+
+    if (method.name && method.name != '$beh0')
+        return typedb.GetTypeByName(method.name);
+
+    return null;
+}
+
+export function CanonicalizeConstructorArgumentType(typeName: string) : string
+{
+    return String(typeName ?? '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/\s*&\s*(inout|in|out)\b/g, '&$1')
+        .replace(/\s*&\s*/g, '&')
+        .replace(/\s*@\s*/g, '@');
+}
+
+function constructorComparisonType(typeName: string) : string
+{
+    return CanonicalizeConstructorArgumentType(typeName)
+        .replace(/^const\s+/, '')
+        .replace(/\s+const$/, '')
+        .replace(/(?:&(?:inout|in|out)?|@)$/, '')
+        .trim();
+}
+
+export function IsCopyLikeConstructor(method: typedb.DBMethod, owner: typedb.DBType) : boolean
+{
+    if (!method.args || method.args.length != 1)
+        return false;
+
+    let argumentType = constructorComparisonType(method.args[0].typename);
+    let ownerQualifiedName = constructorComparisonType(owner.getQualifiedTypenameInNamespace(null));
+    let ownerShortName = constructorComparisonType(owner.name);
+    let templateSubTypes = Array.isArray(owner.templateSubTypes) ? owner.templateSubTypes : [];
+    let ownerTemplateName = templateSubTypes.length > 0
+        ? constructorComparisonType(`${ownerQualifiedName}<${templateSubTypes.join(',')}>`)
+        : '';
+    let ownerShortTemplateName = templateSubTypes.length > 0
+        ? constructorComparisonType(`${ownerShortName}<${templateSubTypes.join(',')}>`)
+        : '';
+    return argumentType == ownerQualifiedName
+        || argumentType == ownerShortName
+        || (!!ownerTemplateName && argumentType == ownerTemplateName)
+        || (!!ownerShortTemplateName && argumentType == ownerShortTemplateName);
+}
+
+export function IsEligibleStructConstructor(method: typedb.DBMethod, ownerOverride?: typedb.DBType | null) : boolean
+{
+    if (!method.isConstructor)
+        return false;
+    let owner = ownerOverride ?? ResolveConstructorOwnerType(method);
+    return !!owner
+        && owner.isStruct
+        && !owner.isDelegate
+        && !owner.isEvent
+        && !owner.isPrimitive
+        && !owner.isEnum
+        && !IsCopyLikeConstructor(method, owner);
+}
+
+function getSymbolVisibility(symbol: typedb.DBSymbol) : ApiSearchVisibility
+{
+    let visibleSymbol = symbol as typedb.DBSymbol & { isPrivate?: boolean; isProtected?: boolean };
+    if (visibleSymbol.isPrivate === true)
+        return 'private';
+    if (visibleSymbol.isProtected === true)
+        return 'protected';
+    return 'public';
+}
+
+export function IsPublicStructConstructor(method: typedb.DBMethod, ownerOverride?: typedb.DBType | null) : boolean
+{
+    return IsEligibleStructConstructor(method, ownerOverride)
+        && !method.isPrivate
+        && !method.isProtected;
+}
+
+export function BuildConstructorSymbolId(
+    source: ApiSearchMatchSource,
+    ownerQualifiedName: string,
+    argumentTypes: string[]
+) : string
+{
+    let identity = JSON.stringify([
+        'constructor',
+        source,
+        ownerQualifiedName,
+        argumentTypes.map(CanonicalizeConstructorArgumentType)
+    ]);
+    return createHash('sha256').update(identity, 'utf8').digest('hex');
+}
+
+export function BuildConstructorArgumentIdentityType(arg: typedb.DBArg) : string
+{
+    let metadata = arg as typedb.DBArg & ConstructorDBArgMetadata;
+    let identityType = CanonicalizeConstructorArgumentType(arg.typename);
+    if (metadata.constructorConst === true && !identityType.startsWith('const '))
+        identityType = `const ${identityType}`;
+    if (metadata.constructorModifier && !new RegExp(`&${metadata.constructorModifier}$`).test(identityType))
+    {
+        identityType = identityType.replace(/&(?:inout|in|out)?$/, '');
+        identityType += `&${metadata.constructorModifier}`;
+    }
+    return identityType;
+}
+
+export function ProjectConstructor(
+    method: typedb.DBMethod,
+    ownerOverride?: typedb.DBType | null
+) : ApiConstructorProjection | null
+{
+    let owner = ownerOverride ?? ResolveConstructorOwnerType(method);
+    if (!owner || !IsEligibleStructConstructor(method, owner))
+        return null;
+
+    let ownerQualifiedName = owner.getQualifiedTypenameInNamespace(null);
+    let args = (method.args ?? []).map((arg) : ApiConstructorArgument => ({
+        type: BuildConstructorArgumentIdentityType(arg),
+        ...(arg.name ? { name: arg.name } : {}),
+        ...(arg.defaultvalue != null ? { defaultValue: arg.defaultvalue } : {})
+    }));
+    let argumentDeclaration = args.map((arg) => {
+        let declaration = arg.type;
+        if (arg.name)
+            declaration += ` ${arg.name}`;
+        if (arg.defaultValue !== undefined)
+            declaration += ` = ${arg.defaultValue}`;
+        return declaration;
+    }).join(', ');
+    let source = getDeclaredSource(method.declaredModule);
+    let documentation = normalizeSearchDocumentation(method.findAvailableDocumentation());
+
+    return {
+        kind: 'constructor',
+        name: owner.name,
+        qualifiedName: `${ownerQualifiedName}.${owner.name}`,
+        ownerQualifiedName,
+        declaration: `${owner.name}(${argumentDeclaration})`,
+        args,
+        source,
+        isCallable: true,
+        symbolId: BuildConstructorSymbolId(source, ownerQualifiedName, (method.args ?? []).map(BuildConstructorArgumentIdentityType)),
+        requiredArgumentCount: method.getRequiredArgumentCount(),
+        ...(documentation ? { documentation } : {})
+    };
+}
+
+export function CompareConstructorProjections(
+    left: ApiConstructorProjection,
+    right: ApiConstructorProjection
+) : number
+{
+    if (left.requiredArgumentCount != right.requiredArgumentCount)
+        return left.requiredArgumentCount - right.requiredArgumentCount;
+    if (left.args.length != right.args.length)
+        return left.args.length - right.args.length;
+    let leftArgumentTypes = left.args.map((arg) => CanonicalizeConstructorArgumentType(arg.type)).join('\u0000');
+    let rightArgumentTypes = right.args.map((arg) => CanonicalizeConstructorArgumentType(arg.type)).join('\u0000');
+    let argumentTypeOrder = leftArgumentTypes.localeCompare(rightArgumentTypes);
+    if (argumentTypeOrder != 0)
+        return argumentTypeOrder;
+    return left.symbolId.localeCompare(right.symbolId);
 }
 
 export function GetAPISearch(payload: unknown) : GetAPISearchResult
@@ -383,10 +630,379 @@ export function GetAPISearch(payload: unknown) : GetAPISearchResult
     });
 }
 
+export type ApiQuerySource = ApiSearchSource;
+export type ApiQueryKind = ApiSearchKind;
+
+export type GetAPIQueryParams = {
+    query: string;
+    mode?: ApiSearchMode;
+    source?: ApiQuerySource;
+    kinds?: ApiQueryKind[];
+    scope?: string;
+    declaredOnly?: boolean;
+    includeDocs?: boolean;
+    includeNonPublic?: boolean;
+    symbolLevel?: ApiSearchSymbolLevel;
+    limit?: number;
+    offset?: number;
+};
+
+export type ApiQueryMatch = Omit<GetAPISearchMatch, 'kind' | 'source'> & {
+    kind: ApiQueryKind;
+    source: ApiQuerySource;
+};
+
+export type GetAPIQueryResult = {
+    ok: true;
+    data: {
+        query: string;
+        mode: ApiSearchMode;
+        matches: ApiQueryMatch[];
+        total: number;
+        returned: number;
+        limit: number;
+        offset: number;
+        omitted: number;
+        truncated: boolean;
+        notices?: GetAPISearchNotice[];
+        scopeLookup?: GetAPISearchScopeLookup;
+        scopeGroups?: Array<{
+            scope: GetAPISearchResolvedScope;
+            matches: ApiQueryMatch[];
+            totalMatches: number;
+            omittedMatches: number;
+        }>;
+        inheritedScopeOutcome?: ApiInheritedScopeOutcome;
+    };
+};
+
+export type GetAPIExactSymbolsParams = {
+    name: string;
+    kind?: ApiQueryKind;
+    source?: ApiQuerySource;
+    includeDocs?: boolean;
+    includeNonPublic?: boolean;
+    symbolId?: string;
+};
+
+export type GetAPIExactSymbolsResult = {
+    ok: true;
+    data: {
+        requestedName: string;
+        found: boolean;
+        symbols: ApiQueryMatch[];
+    };
+} | {
+    ok: false;
+    error: {
+        code: 'InvalidParams' | 'NotFound';
+        message: string;
+    };
+};
+
+function normalizeCoreBoolean(value: unknown, name: string, defaultValue = false) : boolean
+{
+    if (value === undefined)
+        return defaultValue;
+    if (typeof value !== 'boolean')
+        throw new ApiSearchValidationError(`Invalid params. '${name}' must be a boolean.`);
+    return value;
+}
+
+function normalizeCoreKinds(value: unknown) : ApiQueryKind[] | undefined
+{
+    if (value === undefined)
+        return undefined;
+    if (!Array.isArray(value) || value.length == 0)
+        throw new ApiSearchValidationError("Invalid params. 'kinds' must be a non-empty array.");
+    let result = new Array<ApiQueryKind>();
+    for (let item of value)
+    {
+        if (typeof item !== 'string')
+            throw new ApiSearchValidationError("Invalid params. 'kinds' entries must be strings.");
+        let kind = kindAliases.get(item.trim().toLowerCase());
+        if (!kind)
+            throw new ApiSearchValidationError(`Invalid params. Unsupported kind "${item}".`);
+        if (!result.includes(kind))
+            result.push(kind);
+    }
+    return result;
+}
+
+function rawKindsForCoreKinds(kinds: ApiQueryKind[] | undefined) : ApiSearchKind[] | undefined
+{
+    if (!kinds)
+        return undefined;
+    let raw = new Set<ApiSearchKind>();
+    for (let kind of kinds)
+    {
+        raw.add(kind);
+        if (kind == 'property')
+        {
+            raw.add('method');
+            raw.add('function');
+        }
+    }
+    return [...raw];
+}
+
+function getCorePresentationKind(match: GetAPISearchMatch) : ApiQueryKind
+{
+    if ((match.kind == 'method' || match.kind == 'function') && match.isCallable === false)
+        return 'property';
+    return match.kind;
+}
+
+function getCoreNamespaceSource(match: GetAPISearchMatch) : ApiQuerySource
+{
+    if (match.kind != 'namespace')
+        return match.source;
+    let namespace = typedb.LookupNamespace(null, match.qualifiedName);
+    if (!namespace)
+        return match.source;
+    return getNamespaceSource(namespace).filterSource;
+}
+
+function projectCoreMatch(match: GetAPISearchMatch) : ApiQueryMatch
+{
+    return {
+        ...match,
+        kind: getCorePresentationKind(match),
+        source: getCoreNamespaceSource(match)
+    };
+}
+
+function stableRecordIdentity(value: unknown) : string
+{
+    if (Array.isArray(value))
+        return `[${value.map(stableRecordIdentity).join(',')}]`;
+    if (value && typeof value == 'object')
+    {
+        let record = value as Record<string, unknown>;
+        return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableRecordIdentity(record[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value);
+}
+
+function dedupeCoreMatches(matches: ApiQueryMatch[]) : ApiQueryMatch[]
+{
+    let seen = new Set<string>();
+    let result = new Array<ApiQueryMatch>();
+    for (let match of matches)
+    {
+        let identity = stableRecordIdentity(match);
+        if (seen.has(identity))
+            continue;
+        seen.add(identity);
+        result.push(match);
+    }
+    return result;
+}
+
+export function GetAPIQuery(payload: unknown) : GetAPIQueryResult
+{
+    if (!payload || typeof payload != 'object' || Array.isArray(payload))
+        throw new ApiSearchValidationError("Invalid params. Provide a structured API query object.");
+    let record = payload as Record<string, unknown>;
+    let query = typeof record.query == 'string' ? record.query.trim() : '';
+    if (!query)
+        throw new ApiSearchValidationError("Invalid params. 'query' must be a non-empty string.");
+    let mode = normalizeSearchMode(record.mode);
+    let source = normalizeSource(record.source);
+    let kinds = normalizeCoreKinds(record.kinds);
+    let symbolLevel = normalizeSymbolLevel(record.symbolLevel);
+    if (symbolLevel == 'type' && kinds && kinds.some((kind) => !typeOnlyKinds.has(kind as ApiSearchTypeKind)))
+        throw new ApiSearchValidationError("Invalid params. 'kinds' only supports class, struct, or enum when 'symbolLevel' is 'type'.");
+    let declaredOnly = normalizeCoreBoolean(record.declaredOnly, 'declaredOnly');
+    let includeDocs = normalizeCoreBoolean(record.includeDocs, 'includeDocs');
+    let includeNonPublic = normalizeCoreBoolean(record.includeNonPublic, 'includeNonPublic');
+    let limit = record.limit === undefined ? 20 : normalizeLimit(record.limit);
+    if (limit > 1000)
+        throw new ApiSearchValidationError("Invalid params. 'limit' must be between 1 and 1000.");
+    let offset = normalizeOffset(record.offset);
+    let scope = typeof record.scope == 'string' ? record.scope.trim() : '';
+    if (record.scope !== undefined && typeof record.scope != 'string')
+        throw new ApiSearchValidationError("Invalid params. 'scope' must be a string.");
+
+    let raw = GetAPISearch({
+        query,
+        mode,
+        source,
+        kinds: rawKindsForCoreKinds(kinds),
+        ...(scope ? { scope } : {}),
+        declaredOnly,
+        includeDocs,
+        includePrivateOrProtectedMembers: includeNonPublic,
+        symbolLevel,
+        limit: MAX_LIMIT,
+        offset: 0
+    });
+    let allMatches = dedupeCoreMatches(raw.matches
+        .map(projectCoreMatch)
+        .filter((match) => !kinds || kinds.includes(match.kind)));
+    let pageMatches = allMatches.slice(offset, offset + limit);
+    let pageIdentities = new Set(pageMatches.map(stableRecordIdentity));
+    let projectedScopeGroups = raw.scopeGroups?.map((group) =>
+    {
+        let matches = dedupeCoreMatches(group.matches
+            .map(projectCoreMatch)
+            .filter((match) => !kinds || kinds.includes(match.kind)));
+        return {
+            scope: group.scope,
+            identities: new Set(matches.map(stableRecordIdentity))
+        };
+    });
+    let assignedByGroup = projectedScopeGroups?.map(() => new Array<ApiQueryMatch>());
+    if (projectedScopeGroups && assignedByGroup)
+    {
+        for (let match of allMatches)
+        {
+            let identity = stableRecordIdentity(match);
+            let groupIndex = projectedScopeGroups.findIndex((group) => group.identities.has(identity));
+            if (groupIndex < 0)
+                throw new Error(`Scoped API query record has no owning scope group: ${match.qualifiedName}`);
+            assignedByGroup[groupIndex].push(match);
+        }
+    }
+    let scopeGroups = projectedScopeGroups?.map((group, index) =>
+    {
+        let groupMatches = assignedByGroup?.[index] ?? [];
+        let groupPage = groupMatches.filter((match) => pageIdentities.has(stableRecordIdentity(match)));
+        return {
+            scope: group.scope,
+            matches: groupPage,
+            totalMatches: groupMatches.length,
+            omittedMatches: Math.max(0, groupMatches.length - groupPage.length)
+        };
+    });
+    return {
+        ok: true,
+        data: {
+            query,
+            mode,
+            matches: pageMatches,
+            total: allMatches.length,
+            returned: pageMatches.length,
+            limit,
+            offset,
+            omitted: Math.max(0, allMatches.length - pageMatches.length),
+            truncated: offset + pageMatches.length < allMatches.length,
+            ...(raw.notices ? { notices: raw.notices } : {}),
+            ...(raw.scopeLookup ? { scopeLookup: raw.scopeLookup } : {}),
+            ...(scopeGroups ? { scopeGroups } : {}),
+            ...(raw.inheritedScopeOutcome ? { inheritedScopeOutcome: raw.inheritedScopeOutcome } : {})
+        }
+    };
+}
+
+function finalCoreNameSegment(name: string) : string
+{
+    let namespaceIndex = name.lastIndexOf('::');
+    let memberIndex = name.lastIndexOf('.');
+    if (namespaceIndex > memberIndex)
+        return name.substring(namespaceIndex + 2);
+    if (memberIndex >= 0)
+        return name.substring(memberIndex + 1);
+    return name;
+}
+
+function isQualifiedCoreName(name: string) : boolean
+{
+    return name.includes('::') || name.includes('.');
+}
+
+function getConstructorFamilyOwner(name: string) : string | null
+{
+    let dot = name.lastIndexOf('.');
+    if (dot <= 0 || dot == name.length - 1)
+        return null;
+    let owner = name.substring(0, dot);
+    return finalCoreNameSegment(owner) == name.substring(dot + 1) ? owner : null;
+}
+
+function compareExactMatches(left: ApiQueryMatch, right: ApiQueryMatch) : number
+{
+    if (left.kind == 'constructor' && right.kind == 'constructor')
+    {
+        let required = (left.requiredArgumentCount ?? 0) - (right.requiredArgumentCount ?? 0);
+        if (required != 0)
+            return required;
+        let count = (left.args?.length ?? 0) - (right.args?.length ?? 0);
+        if (count != 0)
+            return count;
+        let leftTypes = (left.args ?? []).map((arg) => CanonicalizeConstructorArgumentType(arg.type)).join('\u0000');
+        let rightTypes = (right.args ?? []).map((arg) => CanonicalizeConstructorArgumentType(arg.type)).join('\u0000');
+        let types = leftTypes.localeCompare(rightTypes);
+        if (types != 0)
+            return types;
+        return String(left.symbolId ?? '').localeCompare(String(right.symbolId ?? ''));
+    }
+    return `${left.qualifiedName}\u0000${left.source}\u0000${left.kind}\u0000${left.signature}`
+        .localeCompare(`${right.qualifiedName}\u0000${right.source}\u0000${right.kind}\u0000${right.signature}`);
+}
+
+export function GetAPIExactSymbols(payload: unknown) : GetAPIExactSymbolsResult
+{
+    if (!payload || typeof payload != 'object' || Array.isArray(payload))
+        return { ok: false, error: { code: 'InvalidParams', message: 'Invalid params. Provide an exact symbol query object.' } };
+    let record = payload as Record<string, unknown>;
+    let name = typeof record.name == 'string' ? record.name.trim() : '';
+    if (!name)
+        return { ok: false, error: { code: 'InvalidParams', message: "Invalid params. 'name' must be a non-empty string." } };
+    try
+    {
+        let kindList = record.kind === undefined ? undefined : normalizeCoreKinds([record.kind]);
+        let kind = kindList?.[0];
+        let source = normalizeSource(record.source);
+        let includeDocs = normalizeCoreBoolean(record.includeDocs, 'includeDocs');
+        let includeNonPublic = normalizeCoreBoolean(record.includeNonPublic, 'includeNonPublic');
+        let symbolId = record.symbolId === undefined ? '' : String(record.symbolId).trim().toLowerCase();
+        let constructorOwner = getConstructorFamilyOwner(name);
+        if (kind == 'constructor' && !constructorOwner)
+            return { ok: false, error: { code: 'InvalidParams', message: "Invalid params. kind 'constructor' requires an exact Type.Type constructor family." } };
+        if (symbolId && !constructorOwner)
+            return { ok: false, error: { code: 'InvalidParams', message: "Invalid params. 'symbolId' may only be used with an exact Type.Type constructor family." } };
+        if (symbolId && !/^[0-9a-f]{64}$/.test(symbolId))
+            return { ok: false, error: { code: 'InvalidParams', message: "Invalid params. 'symbolId' must be a full SHA-256 hex value." } };
+
+        let query = GetAPIQuery({
+            query: name,
+            mode: 'smart',
+            source,
+            ...(kind ? { kinds: [kind] } : constructorOwner ? { kinds: ['constructor'] } : {}),
+            includeDocs,
+            includeNonPublic,
+            limit: 1000,
+            offset: 0
+        });
+        let candidates = query.data.matches;
+        let exactQualified = candidates.filter((match) => match.qualifiedName == name);
+        let matches = exactQualified.length > 0 || isQualifiedCoreName(name)
+            ? exactQualified
+            : candidates.filter((match) => finalCoreNameSegment(match.qualifiedName) == name);
+        if (symbolId)
+            matches = matches.filter((match) => match.symbolId?.toLowerCase() == symbolId);
+        matches = dedupeCoreMatches(matches).sort(compareExactMatches);
+        if (matches.length == 0)
+            return { ok: false, error: { code: 'NotFound', message: `API symbol not found: ${name}` } };
+        return { ok: true, data: { requestedName: name, found: true, symbols: matches } };
+    }
+    catch (error)
+    {
+        return {
+            ok: false,
+            error: {
+                code: 'InvalidParams',
+                message: error instanceof Error ? error.message : String(error)
+            }
+        };
+    }
+}
+
 function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
 {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload))
-        throw new ApiSearchValidationError("Invalid params. Provide { query: string, mode?: 'smart' | 'regex', limit?: number, offset?: number, kinds?: ApiSearchKind[], source?: 'native' | 'script' | 'both', scope?: string, includeInheritedFromScope?: boolean, includeDocs?: boolean, symbolLevel?: 'all' | 'type' }.");
+        throw new ApiSearchValidationError("Invalid params. Provide { query: string, mode?: 'smart' | 'regex', limit?: number, kinds?: ApiSearchKind[], source?: 'native' | 'script' | 'both', scope?: string, declaredOnly?: boolean, includeDocs?: boolean, includePrivateOrProtectedMembers?: boolean, symbolLevel?: 'all' | 'type' }.");
 
     let record = payload as Record<string, unknown>;
     let query = typeof record.query === 'string' ? record.query.trim() : '';
@@ -402,6 +1018,9 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
     let scope = typeof record.scope === 'string' ? record.scope.trim() : '';
     let includeInheritedFromScopeMode = normalizeScopeInheritanceMode(record);
     let includeDocs = record.includeDocs === true;
+    if (record.includePrivateOrProtectedMembers !== undefined && typeof record.includePrivateOrProtectedMembers !== 'boolean')
+        throw new ApiSearchValidationError("Invalid params. 'includePrivateOrProtectedMembers' must be a boolean.");
+    let includePrivateOrProtectedMembers = record.includePrivateOrProtectedMembers === true;
     let smartQueries = mode == 'smart' ? parseSmartQueries(query) : undefined;
 
     return {
@@ -414,6 +1033,7 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
         ...(scope.length > 0 ? { scope } : {}),
         includeInheritedFromScopeMode,
         includeDocs,
+        includePrivateOrProtectedMembers,
         symbolLevel,
         ...(kinds.typeResultKinds ? { typeResultKinds: kinds.typeResultKinds } : {}),
         ...(smartQueries ? { smartQueries } : {})
@@ -422,9 +1042,19 @@ function normalizeSearchParams(payload: unknown) : NormalizedSearchParams
 
 function normalizeScopeInheritanceMode(record: Record<string, unknown>) : ScopeInheritanceMode
 {
-    if (!Object.prototype.hasOwnProperty.call(record, 'includeInheritedFromScope'))
+    if (Object.prototype.hasOwnProperty.call(record, 'includeInheritedFromScope'))
+    {
+        if (typeof record.includeInheritedFromScope !== 'boolean')
+            throw new ApiSearchValidationError("Invalid params. 'includeInheritedFromScope' must be a boolean.");
+        if (Object.prototype.hasOwnProperty.call(record, 'declaredOnly'))
+            throw new ApiSearchValidationError("Invalid params. 'declaredOnly' and 'includeInheritedFromScope' cannot be combined.");
+        return record.includeInheritedFromScope === true ? 'on' : 'off';
+    }
+    if (!Object.prototype.hasOwnProperty.call(record, 'declaredOnly'))
         return 'auto';
-    return record.includeInheritedFromScope === true ? 'on' : 'off';
+    if (typeof record.declaredOnly !== 'boolean')
+        throw new ApiSearchValidationError("Invalid params. 'declaredOnly' must be a boolean.");
+    return record.declaredOnly === true ? 'off' : 'auto';
 }
 
 function normalizeSearchMode(value: unknown) : ApiSearchMode
@@ -501,7 +1131,7 @@ function normalizeKinds(
                 throw new ApiSearchValidationError("Invalid params. 'kinds' entries must be strings.");
 
             let normalized = item.trim().toLowerCase();
-            let kind = kindAliases[normalized];
+            let kind = kindAliases.get(normalized);
             if (!kind)
                 throw new ApiSearchValidationError(`Invalid params. Unsupported kind "${item}".`);
             if (kind != 'class' && kind != 'struct' && kind != 'enum')
@@ -529,7 +1159,7 @@ function normalizeKinds(
             throw new ApiSearchValidationError("Invalid params. 'kinds' entries must be strings.");
 
         let normalized = item.trim().toLowerCase();
-        let kind = kindAliases[normalized];
+        let kind = kindAliases.get(normalized);
         if (!kind)
             throw new ApiSearchValidationError(`Invalid params. Unsupported kind "${item}".`);
         kinds.add(kind);
@@ -612,7 +1242,7 @@ function buildSearchIndex() : SearchIndex
 
     let visitNamespace = function (namespace: typedb.DBNamespace)
     {
-        if (!namespace.isRootNamespace() && !isNamespaceApiEmpty(namespace))
+        if (!namespace.isRootNamespace() && !isInternalApiSymbolName(namespace.name) && !isNamespaceApiEmpty(namespace))
         {
             let qualifiedNamespace = namespace.getQualifiedNamespace();
             scopeCandidates.push({
@@ -622,6 +1252,7 @@ function buildSearchIndex() : SearchIndex
                 namespace,
                 isClassType: false
             });
+            entries.push(createNamespaceEntry(namespace, qualifiedNamespace));
         }
 
         for (let [_, childNamespace] of namespace.childNamespaces)
@@ -631,6 +1262,8 @@ function buildSearchIndex() : SearchIndex
         {
             if (symbol instanceof typedb.DBMethod)
             {
+                if (!symbol.isConstructor && isInternalApiSymbolName(symbol.name))
+                    return;
                 if (shouldSkipMethod(symbol))
                     return;
                 entries.push(createMethodEntry(symbol));
@@ -639,6 +1272,8 @@ function buildSearchIndex() : SearchIndex
 
             if (symbol instanceof typedb.DBProperty)
             {
+                if (isInternalApiSymbolName(symbol.name))
+                    return;
                 entries.push(createGlobalPropertyEntry(symbol));
                 return;
             }
@@ -650,12 +1285,13 @@ function buildSearchIndex() : SearchIndex
 
     let visitType = function (dbType: typedb.DBType)
     {
-        if (shouldIncludeTypeInSearch(dbType))
-        {
-            let documentation = normalizeSearchDocumentation(dbType.documentation);
-            let qualifiedTypeName = dbType.getQualifiedTypenameInNamespace(null);
-            let kind = getTypeKind(dbType);
-            let typeEntry = createSearchEntry({
+        if (!shouldIncludeTypeInSearch(dbType))
+            return;
+
+        let documentation = normalizeSearchDocumentation(dbType.documentation);
+        let qualifiedTypeName = dbType.getQualifiedTypenameInNamespace(null);
+        let kind = getTypeKind(dbType);
+        let typeEntry = createSearchEntry({
                 qualifiedName: qualifiedTypeName,
                 kind,
                 isCallable: false,
@@ -673,22 +1309,23 @@ function buildSearchIndex() : SearchIndex
                 namespaceQualifiedName: dbType.namespace && !dbType.namespace.isRootNamespace()
                     ? dbType.namespace.getQualifiedNamespace()
                     : ''
-            });
-            entries.push(typeEntry);
-            typeEntriesByQualifiedName.set(qualifiedTypeName, typeEntry);
-            scopeCandidates.push({
-                kind,
-                qualifiedName: qualifiedTypeName,
-                shortName: dbType.name,
-                dbType,
-                isClassType: isClassType(dbType)
-            });
-        }
+        });
+        entries.push(typeEntry);
+        typeEntriesByQualifiedName.set(qualifiedTypeName, typeEntry);
+        scopeCandidates.push({
+            kind,
+            qualifiedName: qualifiedTypeName,
+            shortName: dbType.name,
+            dbType,
+            isClassType: isClassType(dbType)
+        });
 
         dbType.forEachSymbol((symbol) =>
         {
             if (symbol instanceof typedb.DBMethod)
             {
+                if (!symbol.isConstructor && isInternalApiSymbolName(symbol.name))
+                    return;
                 if (shouldSkipMethod(symbol))
                     return;
                 entries.push(createMethodEntry(symbol));
@@ -696,7 +1333,11 @@ function buildSearchIndex() : SearchIndex
             }
 
             if (symbol instanceof typedb.DBProperty)
+            {
+                if (isInternalApiSymbolName(symbol.name))
+                    return;
                 entries.push(createTypePropertyEntry(symbol));
+            }
         }, false);
     };
 
@@ -708,11 +1349,34 @@ function buildSearchIndex() : SearchIndex
     };
 }
 
+function createNamespaceEntry(namespace: typedb.DBNamespace, qualifiedNamespace: string) : SearchIndexEntry
+{
+    let documentation = normalizeSearchDocumentation(namespace.documentation);
+    let docSource = (namespace as typedb.DBNamespace & { docSource?: ApiSearchDocSource }).docSource;
+    let declaredModule = namespace.declarations.find((declaration) => declaration.declaredModule)?.declaredModule ?? null;
+    return createSearchEntry({
+        qualifiedName: qualifiedNamespace,
+        kind: 'namespace',
+        isCallable: false,
+        signature: `namespace ${qualifiedNamespace}`,
+        summary: extractSummary(documentation),
+        documentation,
+        docSource,
+        source: getDeclaredSource(declaredModule),
+        filterSource: getDeclaredSource(declaredModule),
+        detailsData: ['namespace', qualifiedNamespace],
+        namespaceQualifiedName: qualifiedNamespace
+    });
+}
+
 function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
 {
+    if (method.isConstructor)
+        return createConstructorEntry(method);
+
     let documentation = normalizeSearchDocumentation(method.findAvailableDocumentation());
     let methodArgs = method.args ? method.args.map((arg) => arg.typename) : [];
-    let isCallable = method.isProperty !== true && method.isCallable !== false;
+    let isCallable = method.isCallable !== false;
     let detailsData: unknown;
     let qualifiedName = '';
     let containerQualifiedName: string | undefined = undefined;
@@ -726,6 +1390,7 @@ function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
         declaringTypeQualifiedName = method.containingType.getQualifiedTypenameInNamespace(null);
         qualifiedName = `${declaringTypeQualifiedName}.${method.name}`;
         containerQualifiedName = declaringTypeQualifiedName;
+        aliasQualifiedNames = buildScopedMemberAliases(declaringTypeQualifiedName, method.name);
         namespaceQualifiedName = method.containingType.namespace && !method.containingType.namespace.isRootNamespace()
             ? method.containingType.namespace.getQualifiedNamespace()
             : '';
@@ -771,6 +1436,7 @@ function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
         containerQualifiedName,
         source: getDeclaredSource(method.declaredModule),
         filterSource: getDeclaredSource(method.declaredModule),
+        visibility: getSymbolVisibility(method),
         detailsData,
         namespaceQualifiedName,
         declaringTypeQualifiedName,
@@ -778,6 +1444,43 @@ function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
         mixinTargetQualifiedName,
         aliasQualifiedNames,
         overrideKey: buildMethodOverrideKey(method)
+    });
+}
+
+function createConstructorEntry(method: typedb.DBMethod) : SearchIndexEntry
+{
+    let constructor = ProjectConstructor(method);
+    if (!constructor)
+        throw new Error('Attempted to index an ineligible constructor.');
+
+    let owner = ResolveConstructorOwnerType(method);
+    let namespaceQualifiedName = owner?.namespace && !owner.namespace.isRootNamespace()
+        ? owner.namespace.getQualifiedNamespace()
+        : '';
+    return createSearchEntry({
+        qualifiedName: constructor.qualifiedName,
+        kind: 'constructor',
+        isCallable: true,
+        signature: constructor.declaration,
+        summary: extractSummary(constructor.documentation),
+        documentation: constructor.documentation,
+        containerQualifiedName: constructor.ownerQualifiedName,
+        source: constructor.source,
+        filterSource: constructor.source,
+        visibility: getSymbolVisibility(method),
+        detailsData: [
+            'constructor',
+            constructor.name,
+            namespaceQualifiedName,
+            constructor.symbolId,
+            constructor.args.map((arg) => arg.type)
+        ],
+        namespaceQualifiedName,
+        declaringTypeQualifiedName: constructor.ownerQualifiedName,
+        ownerQualifiedName: constructor.ownerQualifiedName,
+        symbolId: constructor.symbolId,
+        args: constructor.args,
+        requiredArgumentCount: constructor.requiredArgumentCount
     });
 }
 
@@ -799,9 +1502,11 @@ function createTypePropertyEntry(property: typedb.DBProperty) : SearchIndexEntry
         containerQualifiedName: qualifiedContainer,
         source: getDeclaredSource(property.declaredModule),
         filterSource: getDeclaredSource(property.declaredModule),
+        visibility: getSymbolVisibility(property),
         detailsData: ['property', property.containingType.name, property.name],
         namespaceQualifiedName,
         declaringTypeQualifiedName: qualifiedContainer,
+        aliasQualifiedNames: buildScopedMemberAliases(qualifiedContainer, property.name),
         overrideKey: buildPropertyOverrideKey(property)
     });
 }
@@ -826,6 +1531,7 @@ function createGlobalPropertyEntry(property: typedb.DBProperty) : SearchIndexEnt
         containerQualifiedName: namespaceQualifiedName.length > 0 ? namespaceQualifiedName : undefined,
         source: getDeclaredSource(property.declaredModule),
         filterSource: getDeclaredSource(property.declaredModule),
+        visibility: getSymbolVisibility(property),
         detailsData: ['global', qualifiedName],
         namespaceQualifiedName
     });
@@ -838,9 +1544,11 @@ function createSearchEntry(input: {
     signature: string;
     summary?: string;
     documentation?: string;
+    docSource?: ApiSearchDocSource;
     containerQualifiedName?: string;
     source: ApiSearchMatchSource;
     filterSource: ApiSearchSource;
+    visibility?: ApiSearchVisibility;
     detailsData?: unknown;
     namespaceQualifiedName: string;
     declaringTypeQualifiedName?: string;
@@ -848,6 +1556,10 @@ function createSearchEntry(input: {
     mixinTargetQualifiedName?: string;
     aliasQualifiedNames?: string[];
     overrideKey?: string;
+    ownerQualifiedName?: string;
+    symbolId?: string;
+    args?: ApiConstructorArgument[];
+    requiredArgumentCount?: number;
 }) : SearchIndexEntry
 {
     let shortName = getShortName(input.qualifiedName, input.kind);
@@ -861,9 +1573,11 @@ function createSearchEntry(input: {
         signature: input.signature,
         summary: input.summary,
         documentation: input.documentation,
+        docSource: input.docSource,
         containerQualifiedName: input.containerQualifiedName,
         source: input.source,
         filterSource: input.filterSource,
+        visibility: input.visibility ?? 'public',
         detailsData: input.detailsData,
         shortName,
         shortNameLower: shortText.textLower,
@@ -875,8 +1589,34 @@ function createSearchEntry(input: {
         isMixin: input.isMixin === true,
         mixinTargetQualifiedName: input.mixinTargetQualifiedName,
         qualifiedAliasTexts,
-        overrideKey: input.overrideKey
+        overrideKey: input.overrideKey,
+        ownerQualifiedName: input.ownerQualifiedName,
+        symbolId: input.symbolId,
+        args: input.args,
+        requiredArgumentCount: input.requiredArgumentCount
     };
+}
+
+function buildScopedMemberAliases(containerQualifiedName: string, memberName: string) : string[]
+{
+    let aliases = new Array<string>();
+    if (!containerQualifiedName || !memberName)
+        return aliases;
+
+    aliases.push(`${containerQualifiedName}::${memberName}`);
+
+    let namespaceIndex = containerQualifiedName.lastIndexOf('::');
+    if (namespaceIndex >= 0)
+    {
+        let shortContainerName = containerQualifiedName.substring(namespaceIndex + 2);
+        if (shortContainerName.length > 0)
+        {
+            aliases.push(`${shortContainerName}.${memberName}`);
+            aliases.push(`${shortContainerName}::${memberName}`);
+        }
+    }
+
+    return aliases;
 }
 
 function resolveScope(
@@ -887,20 +1627,21 @@ function resolveScope(
 {
     let notices: GetAPISearchNotice[] = [];
     let normalizedScope = scopeName.trim();
-    let normalizedScopeLower = normalizedScope.toLowerCase();
+    let normalizedScopeLower = normalizeSearchText(normalizedScope);
+    let isQualifiedScope = normalizedScope.includes('::') || normalizedScope.includes('.');
 
-    let exactQualifiedCandidates = index.scopeCandidates.filter((candidate) => candidate.qualifiedName.toLowerCase() == normalizedScopeLower);
+    let exactQualifiedCandidates = index.scopeCandidates.filter((candidate) => normalizeSearchText(candidate.qualifiedName) == normalizedScopeLower);
     let candidates = exactQualifiedCandidates;
     let candidateMatchMode: ScopeCandidateMatchMode = 'exact-qualified';
-    if (candidates.length == 0)
+    if (candidates.length == 0 && !isQualifiedScope)
     {
-        let exactShortCandidates = index.scopeCandidates.filter((candidate) => candidate.shortName.toLowerCase() == normalizedScopeLower);
+        let exactShortCandidates = index.scopeCandidates.filter((candidate) => normalizeSearchText(candidate.shortName) == normalizedScopeLower);
         candidates = exactShortCandidates;
         candidateMatchMode = 'exact-short';
     }
-    if (candidates.length == 0)
+    if (candidates.length == 0 && !isQualifiedScope)
     {
-        let prefixCandidates = index.scopeCandidates.filter((candidate) => candidate.qualifiedName.toLowerCase().startsWith(normalizedScopeLower));
+        let prefixCandidates = index.scopeCandidates.filter((candidate) => normalizeSearchText(candidate.qualifiedName).startsWith(normalizedScopeLower));
         candidates = prefixCandidates;
         candidateMatchMode = 'prefix';
     }
@@ -1365,6 +2106,8 @@ function filterCandidate(entry: SearchIndexEntry, params: NormalizedSearchParams
         return false;
     if (params.source != 'both' && entry.filterSource != 'both' && entry.filterSource != params.source)
         return false;
+    if (!params.includePrivateOrProtectedMembers && entry.visibility != 'public')
+        return false;
     return true;
 }
 
@@ -1499,7 +2242,7 @@ function resolveTypeLevelProjection(
         };
     }
 
-    if (entry.kind == 'method' || entry.kind == 'property')
+    if (entry.kind == 'constructor' || entry.kind == 'method' || entry.kind == 'property')
     {
         if (!entry.declaringTypeQualifiedName)
             return null;
@@ -1579,6 +2322,11 @@ function compareCandidates(left: SearchCandidate, right: SearchCandidate) : numb
     let rightExactQualifiedPriority = right.matchSort?.exactQualifiedPriority ?? 0;
     if (leftExactQualifiedPriority != rightExactQualifiedPriority)
         return rightExactQualifiedPriority - leftExactQualifiedPriority;
+
+    let leftExactNamespacePriority = getExactNamespacePriority(left);
+    let rightExactNamespacePriority = getExactNamespacePriority(right);
+    if (leftExactNamespacePriority != rightExactNamespacePriority)
+        return rightExactNamespacePriority - leftExactNamespacePriority;
 
     let leftQualifiedPriorityEnabled = left.matchSort?.qualifiedPriorityEnabled ?? 0;
     let rightQualifiedPriorityEnabled = right.matchSort?.qualifiedPriorityEnabled ?? 0;
@@ -1660,6 +2408,17 @@ function compareCandidates(left: SearchCandidate, right: SearchCandidate) : numb
         return left.entry.qualifiedName.length - right.entry.qualifiedName.length;
 
     return left.entry.qualifiedName.localeCompare(right.entry.qualifiedName);
+}
+
+function getExactNamespacePriority(candidate: SearchCandidate) : number
+{
+    if (candidate.entry.kind != 'namespace')
+        return 0;
+    if (candidate.matchReason == 'exact-qualified')
+        return 2;
+    if (candidate.matchReason == 'exact-short')
+        return 1;
+    return 0;
 }
 
 function isEntryCallable(entry: SearchIndexEntry) : boolean
@@ -1845,7 +2604,10 @@ function parseSmartQueries(query: string) : ParsedSmartQuery[]
         let trimmedBranch = branch.trim();
         if (trimmedBranch.length == 0)
             throw new ApiSearchValidationError("Invalid params. 'query' contains an empty smart OR branch.");
-        parsedQueries.push(parseSmartQuery(trimmedBranch));
+        let parsedQuery = parseSmartQuery(trimmedBranch);
+        if (parsedQuery.searchableCharCount < QUERY_TOO_SHORT_THRESHOLD)
+            throw new ApiSearchValidationError(`Invalid params. Each smart OR branch requires at least ${QUERY_TOO_SHORT_THRESHOLD} searchable Unicode characters.`);
+        parsedQueries.push(parsedQuery);
     }
     return parsedQueries;
 }
@@ -1869,8 +2631,11 @@ function parseSmartQuery(query: string) : ParsedSmartQuery
     if (raw.endsWith(';'))
     {
         raw = raw.slice(0, -1).trimEnd();
-        requiresLeafTermination = true;
+        requiresCallable = true;
     }
+
+    if (raw.length == 0 || raw.startsWith('.') || raw.startsWith('::') || raw.endsWith('.') || raw.endsWith('::') || /(^|[^:]):([^:]|$)/.test(raw))
+        throw new ApiSearchValidationError("Invalid params. Smart search separators must be '.', '::', or whitespace.");
 
     let tokens = raw.match(/::|\.|\s+|[^.\s:]+/g) ?? [];
     let segments: string[] = [];
@@ -1907,7 +2672,7 @@ function parseSmartQuery(query: string) : ParsedSmartQuery
             continue;
         }
 
-        let normalizedSegment = token.toLowerCase();
+        let normalizedSegment = normalizeSearchText(token);
         if (normalizedSegment.length == 0)
             continue;
 
@@ -1919,11 +2684,11 @@ function parseSmartQuery(query: string) : ParsedSmartQuery
 
     return {
         raw,
-        rawLower: raw.toLowerCase(),
+        rawLower: normalizeSearchText(raw),
         segments,
         connectors,
         hasStrongSeparator,
-        searchableCharCount: segments.reduce((total, segment) => total + segment.length, 0),
+        searchableCharCount: segments.reduce((total, segment) => total + [...segment].filter((character) => /[\p{L}\p{N}_]/u.test(character)).length, 0),
         requiresCallable,
         requiresLeafTermination
     };
@@ -1931,7 +2696,7 @@ function parseSmartQuery(query: string) : ParsedSmartQuery
 
 function scoreSmartExactMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
 {
-    let qualifiedStructuredMatch = findStructuredMatch(entry.qualifiedText, query);
+    let qualifiedStructuredMatch = findBestQualifiedStructuredMatch(entry, query);
 
     if (entry.qualifiedName == query.raw || entry.qualifiedNameLower == query.rawLower)
     {
@@ -1958,7 +2723,7 @@ function scoreSmartExactMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) 
             return applyQualifiedPriorityToOutcome(
                 createSearchMatchOutcome('exact-qualified', 0, 0, alias.text.length, 1),
                 qualifiedStructuredMatch,
-                false
+                true
             );
         }
     }
@@ -1968,7 +2733,7 @@ function scoreSmartExactMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) 
 
 function scoreSmartOrderedViewsMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : SearchMatchOutcome | null
 {
-    let qualifiedStructuredMatch = findStructuredMatch(entry.qualifiedText, query);
+    let qualifiedStructuredMatch = findBestQualifiedStructuredMatch(entry, query);
     let bestMatch = pickBetterMatch(
         buildStructuredVariantMatch(entry.qualifiedText, query, 0),
         buildStructuredVariantMatch(entry.shortText, query, 2)
@@ -1980,6 +2745,14 @@ function scoreSmartOrderedViewsMatch(entry: SearchIndexEntry, query: ParsedSmart
         return null;
 
     return applyQualifiedPriorityToOutcome(bestMatch, qualifiedStructuredMatch, false);
+}
+
+function findBestQualifiedStructuredMatch(entry: SearchIndexEntry, query: ParsedSmartQuery) : StructuredMatchState | null
+{
+    let bestMatch = findStructuredMatch(entry.qualifiedText, query);
+    for (let alias of entry.qualifiedAliasTexts)
+        bestMatch = pickBetterStructuredState(bestMatch, findStructuredMatch(alias, query));
+    return bestMatch;
 }
 
 type StructuredMatchState = {
@@ -2093,19 +2866,19 @@ function connectorMatches(
 
 function isIdentifierContinuationCharacter(value: string) : boolean
 {
-    return (value >= 'a' && value <= 'z')
-        || (value >= 'A' && value <= 'Z')
-        || (value >= '0' && value <= '9')
-        || value == '_';
+    return /[\p{L}\p{N}_]/u.test(value);
 }
 
 function buildMatch(candidate: SearchCandidate, includeDocs: boolean) : GetAPISearchMatch
 {
     let match: GetAPISearchMatch = {
         qualifiedName: candidate.entry.qualifiedName,
+        shortName: candidate.entry.shortName,
+        namespaceQualifiedName: candidate.entry.namespaceQualifiedName,
         kind: candidate.entry.kind,
         signature: candidate.entry.signature,
-        source: candidate.entry.source
+        source: candidate.entry.source,
+        visibility: candidate.entry.visibility,
     };
 
     if (candidate.matchReason)
@@ -2113,9 +2886,15 @@ function buildMatch(candidate: SearchCandidate, includeDocs: boolean) : GetAPISe
     if (candidate.entry.summary)
         match.summary = candidate.entry.summary;
     if (includeDocs && candidate.entry.documentation)
+    {
         match.documentation = candidate.entry.documentation;
+        if (candidate.entry.docSource)
+            match.docSource = candidate.entry.docSource;
+    }
     if (candidate.entry.containerQualifiedName)
         match.containerQualifiedName = candidate.entry.containerQualifiedName;
+    if (candidate.entry.isCallable !== undefined)
+        match.isCallable = candidate.entry.isCallable;
     if (candidate.entry.isMixin)
         match.isMixin = true;
     if (candidate.scopeRelationship)
@@ -2130,6 +2909,14 @@ function buildMatch(candidate: SearchCandidate, includeDocs: boolean) : GetAPISe
         match.matchedByKind = candidate.matchedByKind;
     if (candidate.entry.detailsData !== undefined)
         match.detailsData = candidate.entry.detailsData;
+    if (candidate.entry.ownerQualifiedName)
+        match.ownerQualifiedName = candidate.entry.ownerQualifiedName;
+    if (candidate.entry.symbolId)
+        match.symbolId = candidate.entry.symbolId;
+    if (candidate.entry.args)
+        match.args = candidate.entry.args;
+    if (typeof candidate.entry.requiredArgumentCount === 'number')
+        match.requiredArgumentCount = candidate.entry.requiredArgumentCount;
 
     return match;
 }
@@ -2155,62 +2942,32 @@ function isNamespaceApiEmpty(namespace: typedb.DBNamespace) : boolean
 
 function shouldIncludeTypeInSearch(dbType: typedb.DBType) : boolean
 {
-    return !dbType.isDelegate
+    return isPublicApiSymbolName(dbType.name)
+        && !dbType.isDelegate
         && !dbType.isEvent
         && !dbType.isPrimitive
         && !dbType.isTemplateInstantiation;
 }
 
+function isInternalApiSymbolName(name: string | undefined | null) : boolean
+{
+    return typeof name == 'string' && name.startsWith('__');
+}
+
+function isPublicApiSymbolName(name: string | undefined | null) : boolean
+{
+    return typeof name == 'string' && name != 'StaticClass' && !isInternalApiSymbolName(name);
+}
+
 function shouldSkipMethod(method: typedb.DBMethod) : boolean
 {
-    if (method.isConstructor && (!method.args || method.args.length == 0))
-        return true;
-    if (method.isConstructor && method.args && method.args.length == 1)
-        return true;
     if (method.isConstructor)
-    {
-        let ctorType = getConstructorOwnerType(method);
-        if (ctorType && (ctorType.isDelegate || ctorType.isEvent))
-            return true;
-    }
+        return !IsEligibleStructConstructor(method);
+    if (!isPublicApiSymbolName(method.name))
+        return true;
     if (method.name.startsWith('op'))
         return true;
     return false;
-}
-
-function getConstructorOwnerType(method: typedb.DBMethod) : typedb.DBType | null
-{
-    if (method.containingType)
-        return method.containingType;
-
-    if (method.namespace)
-    {
-        let shadowed = method.namespace.getShadowedType();
-        if (shadowed)
-            return shadowed;
-    }
-
-    if (method.returnType)
-    {
-        let lookupNamespace = method.namespace;
-        if (lookupNamespace && lookupNamespace.isRootNamespace())
-            lookupNamespace = null;
-        let found = typedb.LookupType(lookupNamespace, method.returnType);
-        if (found)
-            return found;
-        found = typedb.GetTypeByName(method.returnType);
-        if (found)
-            return found;
-    }
-
-    if (method.name)
-    {
-        let found = typedb.GetTypeByName(method.name);
-        if (found)
-            return found;
-    }
-
-    return null;
 }
 
 function buildMethodSignature(method: typedb.DBMethod) : string
@@ -2341,37 +3098,11 @@ function normalizeSearchDocumentation(documentation: string | null | undefined) 
     return trimmed.length > 0 ? trimmed : undefined;
 }
 
-export {
-    BuildConstructorArgumentIdentityType,
-    BuildConstructorSymbolId,
-    CanonicalizeConstructorArgumentType,
-    CompareConstructorProjections,
-    GetAPIExactSymbols,
-    GetAPIQuery,
-    IsEligibleStructConstructor,
-    IsCopyLikeConstructor,
-    IsPublicStructConstructor,
-    ProjectConstructor,
-    ResolveConstructorOwnerType,
-} from './api_query_engine';
-
-export type {
-    ApiConstructorArgument,
-    ApiConstructorProjection,
-    ApiQueryKind,
-    ApiQueryMatch,
-    ApiQuerySource,
-    GetAPIExactSymbolsParams,
-    GetAPIExactSymbolsResult,
-    GetAPIQueryParams,
-    GetAPIQueryResult,
-} from './api_query_engine';
-
 function createSearchTextVariant(value: string) : SearchTextVariant
 {
     return {
         text: value,
-        textLower: value.toLowerCase(),
+        textLower: normalizeSearchText(value),
         boundaries: collectSearchBoundaries(value)
     };
 }
@@ -2389,7 +3120,7 @@ function dedupeSearchTextVariants(values: string[] | undefined, canonicalTextLow
         if (trimmed.length == 0)
             continue;
 
-        let normalized = trimmed.toLowerCase();
+        let normalized = normalizeSearchText(trimmed);
         if (seen.has(normalized))
             continue;
 
@@ -2403,7 +3134,7 @@ function dedupeSearchTextVariants(values: string[] | undefined, canonicalTextLow
 function getShortName(qualifiedName: string, kind: ApiSearchKind) : string
 {
     let dotIndex = qualifiedName.lastIndexOf('.');
-    if (dotIndex != -1 && (kind == 'method' || kind == 'property'))
+    if (dotIndex != -1 && (kind == 'constructor' || kind == 'method' || kind == 'property'))
         return qualifiedName.substring(dotIndex + 1);
 
     let namespaceIndex = qualifiedName.lastIndexOf('::');
@@ -2453,10 +3184,25 @@ type SearchTextValue = {
 
 function parseRegexPattern(raw: string) : ParsedRegex
 {
-    if (!(raw.length >= 2 && raw.startsWith('/') && raw.lastIndexOf('/') > 0))
+    if (!(raw.length >= 2 && raw.startsWith('/')))
         throw new Error("Expected /pattern/flags syntax.");
 
-    let lastSlash = raw.lastIndexOf('/');
+    let lastSlash = -1;
+    for (let index = raw.length - 1; index > 0; index -= 1)
+    {
+        if (raw[index] != '/')
+            continue;
+        let slashCount = 0;
+        for (let cursor = index - 1; cursor >= 0 && raw[cursor] == '\\'; cursor -= 1)
+            slashCount += 1;
+        if (slashCount % 2 == 0)
+        {
+            lastSlash = index;
+            break;
+        }
+    }
+    if (lastSlash <= 0)
+        throw new Error("Expected /pattern/flags syntax.");
     return {
         pattern: raw.substring(1, lastSlash),
         flags: raw.substring(lastSlash + 1)

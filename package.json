@@ -14,12 +14,7 @@
     ],
     "activationEvents": [
         "onLanguage:angelscript",
-        "workspaceContains:**/*.as",
-        "onLanguageModelTool:angelscript_searchApi",
-        "onLanguageModelTool:angelscript_resolveSymbolAtPosition",
-        "onLanguageModelTool:angelscript_getTypeMembers",
-        "onLanguageModelTool:angelscript_getClassHierarchy",
-        "onLanguageModelTool:angelscript_findReferences"
+        "workspaceContains:**/*.as"
     ],
     "repository": {
         "type": "git",
@@ -36,292 +31,6 @@
                 }
             ]
         },
-        "languageModelTools": [
-            {
-                "name": "angelscript_searchApi",
-                "tags": [
-                    "angelscript",
-                    "api",
-                    "search"
-                ],
-                "toolReferenceName": "angelscript_searchApi",
-                "displayName": "Angelscript API Search",
-                "modelDescription": "Use when you need to discover Angelscript API symbols before you know the exact symbol name. Do not use when you already have a concrete file position and need symbol resolution. Requires `query`; leave `mode` at the default `smart` unless you are intentionally sending `/pattern/flags`.",
-                "userDescription": "Search Angelscript API symbols.",
-                "canBeReferencedInPrompt": true,
-                "icon": "$(search)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search query. In `smart` mode, supports `Type.Member`, `Namespace::Func`, `GameplayCue;` with ASCII `;` leaf termination, trailing `(` or `()`, and `|` branches. In `regex` mode, use `/pattern/flags`."
-                        },
-                        "mode": {
-                            "type": "string",
-                            "description": "Search mode. Defaults to `smart`. Use `regex` only with `/pattern/flags`.",
-                            "enum": [
-                                "smart",
-                                "regex"
-                            ],
-                            "default": "smart"
-                        },
-                        "limit": {
-                            "type": "number",
-                            "description": "Maximum matches to return. Integer 1-200. Defaults to 20.",
-                            "minimum": 1,
-                            "maximum": 200,
-                            "default": 20
-                        },
-                        "kinds": {
-                            "type": "array",
-                            "description": "Hard-filter returned symbol kinds. In `symbolLevel=type`, only `class`, `struct`, or `enum` are allowed; member and mixin hits can still contribute owner-type matches.",
-                            "items": {
-                                "type": "string",
-                                "enum": [
-                                    "class",
-                                    "struct",
-                                    "enum",
-                                    "method",
-                                    "function",
-                                    "property",
-                                    "globalVariable"
-                                ]
-                            }
-                        },
-                        "source": {
-                            "type": "string",
-                            "description": "Limit results to `native`, `script`, or `both`. Defaults to `both`.",
-                            "enum": [
-                                "native",
-                                "script",
-                                "both"
-                            ]
-                        },
-                        "scope": {
-                            "type": "string",
-                            "description": "Known namespace or containing type to narrow before ranking. Type scopes can surface declared members, inherited methods and properties, and applicable mixin functions. Same-name namespace and type scopes merge automatically."
-                        },
-                        "includeInheritedFromScope": {
-                            "type": "boolean",
-                            "description": "Only applies to class/type scopes. When omitted, class scopes auto-expand inherited methods and properties, while namespace/struct/enum scopes keep inheritance expansion off. Explicit `true` preserves ignored-scope reporting for invalid or non-class scopes."
-                        },
-                        "includeDocs": {
-                            "type": "boolean",
-                            "description": "Attach full documentation text to returned matches. This enriches results only and does not affect ranking. Defaults to false.",
-                            "default": false
-                        },
-                        "symbolLevel": {
-                            "type": "string",
-                            "description": "Result projection level. `all` returns matched symbols as-is. `type` still allows member or mixin matches, but only returns their owner `class`, `struct`, or `enum` with additive `matchedBy*` metadata.",
-                            "enum": [
-                                "all",
-                                "type"
-                            ],
-                            "default": "all"
-                        }
-                    },
-                    "required": [
-                        "query"
-                    ]
-                }
-            },
-            {
-                "name": "angelscript_resolveSymbolAtPosition",
-                "tags": [
-                    "angelscript",
-                    "symbol",
-                    "hover"
-                ],
-                "toolReferenceName": "angelscript_resolveSymbolAtPosition",
-                "displayName": "Angelscript Resolve Symbol At Position",
-                "modelDescription": "Use when you have an absolute file path and 1-based cursor position and need the symbol, signature, documentation, or definition at that location. Do not use when the primary goal is collecting project references.",
-                "userDescription": "Resolve the symbol at an absolute file path and 1-based position.",
-                "canBeReferencedInPrompt": true,
-                "icon": "$(symbol-method)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "filePath": {
-                            "type": "string",
-                            "description": "Absolute file path containing the symbol."
-                        },
-                        "position": {
-                            "type": "object",
-                            "properties": {
-                                "line": {
-                                    "type": "number",
-                                    "minimum": 1,
-                                    "description": "1-based line number in tool contract."
-                                },
-                                "character": {
-                                    "type": "number",
-                                    "minimum": 1,
-                                    "description": "1-based character offset in tool contract."
-                                }
-                            },
-                            "required": [
-                                "line",
-                                "character"
-                            ]
-                        },
-                        "includeDocumentation": {
-                            "type": "boolean",
-                            "description": "Include documentation when available. Defaults to true.",
-                            "default": true
-                        }
-                    },
-                    "required": [
-                        "filePath",
-                        "position"
-                    ]
-                }
-            },
-            {
-                "name": "angelscript_getTypeMembers",
-                "tags": [
-                    "angelscript",
-                    "type",
-                    "members"
-                ],
-                "toolReferenceName": "angelscript_getTypeMembers",
-                "displayName": "Angelscript Type Members",
-                "modelDescription": "Use when you need members from one exact Angelscript type. Do not use when you need class hierarchy traversal. Requires exact `name`; provide `namespace` only to disambiguate collisions.",
-                "userDescription": "List members for a given Angelscript type.",
-                "canBeReferencedInPrompt": true,
-                "icon": "$(symbol-class)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Type name to inspect."
-                        },
-                        "namespace": {
-                            "type": "string",
-                            "description": "Namespace used only to disambiguate the type name. Use an empty string for the root namespace."
-                        },
-                        "includeInherited": {
-                            "type": "boolean",
-                            "description": "Include inherited members. Defaults to false.",
-                            "default": false
-                        },
-                        "includeDocs": {
-                            "type": "boolean",
-                            "description": "Include member description text. `type.description` is always returned. Defaults to false.",
-                            "default": false
-                        },
-                        "kinds": {
-                            "type": "string",
-                            "description": "Filter members to `both`, `method`, or `property`. Defaults to `both`.",
-                            "enum": [
-                                "both",
-                                "method",
-                                "property"
-                            ],
-                            "default": "both"
-                        }
-                    },
-                    "required": [
-                        "name"
-                    ]
-                }
-            },
-            {
-                "name": "angelscript_getClassHierarchy",
-                "tags": [
-                    "angelscript",
-                    "class",
-                    "hierarchy"
-                ],
-                "toolReferenceName": "angelscript_getClassHierarchy",
-                "displayName": "Angelscript Class Hierarchy",
-                "modelDescription": "Use when you need the parent chain or derived classes for one exact class. Do not use when you only need members from a single type. Requires exact class `name`.",
-                "userDescription": "Get class hierarchy for a given Angelscript class.",
-                "canBeReferencedInPrompt": true,
-                "icon": "$(symbol-class)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Exact class name to inspect, for example `APawn`."
-                        },
-                        "maxSuperDepth": {
-                            "type": "number",
-                            "description": "Maximum number of supertypes to return. Non-negative integer. Defaults to 3.",
-                            "default": 3
-                        },
-                        "maxSubDepth": {
-                            "type": "number",
-                            "description": "Maximum depth for the subtype tree. Non-negative integer. Defaults to 2.",
-                            "default": 2
-                        },
-                        "maxSubBreadth": {
-                            "type": "number",
-                            "description": "Maximum direct children returned per class. Non-negative integer. Defaults to 10. Per-class truncation counts are reported in `truncated.derivedBreadthByClass`.",
-                            "default": 10
-                        }
-                    },
-                    "required": [
-                        "name"
-                    ]
-                }
-            },
-            {
-                "name": "angelscript_findReferences",
-                "tags": [
-                    "angelscript",
-                    "references",
-                    "symbol"
-                ],
-                "toolReferenceName": "angelscript_findReferences",
-                "displayName": "Angelscript Find References",
-                "modelDescription": "Use when you have an absolute file path and 1-based symbol position and need project references to that symbol. Do not use when you only need to identify the symbol at the current position.",
-                "userDescription": "Find references for the symbol at an absolute file path and 1-based position.",
-                "canBeReferencedInPrompt": true,
-                "icon": "$(references)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "filePath": {
-                            "type": "string",
-                            "description": "Absolute file path containing the symbol."
-                        },
-                        "position": {
-                            "type": "object",
-                            "properties": {
-                                "line": {
-                                    "type": "number",
-                                    "minimum": 1,
-                                    "description": "1-based line number in tool contract."
-                                },
-                                "character": {
-                                    "type": "number",
-                                    "minimum": 1,
-                                    "description": "1-based character offset in tool contract."
-                                }
-                            },
-                            "required": [
-                                "line",
-                                "character"
-                            ]
-                        },
-                        "limit": {
-                            "type": "number",
-                            "description": "Maximum references to return. Integer 1-200. Defaults to 30.",
-                            "minimum": 1,
-                            "maximum": 200,
-                            "default": 30
-                        }
-                    },
-                    "required": [
-                        "filePath",
-                        "position"
-                    ]
-                }
-            }
-        ],
         "views": {
             "angelscript-api": [
                 {
@@ -382,15 +91,6 @@
                     "type": "number",
                     "default": 27099,
                     "description": "What port to use when connecting to the Unreal engine game or editor instance for auto-completion and debugging. Must match the debug port configured in the Unreal Engine project settings, or as a launch argument (-asdebugport=)."
-                },
-                "UnrealAngelscript.languageModelTools.outputMode": {
-                    "type": "string",
-                    "default": "text-only",
-                    "enum": [
-                        "text+structured",
-                        "text-only"
-                    ],
-                    "description": "Controls whether Language Model Tools return readable text only or readable text plus structured JSON payload. Default is text-only."
                 },
                 "UnrealAngelscript.inlayHints.inlayHintsEnabled": {
                     "type": "boolean",
@@ -1012,7 +712,6 @@
     },
     "scripts": {
         "vscode:prepublish": "npm run compile",
-        "sync:lm-tools": "node scripts/sync-lm-tools.mjs",
         "compile": "npm run compile:extension && npm run compile:language-server",
         "compile:extension": "cd extension && node esbuild.js",
         "compile:language-server": "cd language-server && node esbuild.js",
@@ -1021,7 +720,7 @@
         "watch": "npm-run-all -p watch:*",
         "watch:extension": "cd extension && node esbuild.js --watch",
         "watch:language-server": "cd language-server && node esbuild.js --watch",
-        "test:fork-boundary": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/lmToolContractSync.test.js extension/out/__tests__/toolContractUtils.test.js extension/out/__tests__/toolResultTransport.test.js extension/out/__tests__/toolShared.findReferences.test.js extension/out/__tests__/toolTextFormatter.test.js language-server/out/__tests__/apiSearch.test.js language-server/out/__tests__/apiSearch.realSymbols.test.js language-server/out/__tests__/getTypeMembers.test.js language-server/out/__tests__/symbolResolve.test.js language-server/out/__tests__/workspaceLayout.test.js",
+        "test:fork-boundary": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test language-server/out/__tests__/apiQueryCore.test.js language-server/out/__tests__/apiSearch.test.js language-server/out/__tests__/apiSearch.realSymbols.test.js language-server/out/__tests__/symbolResolve.test.js language-server/out/__tests__/workspaceLayout.test.js",
         "test": "npm run compile && npm run clean:tsc-out && npm exec -- tsc -p extension/tsconfig.json && npm exec -- tsc -p language-server/tsconfig.json && node --test extension/out/__tests__/*.test.js language-server/out/__tests__/*.test.js",
         "upstream:divergence:log": "git log --oneline upstream/master..HEAD",
         "upstream:divergence:stat": "git diff --stat upstream/master..HEAD",

@@ -413,6 +413,48 @@ test('smart and regex search modes follow the new name-view contract', () =>
     assert.equal(regexDoesNotMatchSignature.matches.length, 0);
 });
 
+test('offset selects global pages after ranking and preserves offset zero behavior', () =>
+{
+    const smartRequest = { query: 'Movement', mode: 'smart' as const, limit: 1000 };
+    const smartAll = GetAPISearch(smartRequest);
+    assert.ok(smartAll.matches.length >= 3);
+    assert.deepEqual(GetAPISearch({ ...smartRequest, offset: 0 }), smartAll);
+
+    const smartPage = GetAPISearch({ ...smartRequest, limit: 2, offset: 1 });
+    assert.deepEqual(
+        smartPage.matches.map((match) => match.qualifiedName),
+        smartAll.matches.slice(1, 3).map((match) => match.qualifiedName)
+    );
+    assert.deepEqual(smartPage.matchCounts, {
+        total: smartAll.matchCounts.total,
+        returned: 2,
+        omitted: smartAll.matchCounts.total - 2
+    });
+
+    const regexRequest = {
+        query: '/StartMovement$|TickMovement$/',
+        mode: 'regex' as const,
+        kinds: ['method'] as const,
+        limit: 1000
+    };
+    const regexAll = GetAPISearch(regexRequest);
+    const regexPage = GetAPISearch({ ...regexRequest, limit: 1, offset: 1 });
+    assert.deepEqual(regexPage.matches, regexAll.matches.slice(1, 2));
+    assert.deepEqual(regexPage.matchCounts, {
+        total: regexAll.matchCounts.total,
+        returned: 1,
+        omitted: regexAll.matchCounts.total - 1
+    });
+
+    const pastEnd = GetAPISearch({ ...smartRequest, limit: 2, offset: smartAll.matchCounts.total + 10 });
+    assert.deepEqual(pastEnd.matches, []);
+    assert.deepEqual(pastEnd.matchCounts, {
+        total: smartAll.matchCounts.total,
+        returned: 0,
+        omitted: smartAll.matchCounts.total
+    });
+});
+
 test('regex queries stay equivalent to literal or qualified search for class, method, property, and function samples', () =>
 {
     const classSmart = GetAPISearch({ query: 'UMovementDerived', mode: 'smart', kinds: ['class'], source: 'script', limit: 10 });
@@ -1125,6 +1167,42 @@ test('scope collision auto-merges same-name namespace and class groups', () =>
         scoped.scopeGroups?.[1].matches.map((match) => match.qualifiedName),
         ['UCthuBattleSet::GetManaAttr']
     );
+
+    const nextPage = GetAPISearch({
+        query: 'Get',
+        mode: 'smart',
+        scope: 'UCthuBattleSet',
+        offset: 1,
+        limit: 2
+    });
+    assert.deepEqual(nextPage.matches.map((match) => match.qualifiedName), [
+        'UCthuBattleSet::GetManaAttr',
+        'UCthuBattleSet::GetMaxManaAttr'
+    ]);
+    assert.deepEqual(nextPage.matchCounts, {
+        total: 3,
+        returned: 2,
+        omitted: 1
+    });
+    assert.deepEqual(nextPage.scopeGroups?.map((group) => ({
+        kind: group.scope.resolvedKind,
+        matches: group.matches.map((match) => match.qualifiedName),
+        totalMatches: group.totalMatches,
+        omittedMatches: group.omittedMatches
+    })), [
+        {
+            kind: 'class',
+            matches: [],
+            totalMatches: 1,
+            omittedMatches: 1
+        },
+        {
+            kind: 'namespace',
+            matches: ['UCthuBattleSet::GetManaAttr', 'UCthuBattleSet::GetMaxManaAttr'],
+            totalMatches: 2,
+            omittedMatches: 0
+        }
+    ]);
 });
 
 test('same-name merged scope auto-expands inherited matches only for the class side', () =>
@@ -1249,5 +1327,17 @@ test('smart OR rejects empty branches and removed public modes', () =>
     assert.throws(
         () => GetAPISearch({ query: 'Movement', mode: 'plain', limit: 10 } as any),
         /'mode' must be 'smart' or 'regex'/u
+    );
+});
+
+test('offset rejects negative and fractional values', () =>
+{
+    assert.throws(
+        () => GetAPISearch({ query: 'Movement', offset: -1 }),
+        /'offset' must be greater than or equal to 0/u
+    );
+    assert.throws(
+        () => GetAPISearch({ query: 'Movement', offset: 1.5 }),
+        /'offset' must be an integer/u
     );
 });
