@@ -48,6 +48,7 @@ import { registerApiRequestHandlers } from './apiRequestHandlers';
 import * as workspaceLayout from './workspaceLayout';
 import { resolveLanguageServerInitializationOptions, ResolvedAngelScriptLanguageServerOptions } from './languageServerContract';
 import { createLanguageServerAutomationRuntime } from './languageServerAutomationRuntime';
+import { createActiveWorkTracker } from './activeWorkTracker';
 import glob from 'glob';
 
 const ExtensionVersion = String(require('../../package.json').version);
@@ -89,6 +90,7 @@ let UnrealConnected = false;
 let CacheRootPath : string = null;
 let PendingReResolveAfterInitialParse = false;
 let SemanticTokensRefreshTimeout : any = null;
+let PendingSemanticModules = new Set<scriptfiles.ASModule>();
 
 let settings : any = null;
 let reconnectTimeoutId : any = undefined;
@@ -97,6 +99,7 @@ let LanguageServerOptions : ResolvedAngelScriptLanguageServerOptions | null = nu
 const automationRuntime = createLanguageServerAutomationRuntime(connection, ExtensionVersion);
 const unrealCacheController = automationRuntime.cache;
 const readinessController = automationRuntime.readiness;
+const reResolveWork = createActiveWorkTracker(TrySettleSemanticGeneration);
 
 function connect_unreal()
 {
@@ -196,6 +199,9 @@ function connect_unreal()
                 catch (error)
                 {
                     automationRuntime.markHydrationFailed(error);
+                    if (!typedb.HasTypesFromUnreal())
+                        UnrealTypesTimedOut = true;
+                    TrySettleSemanticGeneration();
                     connection.console.error(`DebugDatabase hydration failed: ${String(error)}`);
                     return;
                 }
@@ -403,6 +409,7 @@ connection.onInitialize((_params): InitializeResult => {
 
     CacheRootPath = LanguageServerOptions.canonicalProjectRoot;
     let cacheOutcome = automationRuntime.configure(LanguageServerOptions);
+    automationRuntime.beginScriptSemanticRefresh();
 
     //connection.console.log("RootPath: "+RootPath);
     //connection.console.log("RootUri: "+RootUri+" from "+_params.rootUri);
@@ -453,7 +460,9 @@ connection.onInitialize((_params): InitializeResult => {
     }
     else if (!cacheOutcome.loaded)
     {
-        readinessController.markPartialReady(cacheOutcome.message);
+        readinessController.markPartialReady(cacheOutcome.message, false);
+        if (scriptRoots.length == 0)
+            TrySettleSemanticGeneration();
     }
 
     return {
@@ -519,7 +528,10 @@ function DetectUnrealConnectionTimeout()
 {
     UnrealTypesTimedOut = true;
     if (!typedb.HasTypesFromUnreal())
-        readinessController.markPartialReady('Unreal connection timed out; diagnostics are parse-only.');
+    {
+        readinessController.markPartialReady('Unreal connection timed out; diagnostics are parse-only.', false);
+        TrySettleSemanticGeneration();
+    }
 }
 
 function DetectUnrealTypeListTimeout()
@@ -530,14 +542,15 @@ function DetectUnrealTypeListTimeout()
     }
     catch (error)
     {
-        readinessController.markPartialReady(`DebugDatabase hydration failed: ${String(error)}`);
+        automationRuntime.markHydrationFailed(error);
+        if (!typedb.HasTypesFromUnreal())
+            UnrealTypesTimedOut = true;
+        TrySettleSemanticGeneration();
         return;
     }
 
-    // Make sure no modules are resolved anymore
-    if (PendingReResolveAfterInitialParse)
-        PendingReResolveAfterInitialParse = false;
-    ReResolveAllModules();
+    PendingReResolveAfterInitialParse = true;
+    MaybeReResolveAfterInitialParse();
 }
 
 function TickQueues()
@@ -648,14 +661,7 @@ function TickQueues()
     {
         IsServicingQueues = false;
         MaybeReResolveAfterInitialParse();
-        if (CanResolveModules() && scriptfiles.GetAllLoadedModules().every((module) => module.resolved))
-        {
-            automationRuntime.markCurrentGenerationFullReady();
-        }
-        else if (LanguageServerOptions && (!LanguageServerOptions.unrealOnline || UnrealTypesTimedOut))
-        {
-            readinessController.markPartialReady('Native TypeDB is unavailable; diagnostics are parse-only.');
-        }
+        TrySettleSemanticGeneration();
         // console.log("Finished servicing queues");
     }
 }
@@ -694,6 +700,7 @@ function ReResolveAllModules()
         return;
 
     scriptfiles.ClearAllResolvedModules();
+    let finishReResolve = reResolveWork.begin();
 
     // Update diagnostics on all modules
     let moduleIndex = 0;
@@ -710,7 +717,8 @@ function ReResolveAllModules()
                 clearInterval(timerHandle);
                 ScheduleSemanticTokensRefresh();
                 if (resolveGeneration == unrealCacheController.getGeneration())
-                    automationRuntime.markCurrentGenerationFullReady();
+                    automationRuntime.completeNativeRefresh();
+                finishReResolve();
                 return;
             }
 
@@ -728,6 +736,37 @@ function ReResolveAllModules()
 function CanResolveModules()
 {
     return typedb.HasTypesFromUnreal() && LoadQueue.length == 0;
+}
+
+function BeginModuleSemanticRefresh(module : scriptfiles.ASModule) : void
+{
+    PendingSemanticModules.add(module);
+    automationRuntime.beginScriptSemanticRefresh();
+}
+
+function FinishModuleSemanticRefresh(module : scriptfiles.ASModule) : void
+{
+    PendingSemanticModules.delete(module);
+    TrySettleSemanticGeneration();
+}
+
+function TrySettleSemanticGeneration() : void
+{
+    if (PendingSemanticModules.size != 0 || IsServicingQueues || reResolveWork.hasActiveWork()
+        || automationRuntime.nativeRefreshPending)
+        return;
+    if (CanResolveModules() && scriptfiles.GetAllLoadedModules().every((module) => module.resolved))
+    {
+        automationRuntime.markCurrentGenerationFullReady();
+    }
+    else if (readinessController.snapshot().stage == 'partial')
+    {
+        readinessController.markPartialReady(readinessController.snapshot().cacheReason);
+    }
+    else if (LanguageServerOptions && (!LanguageServerOptions.unrealOnline || UnrealTypesTimedOut))
+    {
+        readinessController.markPartialReady('Native TypeDB is unavailable; diagnostics are parse-only.');
+    }
 }
 
 function ScheduleSemanticTokensRefresh()
@@ -780,6 +819,7 @@ connection.onDidChangeWatchedFiles((_change) => {
         let module = scriptfiles.GetOrCreateModule(getModuleName(change.uri), getPathName(change.uri), change.uri);
         if (module)
         {
+            BeginModuleSemanticRefresh(module);
             if (!module.isOpened)
                 scriptfiles.UpdateModuleFromDisk(module);
             scriptfiles.ParseModule(module);
@@ -788,8 +828,6 @@ connection.onDidChangeWatchedFiles((_change) => {
             {
                 scriptfiles.PostProcessModuleTypes(module);
                 scriptfiles.ResolveModule(module);
-                automationRuntime.scriptGenerationChanged();
-
                 let alwaysSendDiagnostics = false;
                 if (change.type == FileChangeType.Deleted)
                     alwaysSendDiagnostics = true;
@@ -798,6 +836,7 @@ connection.onDidChangeWatchedFiles((_change) => {
 
                 scriptdiagnostics.UpdateScriptModuleDiagnostics(module, false, alwaysSendDiagnostics);
             }
+            FinishModuleSemanticRefresh(module);
         }
     }
 });
@@ -1223,9 +1262,9 @@ function TriggerThrottledModuleParse(asmodule : scriptfiles.ASModule)
         {
             scriptfiles.PostProcessModuleTypes(asmodule);
             scriptfiles.ResolveModule(asmodule);
-            automationRuntime.scriptGenerationChanged();
             scriptdiagnostics.UpdateScriptModuleDiagnostics(asmodule);
         }
+        FinishModuleSemanticRefresh(asmodule);
 
         asmodule.parseDelay = setTimeout(function() {
             asmodule.parseDelay = null;
@@ -1257,6 +1296,7 @@ connection.onDidChangeTextDocument((params) => {
     let modulename = getModuleName(uri);
 
     let asmodule = scriptfiles.GetOrCreateModule(modulename, getPathName(uri), uri);
+    BeginModuleSemanticRefresh(asmodule);
     if (!asmodule.loaded)
         scriptfiles.UpdateModuleFromDisk(asmodule);
     scriptfiles.UpdateModuleFromContentChanges(asmodule, params.contentChanges);
@@ -1286,6 +1326,7 @@ connection.onDidOpenTextDocument(function (params : DidOpenTextDocumentParams)
     let modulename = getModuleName(uri);
 
     let asmodule = scriptfiles.GetOrCreateModule(modulename, getPathName(uri), uri);
+    BeginModuleSemanticRefresh(asmodule);
     asmodule.isOpened = true;
     scriptfiles.UpdateModuleFromContent(asmodule, params.textDocument.text);
     scriptfiles.LoadAndParseModule(asmodule);
@@ -1293,9 +1334,9 @@ connection.onDidOpenTextDocument(function (params : DidOpenTextDocumentParams)
     {
         scriptfiles.PostProcessModuleTypes(asmodule);
         scriptfiles.ResolveModule(asmodule);
-        automationRuntime.scriptGenerationChanged();
         scriptdiagnostics.UpdateScriptModuleDiagnostics(asmodule);
     }
+    FinishModuleSemanticRefresh(asmodule);
 });
 
 connection.onDidCloseTextDocument(function (params : DidCloseTextDocumentParams)

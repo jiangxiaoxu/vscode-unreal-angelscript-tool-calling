@@ -15,6 +15,7 @@ import { Complete } from '../parsed_completion';
 import { ResolveSymbolAtPosition } from '../symbols';
 import { URI } from 'vscode-uri';
 import { createLanguageServerAutomationRuntime } from '../languageServerAutomationRuntime';
+import { createActiveWorkTracker } from '../activeWorkTracker';
 
 function nativeType(name: string, methodName?: string) : Record<string, unknown>
 {
@@ -33,6 +34,8 @@ test('beginRefresh atomically revokes ready coverage and the prior revision', ()
     readiness.beginRefresh(4);
     assert.deepEqual(readiness.snapshot(), {
         generation: 4,
+        semanticGeneration: 1,
+        settledSemanticGeneration: 0,
         stage: 'loading-cache',
         fullReady: false,
         coverage: 'none',
@@ -43,6 +46,41 @@ test('beginRefresh atomically revokes ready coverage and the prior revision', ()
         revision: undefined,
     });
     assert.equal(notifications.length, 2);
+});
+
+test('semantic generations remain unsettled until parsing and resolution explicitly finish', () => {
+    let readiness = createLanguageServerReadinessController(() => {});
+    readiness.markFullReady();
+    assert.equal(readiness.snapshot().semanticGeneration, 0);
+    assert.equal(readiness.snapshot().settledSemanticGeneration, 0);
+
+    assert.equal(readiness.beginSemanticRefresh(), 1);
+    assert.deepEqual(readiness.snapshot(), {
+        generation: 0,
+        semanticGeneration: 1,
+        settledSemanticGeneration: 0,
+        stage: 'parsing',
+        fullReady: false,
+        coverage: 'none',
+        unrealOnline: false,
+        unrealConnected: false,
+        cache: 'not-checked',
+    });
+
+    readiness.markFullReady();
+    assert.equal(readiness.snapshot().fullReady, true);
+    assert.equal(readiness.snapshot().semanticGeneration, 1);
+    assert.equal(readiness.snapshot().settledSemanticGeneration, 1);
+    assert.throws(() => readiness.update({ semanticGeneration: 0 }), /cannot move backwards/);
+
+    readiness.beginSemanticRefresh();
+    assert.throws(() => readiness.update({ fullReady: true }), /requires a settled semantic generation/);
+
+    readiness.markPartialReady('Parsing is still in progress.', false);
+    assert.equal(readiness.snapshot().stage, 'partial');
+    assert.ok(readiness.snapshot().semanticGeneration > readiness.snapshot().settledSemanticGeneration);
+    readiness.markPartialReady('Parsing completed.');
+    assert.equal(readiness.snapshot().semanticGeneration, readiness.snapshot().settledSemanticGeneration);
 });
 
 test('cache publication is fenced by generation and cannot publish mixed chunks', async () => {
@@ -157,6 +195,8 @@ test('failed live refresh restores the prior full-ready status and revision', ()
     runtime.markHydrationFailed(failure);
     assert.deepEqual(runtime.readiness.snapshot(), {
         generation: 2,
+        semanticGeneration: 1,
+        settledSemanticGeneration: 1,
         stage: 'ready',
         fullReady: true,
         coverage: 'full',
@@ -166,6 +206,101 @@ test('failed live refresh restores the prior full-ready status and revision', ()
         cacheReason: undefined,
         revision,
     });
+});
+
+test('hydration failure without a prior cache does not settle unfinished script parsing', () => {
+    let connection = {
+        sendNotification() {},
+        onRequest() {},
+        languages: { diagnostics: { on() {}, onWorkspace() {} } },
+        console: { error() {} },
+    } as any;
+    let runtime = createLanguageServerAutomationRuntime(connection, '1.9.3070');
+    runtime.beginScriptSemanticRefresh();
+    runtime.markHydrationFailed(new Error('invalid initial generation'));
+    let status = runtime.readiness.snapshot();
+    assert.equal(status.stage, 'partial');
+    assert.equal(status.fullReady, false);
+    assert.ok(status.semanticGeneration > status.settledSemanticGeneration);
+});
+
+test('script changes during a failed native refresh remain fenced until separately settled', () => {
+    ResetDatabaseForTests();
+    let connection = {
+        sendNotification() {},
+        onRequest() {},
+        languages: { diagnostics: { on() {}, onWorkspace() {} } },
+        console: { error() {} },
+    } as any;
+    let runtime = createLanguageServerAutomationRuntime(connection, '1.9.3070');
+    runtime.cache.beginRefresh();
+    runtime.cache.recordDebugDatabaseChunk(nativeType('UInterleavedAccepted'));
+    runtime.cache.hydrateRecordedGeneration();
+    let revision = runtime.cache.getRevision()!;
+    runtime.readiness.update({ generation: 1, stage: 'ready', fullReady: true, coverage: 'full', revision });
+
+    runtime.beginLiveRefresh();
+    runtime.beginScriptSemanticRefresh();
+    runtime.markCurrentGenerationFullReady();
+    assert.equal(runtime.readiness.snapshot().fullReady, false);
+    assert.equal(runtime.nativeRefreshPending, true);
+
+    runtime.cache.recordDebugDatabaseChunk({ UInvalidInterleavedReplacement: { properties: { Broken: null }, methods: {} } });
+    let failure: unknown;
+    try { runtime.cache.hydrateRecordedGeneration(); } catch (error) { failure = error; }
+    runtime.markHydrationFailed(failure);
+    let failed = runtime.readiness.snapshot();
+    assert.equal(runtime.nativeRefreshPending, false);
+    assert.equal(failed.fullReady, false);
+    assert.equal(failed.stage, 'parsing');
+    assert.ok(failed.semanticGeneration > failed.settledSemanticGeneration);
+    assert.equal(failed.revision, revision);
+
+    runtime.markCurrentGenerationFullReady();
+    let settled = runtime.readiness.snapshot();
+    assert.equal(settled.fullReady, true);
+    assert.equal(settled.semanticGeneration, settled.settledSemanticGeneration);
+});
+
+test('a stale re-resolve completion settles work left pending by a failed newer native refresh', () => {
+    ResetDatabaseForTests();
+    let connection = {
+        sendNotification() {},
+        onRequest() {},
+        languages: { diagnostics: { on() {}, onWorkspace() {} } },
+        console: { error() {} },
+    } as any;
+    let runtime = createLanguageServerAutomationRuntime(connection, '1.9.3070');
+    runtime.cache.beginRefresh();
+    runtime.cache.recordDebugDatabaseChunk(nativeType('UStaleResolveAccepted'));
+    runtime.cache.hydrateRecordedGeneration();
+    let revision = runtime.cache.getRevision()!;
+    runtime.readiness.update({ generation: 1, stage: 'ready', fullReady: true, coverage: 'full', revision });
+
+    let settledCount = 0;
+    let tracker = createActiveWorkTracker(() => {
+        settledCount += 1;
+        runtime.markCurrentGenerationFullReady();
+    });
+    let finishStaleResolve = tracker.begin();
+
+    runtime.beginLiveRefresh();
+    runtime.beginScriptSemanticRefresh();
+    runtime.cache.recordDebugDatabaseChunk({ UInvalidNewerRefresh: { properties: { Broken: null }, methods: {} } });
+    let failure: unknown;
+    try { runtime.cache.hydrateRecordedGeneration(); } catch (error) { failure = error; }
+    runtime.markHydrationFailed(failure);
+    assert.equal(runtime.nativeRefreshPending, false);
+    assert.equal(runtime.readiness.snapshot().fullReady, false);
+    assert.equal(tracker.hasActiveWork(), true);
+
+    finishStaleResolve();
+    assert.equal(settledCount, 1);
+    assert.equal(tracker.hasActiveWork(), false);
+    assert.equal(runtime.readiness.snapshot().fullReady, true);
+    assert.equal(runtime.readiness.snapshot().semanticGeneration,
+        runtime.readiness.snapshot().settledSemanticGeneration);
+    assert.throws(finishStaleResolve, /only be reported once/);
 });
 
 test('cached startup refresh failure advances the restored generation and can finish initial readiness', () => {

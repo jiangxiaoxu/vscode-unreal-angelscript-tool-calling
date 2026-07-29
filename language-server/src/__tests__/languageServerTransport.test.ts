@@ -24,11 +24,13 @@ type TestClient = {
     close: () => Promise<void>;
 };
 
-function createProject(content = 'class transport_fixture { int Bad_name; }\n') : string
+function createProject(content = 'class transport_fixture { int Bad_name; }\n', additionalFileCount = 0) : string
 {
     let root = fs.mkdtempSync(path.join(os.tmpdir(), 'as-ls-transport-'));
     fs.mkdirSync(path.join(root, 'Script'), { recursive: true });
     fs.writeFileSync(path.join(root, 'Script', 'TransportFixture.as'), content);
+    for (let index = 0; index < additionalFileCount; ++index)
+        fs.writeFileSync(path.join(root, 'Script', `TransportFixture${index}.as`), `class UTransportFixture${index} {}\n`);
     return root;
 }
 
@@ -209,6 +211,56 @@ for (let transport of ['stdio', 'ipc'] as const)
     });
 }
 
+test('offline missing-cache startup does not settle before the initial parse queue drains', async () => {
+    let root = createProject(undefined, 300);
+    let client = createClient('stdio');
+    try
+    {
+        let initialize = await client.request('initialize', {
+            processId: process.pid,
+            rootUri: `file:///${root.replace(/\\/g, '/')}`,
+            capabilities: {},
+            initializationOptions: {
+                role: 'cli-direct',
+                canonicalProjectRoot: root,
+                projectIdentity: 'missing-cache-unsettled-fixture',
+                unreal: { online: false },
+                cache: {
+                    access: 'read-only',
+                    path: path.join(root, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.v2.json.gz'),
+                },
+            },
+        });
+        assert.equal(initialize.error, undefined);
+        client.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
+
+        let early = (await client.request('angelscript/diagnosticsStatus')).result as {
+            stage: string;
+            semanticGeneration: number;
+            settledSemanticGeneration: number;
+        };
+        assert.equal(early.stage, 'partial');
+        assert.ok(early.semanticGeneration > early.settledSemanticGeneration,
+            'The initial parse queue must remain externally unsettled.');
+
+        let settled = false;
+        for (let attempt = 0; attempt < 200 && !settled; ++attempt)
+        {
+            let status = (await client.request('angelscript/diagnosticsStatus')).result as typeof early;
+            settled = status.stage == 'partial'
+                && status.semanticGeneration == status.settledSemanticGeneration;
+            if (!settled)
+                await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(settled, true);
+    }
+    finally
+    {
+        await client.close();
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test('cached stdio startup resolves loaded scripts before publishing full readiness', async () => {
     let root = createProject();
     let projectIdentity = 'cached-transport-fixture';
@@ -295,11 +347,69 @@ test('zero-diagnostic symbol rename republishes the script-revision API index', 
             method: 'textDocument/didOpen',
             params: { textDocument: { uri: scriptUri, languageId: 'angelscript', version: 1, text: 'class UIndexBefore {}\n' } },
         });
+        let openedStatus: { fullReady: boolean; semanticGeneration: number; settledSemanticGeneration: number } | undefined;
+        for (let attempt = 0; attempt < 80; attempt += 1)
+        {
+            let response = await client.request('angelscript/diagnosticsStatus');
+            openedStatus = response.result as typeof openedStatus;
+            if (openedStatus!.fullReady
+                && openedStatus!.semanticGeneration == openedStatus!.settledSemanticGeneration)
+                break;
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        assert.ok(openedStatus?.fullReady);
+        assert.equal(openedStatus!.semanticGeneration, openedStatus!.settledSemanticGeneration);
+        let diagnosticsBefore = await client.request('textDocument/diagnostic', {
+            textDocument: { uri: scriptUri },
+        });
+        let diagnosticsResultIdBefore = (diagnosticsBefore.result as { resultId: string }).resultId;
+
         client.send({
             jsonrpc: '2.0',
             method: 'textDocument/didChange',
-            params: { textDocument: { uri: scriptUri, version: 2 }, contentChanges: [{ text: 'class UIndexAfter {}\n' }] },
+            params: { textDocument: { uri: scriptUri, version: 2 }, contentChanges: [{ text: 'class UIndexMiddle {}\n' }] },
         });
+        let middleStatus = (await client.request('angelscript/diagnosticsStatus')).result as {
+            fullReady: boolean;
+            semanticGeneration: number;
+            settledSemanticGeneration: number;
+        };
+        assert.equal(middleStatus.fullReady, true);
+        assert.equal(middleStatus.semanticGeneration, middleStatus.settledSemanticGeneration);
+        assert.ok(middleStatus.semanticGeneration > openedStatus!.semanticGeneration);
+
+        let stableBefore = middleStatus;
+        let stableQuery = await client.request('angelscript/queryAPI', { query: 'UIndexMiddle' });
+        assert.equal(stableQuery.error, undefined);
+        let stableAfter = (await client.request('angelscript/diagnosticsStatus')).result as typeof middleStatus;
+        assert.equal(stableAfter.semanticGeneration, stableBefore.semanticGeneration);
+        assert.equal(stableAfter.semanticGeneration, stableAfter.settledSemanticGeneration);
+
+        client.send({
+            jsonrpc: '2.0',
+            method: 'textDocument/didChange',
+            params: { textDocument: { uri: scriptUri, version: 3 }, contentChanges: [{ text: 'class UIndexAfter {}\n' }] },
+        });
+        let loadingStatus = (await client.request('angelscript/diagnosticsStatus')).result as typeof middleStatus;
+        assert.equal(loadingStatus.fullReady, false);
+        assert.ok(loadingStatus.semanticGeneration > loadingStatus.settledSemanticGeneration);
+        assert.ok(loadingStatus.semanticGeneration > stableBefore.semanticGeneration);
+
+        let crossingQuery = await client.request('angelscript/queryAPI', { query: 'UIndexAfter' });
+        assert.equal(crossingQuery.error, undefined);
+        let crossingAfter = (await client.request('angelscript/diagnosticsStatus')).result as typeof middleStatus;
+        assert.equal(crossingAfter.fullReady, true);
+        assert.equal(crossingAfter.semanticGeneration, crossingAfter.settledSemanticGeneration);
+        assert.notEqual(crossingAfter.semanticGeneration, stableBefore.semanticGeneration,
+            'A status-before/request/status-after client must reject a request that crossed semantic generations.');
+        let diagnosticsAfter = await client.request('textDocument/diagnostic', {
+            textDocument: { uri: scriptUri },
+            previousResultId: diagnosticsResultIdBefore,
+        });
+        assert.equal((diagnosticsAfter.result as { kind: string }).kind, 'full');
+        assert.notEqual((diagnosticsAfter.result as { resultId: string }).resultId, diagnosticsResultIdBefore,
+            'Zero-diagnostic semantic changes must still invalidate diagnostic result IDs.');
+
         let afterRevision = beforeRevision;
         let afterNames: string[] = [];
         for (let attempt = 0; attempt < 120 && afterRevision == beforeRevision; attempt += 1)

@@ -24,6 +24,8 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
     const diagnostics = createWorkspaceDiagnosticsRegistry();
     const publication = createDebouncedPublication();
     let preRefreshStatus: LanguageServerDiagnosticsStatus | null = null;
+    let nativeRefreshPending = false;
+    let nativeRefreshSemanticGeneration: number | null = null;
     const readiness = createLanguageServerReadinessController((status) => {
         connection.sendNotification('angelscript/diagnosticsStatus', status);
     });
@@ -68,6 +70,8 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
         preRefreshStatus = readiness.snapshot();
         let generation = cache.beginRefresh();
         readiness.beginRefresh(generation);
+        nativeRefreshPending = true;
+        nativeRefreshSemanticGeneration = readiness.snapshot().semanticGeneration;
         readiness.update({ unrealConnected: true, unrealOnline: true });
         publication.cancel();
         return generation;
@@ -77,10 +81,40 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
     {
         if (preRefreshStatus && cache.getRevision())
         {
-            readiness.update({ ...preRefreshStatus, generation: cache.getGeneration(), unrealConnected: true });
+            let currentStatus = readiness.snapshot();
+            let semanticGeneration = currentStatus.semanticGeneration;
+            let onlyNativeRefreshChangedSemantics = semanticGeneration == nativeRefreshSemanticGeneration;
+            let priorSemanticsWereSettled = preRefreshStatus.semanticGeneration
+                == preRefreshStatus.settledSemanticGeneration;
+            nativeRefreshPending = false;
+            nativeRefreshSemanticGeneration = null;
+            if (onlyNativeRefreshChangedSemantics)
+            {
+                readiness.update({
+                    ...preRefreshStatus,
+                    generation: cache.getGeneration(),
+                    semanticGeneration,
+                    settledSemanticGeneration: priorSemanticsWereSettled
+                        ? semanticGeneration
+                        : preRefreshStatus.settledSemanticGeneration,
+                    unrealConnected: true,
+                });
+            }
+            else
+            {
+                readiness.update({
+                    generation: cache.getGeneration(),
+                    revision: cache.getRevision(),
+                    cache: preRefreshStatus.cache,
+                    cacheReason: preRefreshStatus.cacheReason,
+                    unrealConnected: true,
+                });
+            }
             preRefreshStatus = null;
             return;
         }
+        nativeRefreshPending = false;
+        nativeRefreshSemanticGeneration = null;
         readiness.update({
             stage: 'partial',
             fullReady: false,
@@ -102,7 +136,7 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
         if (!options)
             throw new Error('Language Server initialization is incomplete.');
         let status = readiness.snapshot();
-        if (!status.fullReady)
+        if (!status.fullReady || status.semanticGeneration != status.settledSemanticGeneration)
             throw new Error(`Language Server is not fully ready (stage=${status.stage}).`);
         let revision = cache.getRevision() ?? status.revision;
         if (!revision)
@@ -128,11 +162,15 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
 
     function scheduleIndexExport() : void
     {
-        if (options?.role != 'ue-resident' || !readiness.snapshot().fullReady)
+        let status = readiness.snapshot();
+        if (options?.role != 'ue-resident' || !status.fullReady
+            || status.semanticGeneration != status.settledSemanticGeneration)
             return;
-        let generation = cache.getGeneration();
-        publication.schedule(generation, () => {
-            if (generation != cache.getGeneration() || !readiness.snapshot().fullReady)
+        let semanticGeneration = status.semanticGeneration;
+        publication.schedule(semanticGeneration, () => {
+            let current = readiness.snapshot();
+            if (semanticGeneration != current.semanticGeneration || !current.fullReady
+                || current.semanticGeneration != current.settledSemanticGeneration)
                 return;
             try { exportApiQueryIndex(); } catch (error) { connection.console.error(`API query index export failed: ${String(error)}`); }
         });
@@ -151,12 +189,15 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
 
     function markCurrentGenerationFullReady() : void
     {
+        if (nativeRefreshPending)
+            return;
         let generation = cache.getGeneration();
         let revision = cache.getRevision();
         let status = readiness.snapshot();
         if (status.generation != generation || !revision)
             return;
-        readiness.update({ generation, revision, stage: 'ready', fullReady: true, coverage: 'full' });
+        readiness.update({ generation, revision });
+        readiness.markFullReady();
         scheduleIndexExport();
     }
 
@@ -165,9 +206,16 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
         diagnostics.update(uri, values);
     }
 
-    function scriptGenerationChanged() : void
+    function beginScriptSemanticRefresh() : number
     {
-        scheduleIndexExport();
+        publication.cancel();
+        return readiness.beginSemanticRefresh();
+    }
+
+    function completeNativeRefresh() : void
+    {
+        nativeRefreshPending = false;
+        nativeRefreshSemanticGeneration = null;
     }
 
     function shutdown() : void
@@ -189,7 +237,9 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
         scheduleIndexExport,
         exportApiQueryIndex,
         updateDiagnostics,
-        scriptGenerationChanged,
+        beginScriptSemanticRefresh,
+        completeNativeRefresh,
+        get nativeRefreshPending() { return nativeRefreshPending; },
         shutdown,
         get options() { return options; },
     };

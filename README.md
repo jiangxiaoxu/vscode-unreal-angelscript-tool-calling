@@ -92,6 +92,7 @@ The extension restores cache data at startup to provide baseline capabilities wi
 - Publication uses a unique same-directory temporary file, fsync, and atomic rename. The legacy `.vscode/angelscript/unreal-cache.json` is neither read nor deleted.
 - The language server also exports `api-query-index.v1.json.gz`, bound to both the native DebugDatabase revision and loaded script-content revision; its standalone runtime can answer API queries without loading the global TypeDB.
 - Standard `textDocument/diagnostic` and `workspace/diagnostic` pull requests return deterministic result IDs and support unchanged reports through previous-result IDs.
+- `angelscript/diagnosticsStatus` exposes monotonic `semanticGeneration` and `settledSemanticGeneration` counters. A request snapshot is stable only when both counters match, `fullReady` is true, and the counters remain unchanged across status-before/request/status-after.
 
 ### Build
 - `npm install` installs the root dependencies and the nested `extension` and `language-server` packages via `postinstall`.
@@ -162,6 +163,7 @@ Color theme 不一定能区分所有 AngelScript semantic scope. 如需更明显
 - 发布使用同目录唯一临时文件、fsync 和 atomic rename. 旧 `.vscode/angelscript/unreal-cache.json` 不再读取,也不会自动删除.
 - Language Server 还会导出同时绑定 native DebugDatabase revision 与已加载 script-content revision 的 `api-query-index.v1.json.gz`;standalone runtime 无需加载 global TypeDB 即可执行 API query.
 - 标准 `textDocument/diagnostic` 与 `workspace/diagnostic` pull request 会返回确定性的 result ID,并通过 previous-result ID 支持 unchanged report.
+- `angelscript/diagnosticsStatus` 提供单调递增的 `semanticGeneration` 与 `settledSemanticGeneration`. 只有两者相等、`fullReady` 为 true,且 status-before/request/status-after 的计数保持不变时,request snapshot 才稳定.
 
 ### 构建
 - `npm install` 会安装根目录依赖,并通过 `postinstall` 安装嵌套的 `extension` 和 `language-server` 包依赖.

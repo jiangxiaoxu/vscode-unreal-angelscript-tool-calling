@@ -55,7 +55,7 @@ export function registerWorkspaceDiagnostics(
 ) : void
 {
     let resultId = (contentHash: string, status: LanguageServerDiagnosticsStatus) =>
-        `${status.generation}:${status.revision ?? 'partial'}:${contentHash}`;
+        `${status.generation}:${status.semanticGeneration}:${status.revision ?? 'partial'}:${contentHash}`;
 
     connection.languages.diagnostics.on((params) : DocumentDiagnosticReport => {
         let status = getStatus();

@@ -14,6 +14,7 @@ Maintenance rule:
 - Added typed `ue-resident`, `cli-direct`, and `vscode` Language Server initialization roles while preserving both stdio and IPC transports. Unreal connection startup now happens after `initialize`, and offline direct clients no longer wait for the Unreal connection timeout.
 - Replaced the legacy `.vscode` cache with a read-only-by-default, revisioned gzip v2 cache under `Saved/ASEditorAutomation/LanguageServer`; only `ue-resident` may publish it.
 - Added readiness status, standard `textDocument/diagnostic` and `workspace/diagnostic` pull support with unchanged reports, full-ready API request gating, and bounded shutdown cleanup.
+- Readiness now fences script reloads with monotonic active and settled semantic generations, so stdio clients can reject requests that cross a parse or resolve generation without relying on notification ordering.
 - Added an API query index bound to both native and script-content revisions, an export request, and a standalone pure query runtime that does not load the global TypeDB.
 - Removed the VS Code LM tool integration and implementation. The reusable language-server API query core remains available through dedicated request handlers.
 - Removed the lookup-time fallback retry for local `auto` variable inference. `auto` member access now relies on declaration-time synchronization of the resolved initializer type into the local variable model.
@@ -41,6 +42,7 @@ Maintenance rule:
 - 新增 typed `ue-resident`、`cli-direct` 和 `vscode` Language Server initialization roles,同时保留 stdio 与 IPC transports. Unreal connection 改为在 `initialize` 后启动,offline direct client 不再等待 Unreal connection timeout.
 - 旧 `.vscode` cache 已替换为 `Saved/ASEditorAutomation/LanguageServer` 下默认只读且绑定 revision 的 gzip v2 cache;只有 `ue-resident` 可以发布.
 - 新增 readiness status、支持 unchanged report 的标准 `textDocument/diagnostic` 与 `workspace/diagnostic` pull、full-ready API request gate 和 bounded shutdown cleanup.
+- Readiness 现在使用单调递增的 active/settled semantic generations 隔离 script reload,stdio client 无需依赖 notification 顺序即可拒绝跨 parse 或 resolve generation 的 request.
 - 新增同时绑定 native 与 script-content revision 的 API query index、export request 和不加载 global TypeDB 的 standalone pure query runtime.
 - 已删除 VS Code LM tool 集成与实现. 可复用的 language-server API query core 继续通过独立 request handlers 保留.
 - 已移除 local `auto` 变量推断的 lookup 阶段 fallback retry. `auto` member access 现在依赖声明期同步,直接把已解析的 initializer 类型写回 local variable 模型.
