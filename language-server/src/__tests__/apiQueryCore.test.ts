@@ -736,6 +736,141 @@ test('GetAPISymbolMembers returns ambiguity candidates and same-name namespace/t
     }
 });
 
+test('GetAPISymbolMembers filters type members by their declared source before paging', () =>
+{
+    const core = GetRootNamespace().findChildNamespace('Core');
+    assert.ok(core);
+
+    const nativeConstructor = constructor('FSourceOwner', []);
+    const scriptConstructor = constructor('FSourceOwner', [{ type: 'int', name: 'Value' }]);
+    scriptConstructor.declaredModule = 'Game.SourceOwner';
+    const owner = type(core, 'FSourceOwner', {
+        struct: true,
+        methods: [
+            nativeConstructor,
+            scriptConstructor,
+            method('NativeMethod', null),
+            method('ScriptMethod', 'Game.SourceOwner'),
+        ],
+        properties: [
+            property('NativeProperty', null),
+            property('ScriptProperty', 'Game.SourceOwner'),
+        ],
+    });
+    const nativeNested = new DBType().initEmpty('FNativeNested');
+    nativeNested.declaredModule = null;
+    nativeNested.isStruct = true;
+    owner.addSymbol(nativeNested);
+    const scriptNested = new DBType().initEmpty('FScriptNested');
+    scriptNested.declaredModule = 'Game.SourceOwner';
+    scriptNested.isStruct = true;
+    owner.addSymbol(scriptNested);
+    core.addSymbol(method('NativeSourceMixin', null, [{ type: 'Core::FSourceOwner', name: 'Target' }], { mixin: true }));
+    core.addSymbol(method('ScriptSourceMixin', 'Game.SourceOwner', [{ type: 'Core::FSourceOwner', name: 'Target' }], { mixin: true }));
+    OnDirtyTypeCaches();
+
+    const read = (source: 'native' | 'script' | 'both', limit = 200, offset = 0) => GetAPISymbolMembers({
+        name: 'Core::FSourceOwner',
+        ownerKind: 'type',
+        source,
+        members: ['all'],
+        limit,
+        offset,
+    });
+    const native = read('native');
+    const script = read('script');
+    const both = read('both');
+    assert.equal(native.ok, true, JSON.stringify(native));
+    assert.equal(script.ok, true, JSON.stringify(script));
+    assert.equal(both.ok, true, JSON.stringify(both));
+    if (!native.ok || !script.ok || !both.ok)
+        return;
+
+    const nativeItems = native.data.groups[0].members.items;
+    const scriptItems = script.data.groups[0].members.items;
+    const bothItems = both.data.groups[0].members.items;
+    assert.ok(nativeItems.length > 0);
+    assert.ok(scriptItems.length > 0);
+    assert.ok(nativeItems.every((member) => member.source === 'native'));
+    assert.ok(scriptItems.every((member) => member.source === 'script'));
+    assert.equal(bothItems.length, nativeItems.length + scriptItems.length);
+    assert.ok(bothItems.some((member) => member.name === 'NativeMethod' && member.source === 'native'));
+    assert.ok(bothItems.some((member) => member.name === 'ScriptMethod' && member.source === 'script'));
+    assert.ok(bothItems.some((member) => member.name === 'NativeProperty' && member.source === 'native'));
+    assert.ok(bothItems.some((member) => member.name === 'ScriptProperty' && member.source === 'script'));
+    assert.ok(bothItems.some((member) => member.name === 'NativeSourceMixin' && member.source === 'native' && member.isMixin === true));
+    assert.ok(bothItems.some((member) => member.name === 'ScriptSourceMixin' && member.source === 'script' && member.isMixin === true));
+    assert.ok(bothItems.some((member) => member.name === 'FNativeNested' && member.source === 'native'));
+    assert.ok(bothItems.some((member) => member.name === 'FScriptNested' && member.source === 'script'));
+    assert.ok(bothItems.some((member) => member.kind === 'constructor' && member.source === 'native'));
+    assert.ok(bothItems.some((member) => member.kind === 'constructor' && member.source === 'script'));
+
+    const scriptPage = read('script', 1, 1);
+    assert.equal(scriptPage.ok, true, JSON.stringify(scriptPage));
+    if (scriptPage.ok)
+    {
+        assert.equal(scriptPage.data.groups[0].members.total, scriptItems.length);
+        assert.deepEqual(scriptPage.data.groups[0].members.items, scriptItems.slice(1, 2));
+    }
+
+    const nativeInherited = GetAPISymbolMembers({
+        name: 'Core::UDerived',
+        ownerKind: 'type',
+        source: 'native',
+        members: ['data'],
+        includeInherited: true,
+        limit: 200,
+    });
+    assert.equal(nativeInherited.ok, true, JSON.stringify(nativeInherited));
+    if (nativeInherited.ok)
+    {
+        assert.equal(nativeInherited.data.groups[0].ownerSource, 'script');
+        assert.ok(nativeInherited.data.groups[0].members.items.some((member) =>
+            member.name === 'BaseValue'
+            && member.source === 'native'
+            && member.inheritedFrom === 'Core::UBase'));
+        assert.ok(nativeInherited.data.groups[0].members.items.every((member) => member.source === 'native'));
+    }
+
+    const emptyScriptView = GetAPISymbolMembers({
+        name: 'Core::FCollision',
+        ownerKind: 'type',
+        source: 'script',
+        members: ['all'],
+        limit: 200,
+    });
+    assert.equal(emptyScriptView.ok, true, JSON.stringify(emptyScriptView));
+    if (emptyScriptView.ok)
+    {
+        assert.equal(emptyScriptView.data.groups[0].ownerSource, 'native');
+        assert.equal(emptyScriptView.data.groups[0].members.total, 0);
+    }
+});
+
+test('GetAPISymbolMembers preserves namespace owner source resolution', () =>
+{
+    const native = GetAPISymbolMembers({
+        name: 'Core', ownerKind: 'namespace', source: 'native', members: ['callable'], limit: 200,
+    });
+    const script = GetAPISymbolMembers({
+        name: 'Core', ownerKind: 'namespace', source: 'script', members: ['callable'], limit: 200,
+    });
+    assert.equal(native.ok, true, JSON.stringify(native));
+    assert.equal(script.ok, true, JSON.stringify(script));
+    if (native.ok && script.ok)
+    {
+        assert.ok(native.data.groups[0].members.items.every((member) => member.source === 'native'));
+        assert.ok(script.data.groups[0].members.items.every((member) => member.source === 'script'));
+    }
+
+    const missingSource = GetAPISymbolMembers({
+        name: 'Other', ownerKind: 'namespace', source: 'script', members: ['all'], limit: 200,
+    });
+    assert.equal(missingSource.ok, false);
+    if (!missingSource.ok)
+        assert.equal(missingSource.error.code, 'NotFound');
+});
+
 test('GetAPIClassHierarchy uses source-qualified identities and reports depth and breadth truncation', () =>
 {
     const result = GetAPIClassHierarchy({ name: 'Core::UBase', maxSuperDepth: 0, maxSubDepth: 1, maxSubBreadth: 1 });

@@ -14,6 +14,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'node:url';
 
 type ApiSearchSource = "native" | "script" | "both";
+type ApiDeclaredSource = Exclude<ApiSearchSource, "both">;
 
 type TypeMemberVisibility = "public" | "protected" | "private";
 
@@ -33,7 +34,7 @@ type CollectedTypeMember = {
     visibility: TypeMemberVisibility;
     ownerQualifiedName?: string;
     args?: ApiConstructorArgument[];
-    source?: ApiSearchSource;
+    source: ApiDeclaredSource;
     isCallable?: boolean;
     symbolId?: string;
     requiredArgumentCount?: number;
@@ -57,8 +58,12 @@ function matchesSearchSource(declaredModule: string | null | undefined, source: 
 {
     if (source == "both")
         return true;
-    let isScript = typeof declaredModule == "string" && declaredModule.length > 0;
-    return source == "script" ? isScript : !isScript;
+    return sourceOfDeclaredModule(declaredModule) == source;
+}
+
+function sourceOfDeclaredModule(declaredModule: string | null | undefined) : ApiDeclaredSource
+{
+    return typeof declaredModule == "string" && declaredModule.length > 0 ? "script" : "native";
 }
 
 function isClassType(dbType: typedb.DBType) : boolean
@@ -845,6 +850,7 @@ function collectTypeMemberRecords(
                     accessorKind: accessorKind ?? undefined,
                     propertyName: propertyName ?? undefined,
                     visibility: visibility,
+                    source: sourceOfDeclaredModule(symbol.declaredModule),
                     isCallable: symbol.isCallable !== false,
                 });
             }
@@ -864,7 +870,8 @@ function collectTypeMemberRecords(
                 if (includeDocs)
                     description = formatPropertyDocumentationPlain(symbol.documentation);
 
-                let key = `property|${declaredInName}|${symbol.name}|${symbol.typename}`;
+                let memberSource = sourceOfDeclaredModule(symbol.declaredModule);
+                let key = `property|${memberSource}|${declaredInName}|${symbol.name}|${symbol.typename}`;
                 if (seenMembers.has(key))
                     return;
                 seenMembers.add(key);
@@ -880,6 +887,7 @@ function collectTypeMemberRecords(
                     isMixin: false,
                     isAccessor: false,
                     visibility: visibility,
+                    source: memberSource,
                 });
             }
         }, false);
@@ -933,6 +941,7 @@ function collectTypeMemberRecords(
                 accessorKind: accessorKind ?? undefined,
                 propertyName: propertyName ?? undefined,
                 visibility: visibility,
+                source: sourceOfDeclaredModule(symbol.declaredModule),
                 isCallable: symbol.isCallable !== false,
             });
         });
@@ -1092,7 +1101,7 @@ function normalizeMembersOffset(value: unknown) : number
 
 function sourceOfType(dbType: typedb.DBType) : 'native' | 'script'
 {
-    return dbType.declaredModule ? 'script' : 'native';
+    return sourceOfDeclaredModule(dbType.declaredModule);
 }
 
 function qualifiedTypeLookup(qualifiedName: string) : typedb.DBType | null
@@ -1120,7 +1129,7 @@ function normalizeMemberDocumentation(value: string | null | undefined) : string
     return text ? text : undefined;
 }
 
-function projectCollectedMember(member: CollectedTypeMember, ownerSource: 'native' | 'script') : ApiSymbolMember
+function projectCollectedMember(member: CollectedTypeMember) : ApiSymbolMember
 {
     let ownerQualifiedName = member.ownerQualifiedName ?? member.declaredIn;
     let kind: ApiSymbolMember['kind'] = member.kind;
@@ -1134,7 +1143,7 @@ function projectCollectedMember(member: CollectedTypeMember, ownerSource: 'nativ
         kind,
         declaration: member.signature,
         ownerQualifiedName,
-        source: member.source == 'script' ? 'script' : member.source == 'native' ? 'native' : ownerSource,
+        source: member.source,
         visibility: member.visibility,
         ...(member.description ? { documentation: member.description } : {}),
         ...(member.isInherited ? { inheritedFrom: member.declaredIn } : {}),
@@ -1191,6 +1200,7 @@ function paginateMemberItems(items: ApiSymbolMember[], offset: number, limit: nu
 
 function collectTypeMembers(
     owner: typedb.DBType,
+    source: ApiSearchSource,
     categories: ApiMemberCategory[],
     includeInherited: boolean,
     includeDocs: boolean,
@@ -1198,7 +1208,7 @@ function collectTypeMembers(
 ) : ApiSymbolMember[]
 {
     let members = collectTypeMemberRecords(owner, categories, includeInherited, includeDocs, includeNonPublic)
-        .map((member) => projectCollectedMember(member, sourceOfType(owner)));
+        .map(projectCollectedMember);
     members = members.filter((member) =>
     {
         if (member.kind == 'constructor')
@@ -1215,7 +1225,9 @@ function collectTypeMembers(
                 members.push(projectNestedType(symbol, owner.getQualifiedTypenameInNamespace(null), includeDocs));
         }, false);
     }
-    return members.sort(compareMembers);
+    return members
+        .filter((member) => source == 'both' || member.source == source)
+        .sort(compareMembers);
 }
 
 function collectNamespaceMembers(
@@ -1328,15 +1340,34 @@ export function GetAPISymbolMembers(payload: unknown) : GetAPISymbolMembersResul
         if (categories.length == 1 && categories[0] == 'constructor' && ownerKind == 'namespace')
             return invalidMembers('Invalid params. constructor members require a type owner.');
 
-        let exact = GetAPIExactSymbols({ name, source, includeDocs: false, includeNonPublic: true });
+        let exact = GetAPIExactSymbols({ name, source: 'both', includeDocs: false, includeNonPublic: true });
         if ('error' in exact)
             return exact.error.code == 'InvalidParams' ? invalidMembers(exact.error.message) : { ok: false, error: exact.error };
+        let namespaceExact = source == 'both'
+            ? exact
+            : GetAPIExactSymbols({ name, source, includeDocs: false, includeNonPublic: true });
+        if ('error' in namespaceExact && ownerKind == 'namespace')
+            return namespaceExact.error.code == 'InvalidParams'
+                ? invalidMembers(namespaceExact.error.message)
+                : { ok: false, error: namespaceExact.error };
+        let namespaceOwnerKeys = new Set('error' in namespaceExact
+            ? []
+            : namespaceExact.data.symbols
+                .filter((symbol) => symbol.kind == 'namespace')
+                .map((symbol) => `${symbol.qualifiedName}\u0000${symbol.source}`));
         let owners = exact.data.symbols.filter((symbol) =>
-            (ownerKind != 'type' && symbol.kind == 'namespace' && !(categories.length == 1 && categories[0] == 'constructor'))
+            (ownerKind != 'type'
+                && symbol.kind == 'namespace'
+                && !(categories.length == 1 && categories[0] == 'constructor')
+                && namespaceOwnerKeys.has(`${symbol.qualifiedName}\u0000${symbol.source}`))
             || (ownerKind != 'namespace' && (symbol.kind == 'class' || symbol.kind == 'struct' || symbol.kind == 'enum'))
         );
         if (owners.length == 0)
+        {
+            if ('error' in namespaceExact && namespaceExact.error.code != 'InvalidParams')
+                return { ok: false, error: namespaceExact.error };
             return invalidMembers(`API member target is not an eligible namespace or type owner: ${name}`);
+        }
         let qualifiedNames = [...new Set(owners.map((owner) => owner.qualifiedName))];
         if (qualifiedNames.length > 1)
         {
@@ -1364,7 +1395,7 @@ export function GetAPISymbolMembers(payload: unknown) : GetAPISymbolMembersResul
             let dbType = qualifiedTypeLookup(owner.qualifiedName);
             if (!dbType)
                 continue;
-            let items = collectTypeMembers(dbType, categories, includeInherited, includeDocs, includeNonPublic);
+            let items = collectTypeMembers(dbType, source, categories, includeInherited, includeDocs, includeNonPublic);
             groups.push({
                 owner: 'type',
                 ownerQualifiedName: owner.qualifiedName,
