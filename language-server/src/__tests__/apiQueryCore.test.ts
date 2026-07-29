@@ -164,6 +164,13 @@ function setup(): void
         ],
         properties: [property('Count', null)],
     });
+    type(core, 'FCollision', {
+        struct: true,
+        methods: [
+            constructor('FCollision', [{ type: 'T45542', name: 'Value' }]),
+            constructor('FCollision', [{ type: 'T49425', name: 'Value' }]),
+        ],
+    });
     const other = namespace('Other', null);
     type(other, 'FThing', { struct: true, methods: [constructor('FThing', [])] });
 
@@ -417,6 +424,9 @@ test('GetAPIExactSymbols handles qualified and short collisions plus stable non-
         return;
     assert.equal(constructors.data.symbols.length, 2);
     assert.ok(constructors.data.symbols.every((symbol) => /^[0-9a-f]{64}$/u.test(symbol.symbolId ?? '')));
+    assert.ok(constructors.data.symbols.every((symbol) => /^[0-9a-f]{8,64}$/u.test(symbol.symbolIdPrefix ?? '')));
+    assert.ok(constructors.data.symbols.every((symbol) => symbol.symbolId?.startsWith(symbol.symbolIdPrefix ?? '')));
+    assert.equal(new Set(constructors.data.symbols.map((symbol) => symbol.symbolIdPrefix)).size, 2);
     assert.deepEqual(constructors.data.symbols.map((symbol) => symbol.args?.length), [0, 1]);
     assert.ok(constructors.data.symbols.every((symbol) => symbol.visibility === 'public'));
     const nonPublicConstructors = GetAPIExactSymbols({
@@ -445,11 +455,155 @@ test('GetAPIExactSymbols handles qualified and short collisions plus stable non-
     const selected = GetAPIExactSymbols({
         name: 'Core::FThing.FThing',
         kind: 'constructor',
-        symbolId: constructors.data.symbols[1].symbolId,
+        symbolId: `  ${constructors.data.symbols[1].symbolIdPrefix?.toUpperCase()}  `,
     });
     assert.equal(selected.ok, true);
+    if (selected.ok)
+    {
+        assert.equal(selected.data.symbols.length, 1);
+        assert.equal(selected.data.symbols[0].symbolId, constructors.data.symbols[1].symbolId);
+        assert.equal(selected.data.symbols[0].symbolIdPrefix, constructors.data.symbols[1].symbolIdPrefix);
+    }
+    const selectedByFullId = GetAPIExactSymbols({
+        name: 'Core::FThing.FThing',
+        kind: 'constructor',
+        symbolId: constructors.data.symbols[0].symbolId,
+    });
+    assert.equal(selectedByFullId.ok, true);
+    const missingPrefix = GetAPIExactSymbols({ name: 'Core::FThing.FThing', symbolId: '00000000' });
+    assert.equal(missingPrefix.ok, false);
+    if (!missingPrefix.ok)
+        assert.equal(missingPrefix.error.code, 'NotFound');
+    const shortPrefix = GetAPIExactSymbols({ name: 'Core::FThing.FThing', symbolId: 'abcdefg' });
+    assert.equal(shortPrefix.ok, false);
+    if (!shortPrefix.ok)
+        assert.equal(shortPrefix.error.code, 'InvalidParams');
     assert.equal(GetAPIExactSymbols({ name: 'Core::FThing.FThing', symbolId: 'bad' }).ok, false);
+    assert.equal(GetAPIExactSymbols({ name: 'Core::FThing.FThing', symbolId: 'g0000000' }).ok, false);
+    assert.equal(GetAPIExactSymbols({ name: 'Core::FThing.FThing', symbolId: '' }).ok, false);
+    assert.equal(GetAPIExactSymbols({ name: 'Core::FThing.FThing', symbolId: 12345678 as any }).ok, false);
+    assert.equal(GetAPIExactSymbols({ name: 'Core::FThing.FThing', symbolId: 'a'.repeat(65) }).ok, false);
+    const conflictingKind = GetAPIExactSymbols({
+        name: 'Core::FThing.FThing',
+        kind: 'method',
+        symbolId: constructors.data.symbols[0].symbolIdPrefix,
+    });
+    assert.equal(conflictingKind.ok, false);
+    if (!conflictingKind.ok)
+        assert.equal(conflictingKind.error.code, 'InvalidParams');
     assert.equal(GetAPIExactSymbols({ name: 'Core::UDerived.UDerived', kind: 'constructor', includeNonPublic: true }).ok, false);
+
+    const collisionFamily = GetAPIExactSymbols({ name: 'Core::FCollision.FCollision', kind: 'constructor' });
+    assert.equal(collisionFamily.ok, true);
+    if (collisionFamily.ok)
+    {
+        assert.deepEqual(collisionFamily.data.symbols.map((symbol) => symbol.symbolId?.substring(0, 8)), ['6e31bfec', '6e31bfec']);
+        assert.deepEqual(collisionFamily.data.symbols.map((symbol) => symbol.symbolIdPrefix?.length), [9, 9]);
+        const ambiguousPrefix = GetAPIExactSymbols({
+            name: 'Core::FCollision.FCollision',
+            kind: 'constructor',
+            symbolId: '6e31bfec',
+        });
+        assert.equal(ambiguousPrefix.ok, false);
+        if (!ambiguousPrefix.ok)
+        {
+            assert.equal(ambiguousPrefix.error.code, 'InvalidParams');
+            assert.match(ambiguousPrefix.error.message, /ambiguous/u);
+        }
+        const collisionSelected = GetAPIExactSymbols({
+            name: 'Core::FCollision.FCollision',
+            symbolId: collisionFamily.data.symbols[0].symbolIdPrefix?.toUpperCase(),
+        });
+        assert.equal(collisionSelected.ok, true);
+        if (collisionSelected.ok)
+            assert.equal(collisionSelected.data.symbols[0].symbolIdPrefix?.length, 9);
+    }
+
+    const hiddenConstructor = nonPublicConstructors.ok
+        ? nonPublicConstructors.data.symbols.find((symbol) => symbol.visibility != 'public')
+        : undefined;
+    assert.ok(hiddenConstructor?.symbolIdPrefix);
+    assert.equal(GetAPIExactSymbols({
+        name: 'Core::FThing.FThing',
+        symbolId: hiddenConstructor?.symbolIdPrefix,
+    }).ok, false);
+    assert.equal(GetAPIExactSymbols({
+        name: 'Core::FThing.FThing',
+        symbolId: hiddenConstructor?.symbolIdPrefix,
+        includeNonPublic: true,
+        source: 'native',
+    }).ok, true);
+    assert.equal(GetAPIExactSymbols({
+        name: 'Core::FThing.FThing',
+        symbolId: constructors.data.symbols[0].symbolIdPrefix,
+        source: 'script',
+    }).ok, false);
+
+    const legacyConstructorQuery = GetAPIQuery({ query: 'Core::FThing.FThing', kinds: ['constructor'], limit: 10 });
+    assert.ok(legacyConstructorQuery.data.matches.every((symbol) => symbol.symbolIdPrefix === undefined));
+    const legacyDetailsData = constructors.data.symbols[0].detailsData as any[];
+    assert.deepEqual(legacyDetailsData?.slice(0, 3), ['constructor', 'FThing', 'Core']);
+    assert.equal(legacyDetailsData[3], constructors.data.symbols[0].symbolId);
+
+    const core = namespace('Core', null);
+    type(core, 'FMany', {
+        struct: true,
+        methods: [
+            constructor('FMany', [{ type: 'T102484', name: 'FirstCollision' }]),
+            ...Array.from({ length: 999 }, (_, index) => constructor('FMany', [{
+                type: `T2${index.toString().padStart(5, '0')}`,
+                name: 'Value',
+            }])),
+            constructor('FMany', [{ type: 'T88812', name: 'LastCollision' }]),
+        ],
+    });
+    type(core, 'FDuplicate', {
+        struct: true,
+        methods: [
+            constructor('FDuplicate', [{ type: 'int', name: 'Zed', defaultValue: '9' }]),
+            constructor('FDuplicate', [{ type: 'int', name: 'Alpha', defaultValue: '0' }]),
+        ],
+    });
+    OnDirtyTypeCaches();
+
+    const many = GetAPIExactSymbols({ name: 'Core::FMany.FMany', kind: 'constructor' });
+    assert.equal(many.ok, true);
+    if (many.ok)
+    {
+        assert.equal(many.data.symbols.length, 1001);
+        const firstCollision = many.data.symbols.find((symbol) => symbol.args?.[0]?.type == 'T102484');
+        const pageTwoCollision = many.data.symbols[1000];
+        assert.equal(pageTwoCollision.args?.[0]?.type, 'T88812');
+        assert.equal(firstCollision?.symbolId?.substring(0, 8), '155b4977');
+        assert.equal(pageTwoCollision.symbolId?.substring(0, 8), '155b4977');
+        assert.equal(firstCollision?.symbolIdPrefix?.length, 9);
+        assert.equal(pageTwoCollision.symbolIdPrefix?.length, 9);
+        const selectedPageTwoFull = GetAPIExactSymbols({
+            name: 'Core::FMany.FMany',
+            symbolId: pageTwoCollision.symbolId,
+        });
+        assert.equal(selectedPageTwoFull.ok, true);
+        const selectedPageTwoPrefix = GetAPIExactSymbols({
+            name: 'Core::FMany.FMany',
+            symbolId: pageTwoCollision.symbolIdPrefix,
+        });
+        assert.equal(selectedPageTwoPrefix.ok, true);
+    }
+
+    const duplicateIdentity = GetAPIExactSymbols({ name: 'Core::FDuplicate.FDuplicate', kind: 'constructor' });
+    assert.equal(duplicateIdentity.ok, true);
+    if (duplicateIdentity.ok)
+    {
+        assert.equal(duplicateIdentity.data.symbols.length, 1);
+        assert.match(duplicateIdentity.data.symbols[0].signature, /Alpha/u);
+        const duplicateSelected = GetAPIExactSymbols({
+            name: 'Core::FDuplicate.FDuplicate',
+            symbolId: duplicateIdentity.data.symbols[0].symbolId,
+        });
+        assert.equal(duplicateSelected.ok, true);
+        if (duplicateSelected.ok)
+            assert.equal(duplicateSelected.data.symbols.length, 1);
+    }
 });
 
 test('GetAPISymbolMembers returns ambiguity candidates and same-name namespace/type groups', () =>

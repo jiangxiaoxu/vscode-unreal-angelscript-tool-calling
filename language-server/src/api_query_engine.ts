@@ -653,6 +653,7 @@ type ApiQueryScopeMode = 'default' | 'exclude-inherited' | 'declared-only';
 export type ApiQueryMatch = Omit<GetAPISearchMatch, 'kind' | 'source'> & {
     kind: ApiQueryKind;
     source: ApiQuerySource;
+    symbolIdPrefix?: string;
 };
 
 type CoreRankedMatch = {
@@ -1050,6 +1051,54 @@ function compareExactMatches(left: ApiQueryMatch, right: ApiQueryMatch) : number
         .localeCompare(`${right.qualifiedName}\u0000${right.source}\u0000${right.kind}\u0000${right.signature}`);
 }
 
+function getShortestUniqueConstructorSymbolIdPrefix(
+    symbolId: string,
+    familySymbolIds: readonly string[]
+) : string | undefined
+{
+    let normalizedId = symbolId.toLowerCase();
+    let normalizedFamilyIds = familySymbolIds.map((candidate) => candidate.toLowerCase());
+    for (let length = 8; length <= normalizedId.length; ++length)
+    {
+        let prefix = normalizedId.substring(0, length);
+        if (normalizedFamilyIds.filter((candidate) => candidate.startsWith(prefix)).length == 1)
+            return prefix;
+    }
+    return undefined;
+}
+
+function addConstructorSymbolIdPrefixes(matches: ApiQueryMatch[]) : ApiQueryMatch[]
+{
+    let symbolIds = matches
+        .filter((match) => match.kind == 'constructor' && typeof match.symbolId == 'string')
+        .map((match) => match.symbolId as string);
+    return matches.map((match) => {
+        if (match.kind != 'constructor' || !match.symbolId)
+            return match;
+        let symbolIdPrefix = getShortestUniqueConstructorSymbolIdPrefix(match.symbolId, symbolIds);
+        return symbolIdPrefix ? { ...match, symbolIdPrefix } : match;
+    });
+}
+
+function dedupeConstructorMatchesBySymbolId(matches: ApiQueryMatch[]) : ApiQueryMatch[]
+{
+    let canonicalBySymbolId = new Map<string, ApiQueryMatch>();
+    let withoutSymbolId = new Array<ApiQueryMatch>();
+    for (let match of matches)
+    {
+        if (match.kind != 'constructor' || !match.symbolId)
+        {
+            withoutSymbolId.push(match);
+            continue;
+        }
+        let symbolId = match.symbolId.toLowerCase();
+        let current = canonicalBySymbolId.get(symbolId);
+        if (!current || stableRecordIdentity(match).localeCompare(stableRecordIdentity(current)) < 0)
+            canonicalBySymbolId.set(symbolId, match);
+    }
+    return [...canonicalBySymbolId.values(), ...withoutSymbolId];
+}
+
 export function GetAPIExactSymbols(payload: unknown) : GetAPIExactSymbolsResult
 {
     if (!payload || typeof payload != 'object' || Array.isArray(payload))
@@ -1065,33 +1114,62 @@ export function GetAPIExactSymbols(payload: unknown) : GetAPIExactSymbolsResult
         let source = normalizeSource(record.source);
         let includeDocs = normalizeCoreBoolean(record.includeDocs, 'includeDocs');
         let includeNonPublic = normalizeCoreBoolean(record.includeNonPublic, 'includeNonPublic');
-        let symbolId = record.symbolId === undefined ? '' : String(record.symbolId).trim().toLowerCase();
+        let hasSymbolId = record.symbolId !== undefined;
+        if (hasSymbolId && typeof record.symbolId != 'string')
+            return { ok: false, error: { code: 'InvalidParams', message: "Invalid params. 'symbolId' must be a string." } };
+        let symbolId = hasSymbolId ? (record.symbolId as string).trim().toLowerCase() : '';
         let constructorOwner = getConstructorFamilyOwner(name);
         if (kind == 'constructor' && !constructorOwner)
             return { ok: false, error: { code: 'InvalidParams', message: "Invalid params. kind 'constructor' requires an exact Type.Type constructor family." } };
-        if (symbolId && !constructorOwner)
+        if (hasSymbolId && !constructorOwner)
             return { ok: false, error: { code: 'InvalidParams', message: "Invalid params. 'symbolId' may only be used with an exact Type.Type constructor family." } };
-        if (symbolId && !/^[0-9a-f]{64}$/.test(symbolId))
-            return { ok: false, error: { code: 'InvalidParams', message: "Invalid params. 'symbolId' must be a full SHA-256 hex value." } };
+        if (hasSymbolId && kind && kind != 'constructor')
+            return { ok: false, error: { code: 'InvalidParams', message: "Invalid params. 'symbolId' cannot be combined with a non-constructor kind." } };
+        if (hasSymbolId && !/^[0-9a-f]{8,64}$/.test(symbolId))
+            return { ok: false, error: { code: 'InvalidParams', message: "Invalid params. 'symbolId' must be an 8-64 character SHA-256 hex prefix." } };
 
-        let query = GetAPIQuery({
+        let queryParams: GetAPIQueryParams = {
             query: name,
             mode: 'smart',
             source,
             ...(kind ? { kinds: [kind] } : constructorOwner ? { kinds: ['constructor'] } : {}),
             includeDocs,
             includeNonPublic,
-            limit: 1000,
-            offset: 0
-        });
-        let candidates = query.data.matches;
+        };
+        let query = GetAPIQuery({ ...queryParams, limit: 1000, offset: 0 });
+        let candidates = [...query.data.matches];
+        while (constructorOwner && candidates.length < query.data.total)
+        {
+            let page = GetAPIQuery({ ...queryParams, limit: 1000, offset: candidates.length });
+            if (page.data.matches.length == 0)
+                break;
+            candidates.push(...page.data.matches);
+        }
         let exactQualified = candidates.filter((match) => match.qualifiedName == name);
         let matches = exactQualified.length > 0 || isQualifiedCoreName(name)
             ? exactQualified
             : candidates.filter((match) => finalCoreNameSegment(match.qualifiedName) == name);
-        if (symbolId)
-            matches = matches.filter((match) => match.symbolId?.toLowerCase() == symbolId);
-        matches = dedupeCoreMatches(matches).sort(compareExactMatches);
+        if (constructorOwner)
+            matches = dedupeConstructorMatchesBySymbolId(dedupeCoreMatches(matches));
+        else
+            matches = dedupeCoreMatches(matches);
+        matches = matches.sort(compareExactMatches);
+        if (constructorOwner)
+            matches = addConstructorSymbolIdPrefixes(matches);
+        if (hasSymbolId)
+        {
+            matches = matches.filter((match) => match.symbolId?.toLowerCase().startsWith(symbolId));
+            if (matches.length > 1)
+            {
+                return {
+                    ok: false,
+                    error: {
+                        code: 'InvalidParams',
+                        message: `Constructor symbol ID prefix is ambiguous for ${name}; provide a longer prefix.`
+                    }
+                };
+            }
+        }
         if (matches.length == 0)
             return { ok: false, error: { code: 'NotFound', message: `API symbol not found: ${name}` } };
         return { ok: true, data: { requestedName: name, found: true, symbols: matches } };
