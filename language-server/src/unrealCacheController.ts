@@ -4,13 +4,22 @@ import * as scriptlenses from './code_lenses';
 import * as api_search from './api_search';
 import {
     DebugDatabaseCacheContext,
+    DebugDatabaseCachePayload,
     DebugDatabaseCacheProducer,
     DebugDatabaseCacheV2,
     createDebugDatabaseRevision,
     loadDebugDatabaseCacheV2,
-    saveDebugDatabaseCacheV2,
+    saveDebugDatabaseCacheV2Async,
 } from './debugDatabaseCacheV2';
-import { hydrateTypeDatabaseGeneration, resolveAllScriptModulesForGeneration } from './typeDatabaseGeneration';
+import {
+    DebugDatabasePersistenceStatus,
+    createDebugDatabaseCachePublisher,
+} from './debugDatabaseCachePublisher';
+import {
+    hydrateTypeDatabaseGeneration,
+    resetTypeDatabaseForGeneration,
+    resolveAllScriptModulesForGeneration,
+} from './typeDatabaseGeneration';
 
 type CachedScriptSettings = {
     floatIsFloat64 : boolean;
@@ -22,6 +31,14 @@ type CachedScriptSettings = {
     disallowActorGenerics : boolean;
 };
 
+type AcceptedDebugDatabaseGeneration = {
+    generation: number;
+    chunks: unknown[];
+    scriptSettings: CachedScriptSettings;
+    engineSupportsCreateBlueprint: boolean;
+    revision: string;
+};
+
 export type UnrealCacheLoadOutcome = {
     loaded: boolean;
     code: string;
@@ -29,47 +46,67 @@ export type UnrealCacheLoadOutcome = {
     revision?: string;
 };
 
+export type UnrealCacheControllerOptions = {
+    publishCache?: (
+        context: DebugDatabaseCacheContext,
+        payload: DebugDatabaseCachePayload,
+        shouldCommit: () => boolean,
+    ) => Promise<DebugDatabaseCacheV2>;
+    publisherRetryDelaysMs?: readonly number[];
+    onPersistenceStatus?: (status: DebugDatabasePersistenceStatus) => void;
+    onPublished?: (cache: DebugDatabaseCacheV2) => void;
+};
+
 export type UnrealCacheController = {
     configure: (context: DebugDatabaseCacheContext, producer: DebugDatabaseCacheProducer) => void;
     beginRefresh: () => number;
+    abortRefresh: () => boolean;
+    isRefreshInProgress: () => boolean;
+    hasAcceptedGeneration: () => boolean;
     recordDebugDatabaseChunk: (chunk: unknown) => void;
-    hydrateRecordedGeneration: () => void;
-    markDebugDatabaseComplete: () => void;
+    recordDebugDatabaseSettings: (settings: Partial<CachedScriptSettings>, engineSupportsCreateBlueprint: boolean) => void;
+    acceptCompleteCandidate: () => { generation: number; revision: string };
     invalidateSearchCache: () => void;
     loadCacheFromDisk: () => UnrealCacheLoadOutcome;
-    scheduleWrite: (
-        unrealConnected: boolean,
-        onPublished?: (cache: DebugDatabaseCacheV2) => void,
-        onError?: (error: unknown) => void
-    ) => void;
-    getRevision: () => string | undefined;
+    getActiveRevision: () => string | undefined;
+    getActiveGeneration: () => number | undefined;
     getGeneration: () => number;
-    cancelPendingWrite: () => void;
+    getPersistenceStatus: () => DebugDatabasePersistenceStatus;
+    flushPersistence: (timeoutMs?: number) => Promise<boolean>;
+    shutdownPersistence: (timeoutMs?: number) => Promise<boolean>;
 };
 
-export function createUnrealCacheController() : UnrealCacheController
+function immutableJsonClone<T>(value: T) : T
+{
+    return JSON.parse(JSON.stringify(value)) as T;
+}
+
+export function createUnrealCacheController(
+    options: UnrealCacheControllerOptions = {},
+) : UnrealCacheController
 {
     let pendingDebugDatabaseChunks : Array<unknown> = [];
-    let debugDatabaseComplete = false;
-    let unrealCacheWriteTimeout : NodeJS.Timeout | null = null;
     let cacheContext : DebugDatabaseCacheContext | null = null;
     let cacheProducer : DebugDatabaseCacheProducer = {
         extensionVersion: 'development',
         languageServerCommit: 'unknown',
     };
-    let activeRevision : string | undefined;
-    let acceptedGeneration: {
-        chunks: unknown[];
-        scriptSettings: CachedScriptSettings;
-        engineSupportsCreateBlueprint: boolean;
-        revision: string;
-    } | null = null;
+    let acceptedGeneration: AcceptedDebugDatabaseGeneration | null = null;
     let generation = 0;
+    let refreshInProgress = false;
+    let pendingScriptSettings: CachedScriptSettings | null = null;
+    let pendingEngineSupportsCreateBlueprint: boolean | null = null;
+    let publisher = createDebugDatabaseCachePublisher({
+        retryDelaysMs: options.publisherRetryDelaysMs,
+        onStatus: options.onPersistenceStatus,
+        onPublished: options.onPublished,
+    });
 
     function configure(context: DebugDatabaseCacheContext, producer: DebugDatabaseCacheProducer) : void
     {
-        cacheContext = context;
-        cacheProducer = producer;
+        cacheContext = { ...context, budgets: { ...context.budgets } };
+        cacheProducer = { ...producer };
+        publisher.setInitialState(context.access == 'disabled' ? 'disabled' : 'missing');
     }
 
     function getCurrentScriptSettings() : CachedScriptSettings
@@ -88,37 +125,145 @@ export function createUnrealCacheController() : UnrealCacheController
 
     function applyCachedScriptSettings(settings: Record<string, boolean>, engineSupportsCreateBlueprint: boolean) : void
     {
-        if (!settings)
-            return;
         let scriptSettings = scriptfiles.GetScriptSettings();
         for (let key of Object.keys(settings) as Array<keyof CachedScriptSettings>)
         {
             if (typeof settings[key] == 'boolean' && key in scriptSettings)
                 (scriptSettings as unknown as Record<string, boolean>)[key] = settings[key];
         }
-        if (typeof engineSupportsCreateBlueprint == 'boolean')
-            scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint = engineSupportsCreateBlueprint;
+        scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint = engineSupportsCreateBlueprint;
     }
 
     function beginRefresh() : number
     {
         generation += 1;
-        cancelPendingWrite();
         pendingDebugDatabaseChunks = [];
-        debugDatabaseComplete = false;
-        api_search.InvalidateAPISearchCache();
+        pendingScriptSettings = acceptedGeneration?.scriptSettings ?? getCurrentScriptSettings();
+        pendingEngineSupportsCreateBlueprint = acceptedGeneration?.engineSupportsCreateBlueprint
+            ?? scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint;
+        refreshInProgress = true;
         return generation;
     }
 
     function recordDebugDatabaseChunk(chunk: unknown) : void
     {
-        pendingDebugDatabaseChunks.push(chunk);
+        if (refreshInProgress)
+            pendingDebugDatabaseChunks.push(chunk);
     }
 
-    function markDebugDatabaseComplete() : void
+    function recordDebugDatabaseSettings(
+        settings: Partial<CachedScriptSettings>,
+        engineSupportsCreateBlueprint: boolean,
+    ) : void
     {
-        debugDatabaseComplete = true;
-        activeRevision = createDebugDatabaseRevision(pendingDebugDatabaseChunks);
+        if (!refreshInProgress || !pendingScriptSettings)
+            return;
+        pendingScriptSettings = { ...pendingScriptSettings, ...settings };
+        pendingEngineSupportsCreateBlueprint = engineSupportsCreateBlueprint;
+    }
+
+    function clearCandidate() : void
+    {
+        pendingDebugDatabaseChunks = [];
+        pendingScriptSettings = null;
+        pendingEngineSupportsCreateBlueprint = null;
+        refreshInProgress = false;
+    }
+
+    function abortRefresh() : boolean
+    {
+        if (!refreshInProgress)
+            return false;
+        clearCandidate();
+        return true;
+    }
+
+    function restoreAcceptedGeneration(prior: AcceptedDebugDatabaseGeneration | null) : void
+    {
+        if (prior)
+        {
+            applyCachedScriptSettings(prior.scriptSettings, prior.engineSupportsCreateBlueprint);
+            hydrateTypeDatabaseGeneration(prior.chunks, prior.scriptSettings.floatIsFloat64);
+            resolveAllScriptModulesForGeneration();
+        }
+        else
+        {
+            resetTypeDatabaseForGeneration();
+            resolveAllScriptModulesForGeneration();
+        }
+        api_search.InvalidateAPISearchCache();
+    }
+
+    function acceptCompleteCandidate() : { generation: number; revision: string }
+    {
+        if (!refreshInProgress)
+            throw new Error('DebugDatabase candidate is incomplete or contains no chunks.');
+        if (pendingDebugDatabaseChunks.length == 0)
+        {
+            clearCandidate();
+            throw new Error('DebugDatabase candidate is incomplete or contains no chunks.');
+        }
+
+        let nextChunks = immutableJsonClone(pendingDebugDatabaseChunks);
+        let nextSettings = { ...(pendingScriptSettings ?? getCurrentScriptSettings()) };
+        let nextBlueprintSupport = pendingEngineSupportsCreateBlueprint
+            ?? scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint;
+        let nextRevision = createDebugDatabaseRevision(nextChunks);
+        let acceptedId = generation;
+        let prior = acceptedGeneration;
+
+        try
+        {
+            // Candidate validation and hydration are synchronous. No request can observe the
+            // temporary global TypeDB before the accepted authority is swapped below.
+            applyCachedScriptSettings(nextSettings, nextBlueprintSupport);
+            hydrateTypeDatabaseGeneration(nextChunks, nextSettings.floatIsFloat64);
+            resolveAllScriptModulesForGeneration();
+        }
+        catch (error)
+        {
+            clearCandidate();
+            try
+            {
+                restoreAcceptedGeneration(prior);
+            }
+            catch (rollbackError)
+            {
+                acceptedGeneration = null;
+                throw new Error(`DebugDatabase candidate failed (${String(error)}); accepted generation restore failed (${String(rollbackError)}).`);
+            }
+            throw error;
+        }
+
+        acceptedGeneration = {
+            generation: acceptedId,
+            chunks: nextChunks,
+            scriptSettings: nextSettings,
+            engineSupportsCreateBlueprint: nextBlueprintSupport,
+            revision: nextRevision,
+        };
+        clearCandidate();
+        api_search.InvalidateAPISearchCache();
+
+        let contextSnapshot = cacheContext ? { ...cacheContext, budgets: { ...cacheContext.budgets } } : null;
+        let payload: DebugDatabaseCachePayload | null = contextSnapshot ? immutableJsonClone({
+            projectIdentity: contextSnapshot.projectIdentity,
+            producer: cacheProducer,
+            scriptSettings: nextSettings,
+            engineSupportsCreateBlueprint: nextBlueprintSupport,
+            debugDatabaseChunks: nextChunks,
+        }) : null;
+        publisher.submit({
+            generation: acceptedId,
+            revision: nextRevision,
+            publish: async (isCurrent) => {
+                if (!contextSnapshot || !payload)
+                    throw new Error('DebugDatabase cache is not configured.');
+                let write = options.publishCache ?? saveDebugDatabaseCacheV2Async;
+                return write(contextSnapshot, payload, isCurrent);
+            },
+        });
+        return { generation: acceptedId, revision: nextRevision };
     }
 
     function invalidateSearchCache() : void
@@ -130,12 +275,20 @@ export function createUnrealCacheController() : UnrealCacheController
     {
         if (!cacheContext)
             return { loaded: false, code: 'not-configured', message: 'Cache is not configured.' };
+        if (cacheContext.access == 'disabled')
+            return { loaded: false, code: 'disabled', message: 'Cache is disabled because exact project identity is unavailable.' };
         if (typedb.HasTypesFromUnreal())
+        {
+            let activeRevision = acceptedGeneration?.revision;
             return { loaded: true, code: 'already-ready', message: 'Type database is already populated.', revision: activeRevision };
+        }
 
         let result = loadDebugDatabaseCacheV2(cacheContext);
         if (result.ok === false)
+        {
+            publisher.setInitialState('missing');
             return { loaded: false, code: result.code, message: result.message };
+        }
 
         let previousSettings = getCurrentScriptSettings();
         let previousBlueprintSupport = scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint;
@@ -147,121 +300,37 @@ export function createUnrealCacheController() : UnrealCacheController
         catch (error)
         {
             applyCachedScriptSettings(previousSettings, previousBlueprintSupport);
+            publisher.setInitialState('missing');
             return { loaded: false, code: 'hydrate-failed', message: `Cache TypeDB hydration failed: ${String(error)}` };
         }
         api_search.InvalidateAPISearchCache();
-        activeRevision = result.cache.revision;
         acceptedGeneration = {
-            chunks: result.cache.debugDatabaseChunks.slice(),
+            generation,
+            chunks: immutableJsonClone(result.cache.debugDatabaseChunks),
             scriptSettings: getCurrentScriptSettings(),
             engineSupportsCreateBlueprint: scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint,
             revision: result.cache.revision,
         };
-        return { loaded: true, code: 'loaded', message: 'Loaded debug database cache v2.', revision: activeRevision };
-    }
-
-    function hydrateRecordedGeneration() : void
-    {
-        if (pendingDebugDatabaseChunks.length == 0)
-            throw new Error('DebugDatabase generation contains no chunks.');
-        let nextChunks = pendingDebugDatabaseChunks.slice();
-        let nextSettings = getCurrentScriptSettings();
-        let nextBlueprintSupport = scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint;
-        let prior = acceptedGeneration;
-        try
-        {
-            hydrateTypeDatabaseGeneration(nextChunks, nextSettings.floatIsFloat64);
-        }
-        catch (error)
-        {
-            if (prior)
-            {
-                applyCachedScriptSettings(prior.scriptSettings, prior.engineSupportsCreateBlueprint);
-                try
-                {
-                    hydrateTypeDatabaseGeneration(prior.chunks, prior.scriptSettings.floatIsFloat64);
-                    resolveAllScriptModulesForGeneration();
-                    activeRevision = prior.revision;
-                }
-                catch (rollbackError)
-                {
-                    activeRevision = undefined;
-                    acceptedGeneration = null;
-                    throw new Error(`DebugDatabase hydration failed (${String(error)}); prior generation restore failed (${String(rollbackError)}).`);
-                }
-            }
-            throw error;
-        }
-        markDebugDatabaseComplete();
-        acceptedGeneration = {
-            chunks: nextChunks,
-            scriptSettings: nextSettings,
-            engineSupportsCreateBlueprint: nextBlueprintSupport,
-            revision: activeRevision!,
-        };
-        api_search.InvalidateAPISearchCache();
-    }
-
-    function cancelPendingWrite() : void
-    {
-        if (unrealCacheWriteTimeout)
-        {
-            clearTimeout(unrealCacheWriteTimeout);
-            unrealCacheWriteTimeout = null;
-        }
-    }
-
-    function scheduleWrite(
-        unrealConnected: boolean,
-        onPublished?: (cache: DebugDatabaseCacheV2) => void,
-        onError?: (error: unknown) => void
-    ) : void
-    {
-        if (!cacheContext || cacheContext.access != 'read-write' || !unrealConnected || !debugDatabaseComplete)
-            return;
-        cancelPendingWrite();
-        let scheduledGeneration = generation;
-        let scheduledChunks = acceptedGeneration?.chunks.slice() ?? [];
-        unrealCacheWriteTimeout = setTimeout(function()
-        {
-            unrealCacheWriteTimeout = null;
-            if (!cacheContext || cacheContext.access != 'read-write' || !debugDatabaseComplete
-                || scheduledGeneration != generation || scheduledChunks.length == 0)
-                return;
-            let published: DebugDatabaseCacheV2;
-            try
-            {
-                published = saveDebugDatabaseCacheV2(cacheContext, {
-                    projectIdentity: cacheContext.projectIdentity,
-                    producer: cacheProducer,
-                    scriptSettings: getCurrentScriptSettings(),
-                    engineSupportsCreateBlueprint: scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint,
-                    debugDatabaseChunks: scheduledChunks,
-                });
-            }
-            catch (error)
-            {
-                onError?.(error);
-                return;
-            }
-            if (scheduledGeneration != generation)
-                return;
-            activeRevision = published.revision;
-            onPublished?.(published);
-        }, 500);
+        publisher.setInitialState('clean', result.cache.revision);
+        return { loaded: true, code: 'loaded', message: 'Loaded debug database cache v2.', revision: result.cache.revision };
     }
 
     return {
         configure,
         beginRefresh,
+        abortRefresh,
+        isRefreshInProgress: () => refreshInProgress,
+        hasAcceptedGeneration: () => acceptedGeneration != null,
         recordDebugDatabaseChunk,
-        hydrateRecordedGeneration,
-        markDebugDatabaseComplete,
+        recordDebugDatabaseSettings,
+        acceptCompleteCandidate,
         invalidateSearchCache,
         loadCacheFromDisk,
-        scheduleWrite,
-        getRevision: () => activeRevision,
+        getActiveRevision: () => acceptedGeneration?.revision,
+        getActiveGeneration: () => acceptedGeneration?.generation,
         getGeneration: () => generation,
-        cancelPendingWrite,
+        getPersistenceStatus: publisher.snapshot,
+        flushPersistence: publisher.flush,
+        shutdownPersistence: publisher.shutdown,
     };
 }

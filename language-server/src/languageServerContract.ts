@@ -1,8 +1,8 @@
 import * as path from 'node:path';
 import { WorkspaceFolder } from 'vscode-languageserver/node';
 
-export type AngelScriptLanguageServerRole = 'ue-resident' | 'cli-direct' | 'vscode';
-export type AngelScriptCacheAccess = 'read-write' | 'read-only';
+export type AngelScriptLanguageServerRole = 'vscode' | 'project-daemon';
+export type AngelScriptCacheAccess = 'read-write' | 'disabled';
 
 export type AngelScriptLanguageServerBudgets = {
     maxCompressedBytes: number;
@@ -21,8 +21,7 @@ export type AngelScriptLanguageServerInitializationOptions = {
         debuggerPort?: number;
     };
     cache?: {
-        path?: string;
-        access?: AngelScriptCacheAccess;
+        enabled?: boolean;
         budgets?: Partial<AngelScriptLanguageServerBudgets>;
     };
 };
@@ -62,6 +61,12 @@ function positiveInteger(value: unknown, fallback: number, name: string) : numbe
     return value;
 }
 
+function projectIdentityFor(uprojectPath: string) : string
+{
+    let normalized = path.normalize(uprojectPath);
+    return process.platform == 'win32' ? normalized.toLowerCase() : normalized;
+}
+
 export function resolveLanguageServerInitializationOptions(
     raw: unknown,
     inferredProjectRoot: string
@@ -70,21 +75,23 @@ export function resolveLanguageServerInitializationOptions(
     let options = raw && typeof raw == 'object' && !Array.isArray(raw)
         ? raw as AngelScriptLanguageServerInitializationOptions
         : {};
+    let rawCache = options.cache as Record<string, unknown> | undefined;
+    if (rawCache && ('path' in rawCache || 'access' in rawCache))
+        throw new Error("Initialization options 'cache.path' and 'cache.access' were removed; cache ownership is fixed by role.");
     let role = options.role ?? 'vscode';
-    if (role != 'ue-resident' && role != 'cli-direct' && role != 'vscode')
+    if (role != 'vscode' && role != 'project-daemon')
         throw new Error(`Invalid initialization option 'role': ${String(role)}.`);
 
     let projectRoot = normalizeAbsolutePath(options.canonicalProjectRoot, inferredProjectRoot);
-    let cachePath = normalizeAbsolutePath(
-        options.cache?.path,
-        path.join(projectRoot, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.v2.json.gz')
-    );
-    let requestedAccess = options.cache?.access ?? (role == 'ue-resident' ? 'read-write' : 'read-only');
-    if (requestedAccess != 'read-only' && requestedAccess != 'read-write')
-        throw new Error(`Invalid initialization option 'cache.access': ${String(requestedAccess)}.`);
-    if (requestedAccess == 'read-write' && role != 'ue-resident')
-        throw new Error("Only role 'ue-resident' may use cache access 'read-write'.");
+    let cachePath = role == 'vscode'
+        ? path.join(projectRoot, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz')
+        : path.join(projectRoot, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.v2.json.gz');
+    let cacheAccess: AngelScriptCacheAccess = options.cache?.enabled === false ? 'disabled' : 'read-write';
+    if (role == 'project-daemon' && cacheAccess != 'read-write')
+        throw new Error("Role 'project-daemon' requires its fixed Saved v2 cache writer.");
 
+    if (role == 'project-daemon' && options.unreal?.debuggerPort === undefined)
+        throw new Error("Role 'project-daemon' requires the project-derived unreal.debuggerPort.");
     let debuggerPort = positiveInteger(options.unreal?.debuggerPort, 27099, 'unreal.debuggerPort');
     if (debuggerPort > 65535)
         throw new Error("Invalid initialization option 'unreal.debuggerPort': expected a TCP port.");
@@ -96,6 +103,14 @@ export function resolveLanguageServerInitializationOptions(
     let projectIdentity = typeof options.projectIdentity == 'string' && options.projectIdentity.trim().length != 0
         ? options.projectIdentity.trim()
         : path.normalize(uprojectPath ?? projectRoot).toLowerCase();
+    if (role == 'project-daemon' && options.unreal?.online === false)
+        throw new Error("Role 'project-daemon' requires unreal.online=true.");
+    if (cacheAccess == 'read-write' && (!uprojectPath || !options.projectIdentity?.trim()))
+        throw new Error(`Role '${role}' requires an exact uprojectPath and projectIdentity when cache publication is enabled.`);
+    if (uprojectPath && projectIdentityFor(path.dirname(uprojectPath)) != projectIdentityFor(projectRoot))
+        throw new Error('uprojectPath must belong to canonicalProjectRoot.');
+    if (uprojectPath && projectIdentity != projectIdentityFor(uprojectPath))
+        throw new Error('projectIdentity must equal the canonical physical uprojectPath identity.');
 
     return {
         additionalScriptRootFolders: Array.isArray(options.additionalScriptRootFolders)
@@ -105,10 +120,10 @@ export function resolveLanguageServerInitializationOptions(
         canonicalProjectRoot: projectRoot,
         uprojectPath,
         projectIdentity,
-        unrealOnline: options.unreal?.online !== false,
+        unrealOnline: role == 'project-daemon' ? true : options.unreal?.online !== false,
         debuggerPort,
         cachePath,
-        cacheAccess: requestedAccess,
+        cacheAccess,
         budgets: {
             maxCompressedBytes: positiveInteger(budgetOverrides.maxCompressedBytes, DEFAULT_LANGUAGE_SERVER_BUDGETS.maxCompressedBytes, 'cache.budgets.maxCompressedBytes'),
             maxUncompressedBytes: positiveInteger(budgetOverrides.maxUncompressedBytes, DEFAULT_LANGUAGE_SERVER_BUDGETS.maxUncompressedBytes, 'cache.budgets.maxUncompressedBytes'),

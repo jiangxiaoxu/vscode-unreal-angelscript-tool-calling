@@ -4,9 +4,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { ChildProcess, fork, spawn } from 'node:child_process';
-import { saveDebugDatabaseCacheV2 } from '../debugDatabaseCacheV2';
+import * as net from 'node:net';
+import { loadDebugDatabaseCacheV2, saveDebugDatabaseCacheV2 } from '../debugDatabaseCacheV2';
 import { DEFAULT_LANGUAGE_SERVER_BUDGETS } from '../languageServerContract';
-import { decodeApiQueryIndex } from '../apiQueryIndexRuntime';
 
 type JsonRpcMessage = {
     jsonrpc: '2.0';
@@ -19,6 +19,7 @@ type JsonRpcMessage = {
 
 type TestClient = {
     child: ChildProcess;
+    notifications: JsonRpcMessage[];
     send: (message: JsonRpcMessage) => void;
     request: (method: string, params?: unknown) => Promise<JsonRpcMessage>;
     close: () => Promise<void>;
@@ -28,15 +29,41 @@ function createProject(content = 'class transport_fixture { int Bad_name; }\n', 
 {
     let root = fs.mkdtempSync(path.join(os.tmpdir(), 'as-ls-transport-'));
     fs.mkdirSync(path.join(root, 'Script'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'Transport.uproject'), '{}');
     fs.writeFileSync(path.join(root, 'Script', 'TransportFixture.as'), content);
     for (let index = 0; index < additionalFileCount; ++index)
         fs.writeFileSync(path.join(root, 'Script', `TransportFixture${index}.as`), `class UTransportFixture${index} {}\n`);
     return root;
 }
 
+async function removeDirectoryEventually(directory: string) : Promise<void>
+{
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 20; ++attempt)
+    {
+        try
+        {
+            fs.rmSync(directory, { recursive: true, force: true });
+            return;
+        }
+        catch (error)
+        {
+            lastError = error;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+    }
+    throw lastError;
+}
+
+function projectIdentity(root: string) : string
+{
+    let uprojectPath = path.join(root, 'Transport.uproject');
+    return process.platform == 'win32' ? uprojectPath.toLowerCase() : uprojectPath;
+}
+
 function writeEmptyNativeCache(root: string, projectIdentity: string) : string
 {
-    let cachePath = path.join(root, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.v2.json.gz');
+    let cachePath = path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz');
     saveDebugDatabaseCacheV2({
         cachePath,
         access: 'read-write',
@@ -68,11 +95,16 @@ function createClient(transport: 'stdio' | 'ipc') : TestClient
         : fork(server, [], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
     let nextId = 1;
     let pending = new Map<number, (message: JsonRpcMessage) => void>();
+    let notifications: JsonRpcMessage[] = [];
     let accept = (message: JsonRpcMessage) => {
         if (typeof message.id == 'number' && pending.has(message.id))
         {
             pending.get(message.id)!(message);
             pending.delete(message.id);
+        }
+        else
+        {
+            notifications.push(message);
         }
     };
     if (transport == 'stdio')
@@ -141,7 +173,7 @@ function createClient(transport: 'stdio' | 'ipc') : TestClient
             child.once('exit', () => { clearTimeout(timer); resolve(); });
         });
     }
-    return { child, send, request, close };
+    return { child, notifications, send, request, close };
 }
 
 for (let transport of ['stdio', 'ipc'] as const)
@@ -156,14 +188,12 @@ for (let transport of ['stdio', 'ipc'] as const)
                 rootUri: `file:///${root.replace(/\\/g, '/')}`,
                 capabilities: { textDocument: { publishDiagnostics: { relatedInformation: true } } },
                 initializationOptions: {
-                    role: 'cli-direct',
+                    role: 'vscode',
                     canonicalProjectRoot: root,
-                    projectIdentity: 'transport-fixture',
+                    uprojectPath: path.join(root, 'Transport.uproject'),
+                    projectIdentity: projectIdentity(root),
                     unreal: { online: false, debuggerPort: 27099 },
-                    cache: {
-                        access: 'read-only',
-                        path: path.join(root, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.v2.json.gz'),
-                    },
+                    cache: { enabled: false },
                 },
             });
             assert.equal(initialize.error, undefined);
@@ -221,14 +251,12 @@ test('offline missing-cache startup does not settle before the initial parse que
             rootUri: `file:///${root.replace(/\\/g, '/')}`,
             capabilities: {},
             initializationOptions: {
-                role: 'cli-direct',
+                role: 'vscode',
                 canonicalProjectRoot: root,
-                projectIdentity: 'missing-cache-unsettled-fixture',
+                uprojectPath: path.join(root, 'Transport.uproject'),
+                projectIdentity: projectIdentity(root),
                 unreal: { online: false },
-                cache: {
-                    access: 'read-only',
-                    path: path.join(root, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.v2.json.gz'),
-                },
+                cache: { enabled: true },
             },
         });
         assert.equal(initialize.error, undefined);
@@ -263,8 +291,8 @@ test('offline missing-cache startup does not settle before the initial parse que
 
 test('cached stdio startup resolves loaded scripts before publishing full readiness', async () => {
     let root = createProject();
-    let projectIdentity = 'cached-transport-fixture';
-    let cachePath = writeEmptyNativeCache(root, projectIdentity);
+    let identity = projectIdentity(root);
+    let cachePath = writeEmptyNativeCache(root, identity);
     let client = createClient('stdio');
     try
     {
@@ -273,11 +301,12 @@ test('cached stdio startup resolves loaded scripts before publishing full readin
             rootUri: `file:///${root.replace(/\\/g, '/')}`,
             capabilities: { textDocument: { publishDiagnostics: { relatedInformation: true } } },
             initializationOptions: {
-                role: 'cli-direct',
+                role: 'vscode',
                 canonicalProjectRoot: root,
-                projectIdentity,
+                uprojectPath: path.join(root, 'Transport.uproject'),
+                projectIdentity: identity,
                 unreal: { online: false },
-                cache: { access: 'read-only', path: cachePath },
+                cache: { enabled: true },
             },
         });
         assert.equal(initialize.error, undefined);
@@ -299,137 +328,571 @@ test('cached stdio startup resolves loaded scripts before publishing full readin
     }
 });
 
-test('zero-diagnostic symbol rename republishes the script-revision API index', async () => {
-    let root = createProject('class UIndexBefore {}\n');
-    let projectIdentity = 'script-revision-transport-fixture';
-    let cachePath = writeEmptyNativeCache(root, projectIdentity);
-    let indexPath = path.join(path.dirname(cachePath), 'api-query-index.v1.json.gz');
-    let scriptPath = path.join(root, 'Script', 'TransportFixture.as');
-    let scriptUri = `file:///${scriptPath.replace(/\\/g, '/')}`;
+test('stdio EOF terminates the language server without an LSP shutdown request', async () => {
+    let root = createProject();
+    let client = createClient('stdio');
+    let initialized = await client.request('initialize', {
+        processId: process.pid,
+        rootUri: `file:///${root.replace(/\\/g, '/')}`,
+        capabilities: {},
+        initializationOptions: {
+            role: 'vscode',
+            canonicalProjectRoot: root,
+            uprojectPath: path.join(root, 'Transport.uproject'),
+            projectIdentity: projectIdentity(root),
+            unreal: { online: false },
+            cache: { enabled: false },
+        },
+    });
+    assert.equal(initialized.error, undefined);
+    let stderr = '';
+    client.child.stderr?.on('data', (data: Buffer) => { stderr += data.toString('utf8'); });
+    client.child.stdin!.end();
+    let exitCode = await new Promise<number | null>((resolve, reject) => {
+        let timer = setTimeout(() => reject(new Error('Language Server survived stdio EOF.')), 3000);
+        client.child.once('exit', (code) => { clearTimeout(timer); resolve(code); });
+    });
+    assert.equal(exitCode, 0, stderr);
+    fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('project daemon child exits when its initialize.processId parent dies', async () => {
+    let root = createProject();
+    let host = path.resolve('language-server', 'src', '__tests__', 'fixtures', 'projectDaemonParentHost.js');
+    let server = path.resolve('language-server', 'dist', 'server.js');
+    let parent = spawn(process.execPath, [host, server, root], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let childPid = 0;
+    try
+    {
+        childPid = await new Promise<number>((resolve, reject) => {
+            let buffer = '';
+            let timer = setTimeout(() => reject(new Error('Parent host did not initialize the Language Server.')), 5000);
+            parent.stdout.on('data', (data: Buffer) => {
+                buffer += data.toString('utf8');
+                let lineEnd = buffer.indexOf('\n');
+                if (lineEnd < 0)
+                    return;
+                clearTimeout(timer);
+                resolve(Number(buffer.slice(0, lineEnd).trim()));
+            });
+        });
+        assert.ok(Number.isSafeInteger(childPid) && childPid > 0);
+        parent.kill();
+        let exited = false;
+        for (let attempt = 0; attempt < 50 && !exited; ++attempt)
+        {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            try { process.kill(childPid, 0); }
+            catch { exited = true; }
+        }
+        assert.equal(exited, true, 'Language Server must exit after its project-daemon parent dies.');
+    }
+    finally
+    {
+        if (parent.exitCode == null)
+            parent.kill();
+        if (childPid > 0)
+        {
+            try { process.kill(childPid); } catch {}
+        }
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('VS Code and project daemon reconnect to a new Editor PID and publish isolated v2 caches', {
+    skip: process.platform != 'win32',
+}, async () => {
+    let root = createProject();
+    let serverPath = path.resolve('language-server', 'dist', 'server.js');
+    let fixture = path.resolve('language-server', 'src', '__tests__', 'fixtures', 'fakeUnrealEditorTcp.ps1');
+    let fakeEditor = path.join(root, 'UnrealEditor-Test.exe');
+    fs.copyFileSync('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', fakeEditor);
+    let uprojectPath = path.join(root, 'Transport.uproject');
+    let identity = projectIdentity(root);
+    let port = await new Promise<number>((resolve, reject) => {
+        let probe = net.createServer();
+        probe.once('error', reject);
+        probe.listen(0, '127.0.0.1', () => {
+            let address = probe.address() as net.AddressInfo;
+            probe.close((error) => error ? reject(error) : resolve(address.port));
+        });
+    });
+    let clients = [createClient('stdio'), createClient('stdio')];
+    let fake: ChildProcess | null = null;
+    let startFake = async (typeName: string) => {
+        fake = spawn(fakeEditor, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixture, uprojectPath, String(port), typeName], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+        });
+        await new Promise<void>((resolve, reject) => {
+            let output = '';
+            let timer = setTimeout(() => reject(new Error('Fake Unreal Editor did not listen.')), 5000);
+            fake!.stdout!.on('data', (data: Buffer) => {
+                output += data.toString('utf8');
+                if (output.includes('READY'))
+                {
+                    clearTimeout(timer);
+                    resolve();
+                }
+            });
+            fake!.once('error', reject);
+        });
+        return fake;
+    };
+    let cachePaths = [
+        path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz'),
+        path.join(root, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.v2.json.gz'),
+    ];
+    let waitForType = async (typeName: string, priorRevisions: string[] = []) => {
+        for (let attempt = 0; attempt < 160; ++attempt)
+        {
+            let loaded = cachePaths.map((cachePath) => loadDebugDatabaseCacheV2({
+                cachePath,
+                access: 'read-write',
+                projectIdentity: identity,
+                budgets: DEFAULT_LANGUAGE_SERVER_BUDGETS,
+            }));
+            if (loaded.every((value, index) => value.ok
+                && value.cache.revision != priorRevisions[index]
+                && JSON.stringify(value.cache.debugDatabaseChunks).includes(typeName)))
+                return loaded.map((value) => value.ok ? value.cache.revision : '');
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        let logs = clients.flatMap((client) => client.notifications)
+            .filter((message) => message.method == 'window/logMessage' || message.method == 'angelscript/diagnosticsStatus');
+        throw new Error(`Timed out waiting for both role caches to publish ${typeName}: ${JSON.stringify(logs.slice(-20))}`);
+    };
+    try
+    {
+        let firstFake = await startFake('UFirstEditorGeneration');
+        let initializationOptions = [
+            {
+                role: 'vscode',
+                canonicalProjectRoot: root,
+                uprojectPath,
+                projectIdentity: identity,
+                unreal: { online: true, debuggerPort: port },
+            },
+            {
+                role: 'project-daemon',
+                canonicalProjectRoot: root,
+                uprojectPath,
+                projectIdentity: identity,
+                unreal: { debuggerPort: port },
+            },
+        ];
+        await Promise.all(clients.map(async (client, index) => {
+            let initialized = await client.request('initialize', {
+                processId: process.pid,
+                rootUri: `file:///${root.replace(/\\/g, '/')}`,
+                capabilities: {},
+                initializationOptions: initializationOptions[index],
+            });
+            assert.equal(initialized.error, undefined);
+            client.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
+        }));
+        let firstRevisions = await waitForType('UFirstEditorGeneration');
+        await new Promise<void>((resolve) => firstFake.once('exit', () => resolve()));
+
+        let secondFake = await startFake('USecondEditorGeneration');
+        let secondRevisions = await waitForType('USecondEditorGeneration', firstRevisions);
+        assert.notDeepEqual(secondRevisions, firstRevisions);
+        await new Promise<void>((resolve) => secondFake.once('exit', () => resolve()));
+    }
+    finally
+    {
+        await Promise.all(clients.map((client) => client.close()));
+        if (fake?.exitCode == null)
+        {
+            fake.kill();
+            await new Promise<void>((resolve) => fake!.once('exit', () => resolve()));
+        }
+        await removeDirectoryEventually(root);
+    }
+});
+
+test('one verified socket accepts consecutive native rounds and settles diagnostics for the latest generation', {
+    skip: process.platform != 'win32',
+    timeout: 20000,
+}, async () => {
+    let root = createProject('class URoundChild : URoundNative {}\n');
+    let fixture = path.resolve('language-server', 'src', '__tests__', 'fixtures', 'fakeUnrealEditorRounds.ps1');
+    let fakeEditor = path.join(root, 'UnrealEditor-Rounds.exe');
+    fs.copyFileSync('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', fakeEditor);
+    let uprojectPath = path.join(root, 'Transport.uproject');
+    let identity = projectIdentity(root);
+    let port = await new Promise<number>((resolve, reject) => {
+        let probe = net.createServer();
+        probe.once('error', reject);
+        probe.listen(0, '127.0.0.1', () => {
+            let address = probe.address() as net.AddressInfo;
+            probe.close((error) => error ? reject(error) : resolve(address.port));
+        });
+    });
+    let fake = spawn(fakeEditor, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixture, uprojectPath, String(port)], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+    });
     let client = createClient('stdio');
     try
     {
-        let initialize = await client.request('initialize', {
+        await new Promise<void>((resolve, reject) => {
+            let timer = setTimeout(() => reject(new Error('Round fixture did not listen.')), 5000);
+            fake.stdout!.on('data', (data: Buffer) => {
+                if (data.toString('utf8').includes('READY'))
+                {
+                    clearTimeout(timer);
+                    resolve();
+                }
+            });
+            fake.once('error', reject);
+        });
+        let initialized = await client.request('initialize', {
             processId: process.pid,
             rootUri: `file:///${root.replace(/\\/g, '/')}`,
-            capabilities: { textDocument: { publishDiagnostics: { relatedInformation: true } } },
+            capabilities: {},
             initializationOptions: {
-                role: 'ue-resident',
+                role: 'vscode',
                 canonicalProjectRoot: root,
-                projectIdentity,
-                unreal: { online: false },
-                cache: { access: 'read-write', path: cachePath },
+                uprojectPath,
+                projectIdentity: identity,
+                unreal: { online: true, debuggerPort: port },
             },
         });
-        assert.equal(initialize.error, undefined);
+        assert.equal(initialized.error, undefined);
         client.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
-        for (let attempt = 0; attempt < 80; attempt += 1)
-        {
-            let status = await client.request('angelscript/diagnosticsStatus');
-            if ((status.result as { fullReady: boolean }).fullReady)
-                break;
-            await new Promise((resolve) => setTimeout(resolve, 25));
-        }
-        let beforeRevision = '';
-        for (let attempt = 0; attempt < 80 && !beforeRevision; attempt += 1)
-        {
-            if (fs.existsSync(indexPath))
+
+        let waitForSettledRevision = async (prior?: string) => {
+            for (let attempt = 0; attempt < 300; ++attempt)
             {
-                try { beforeRevision = decodeApiQueryIndex(fs.readFileSync(indexPath)).scriptContentRevision; } catch {}
+                let response = await client.request('angelscript/diagnosticsStatus');
+                let status = response.result as {
+                    fullReady: boolean;
+                    semanticGeneration: number;
+                    settledSemanticGeneration: number;
+                    activeRevision?: string;
+                    persistedRevision?: string;
+                };
+                if (status.fullReady
+                    && status.semanticGeneration == status.settledSemanticGeneration
+                    && status.activeRevision
+                    && status.activeRevision == status.persistedRevision
+                    && status.activeRevision != prior)
+                    return status.activeRevision;
+                await new Promise((resolve) => setTimeout(resolve, 20));
             }
-            if (!beforeRevision)
-                await new Promise((resolve) => setTimeout(resolve, 25));
-        }
-        assert.ok(beforeRevision);
-
-        client.send({
-            jsonrpc: '2.0',
-            method: 'textDocument/didOpen',
-            params: { textDocument: { uri: scriptUri, languageId: 'angelscript', version: 1, text: 'class UIndexBefore {}\n' } },
-        });
-        let openedStatus: { fullReady: boolean; semanticGeneration: number; settledSemanticGeneration: number } | undefined;
-        for (let attempt = 0; attempt < 80; attempt += 1)
-        {
-            let response = await client.request('angelscript/diagnosticsStatus');
-            openedStatus = response.result as typeof openedStatus;
-            if (openedStatus!.fullReady
-                && openedStatus!.semanticGeneration == openedStatus!.settledSemanticGeneration)
-                break;
-            await new Promise((resolve) => setTimeout(resolve, 25));
-        }
-        assert.ok(openedStatus?.fullReady);
-        assert.equal(openedStatus!.semanticGeneration, openedStatus!.settledSemanticGeneration);
-        let diagnosticsBefore = await client.request('textDocument/diagnostic', {
-            textDocument: { uri: scriptUri },
-        });
-        let diagnosticsResultIdBefore = (diagnosticsBefore.result as { resultId: string }).resultId;
-
-        client.send({
-            jsonrpc: '2.0',
-            method: 'textDocument/didChange',
-            params: { textDocument: { uri: scriptUri, version: 2 }, contentChanges: [{ text: 'class UIndexMiddle {}\n' }] },
-        });
-        let middleStatus = (await client.request('angelscript/diagnosticsStatus')).result as {
-            fullReady: boolean;
-            semanticGeneration: number;
-            settledSemanticGeneration: number;
+            throw new Error('Timed out waiting for a settled native round.');
         };
-        assert.equal(middleStatus.fullReady, true);
-        assert.equal(middleStatus.semanticGeneration, middleStatus.settledSemanticGeneration);
-        assert.ok(middleStatus.semanticGeneration > openedStatus!.semanticGeneration);
 
-        let stableBefore = middleStatus;
-        let stableQuery = await client.request('angelscript/queryAPI', { query: 'UIndexMiddle' });
-        assert.equal(stableQuery.error, undefined);
-        let stableAfter = (await client.request('angelscript/diagnosticsStatus')).result as typeof middleStatus;
-        assert.equal(stableAfter.semanticGeneration, stableBefore.semanticGeneration);
-        assert.equal(stableAfter.semanticGeneration, stableAfter.settledSemanticGeneration);
+        let firstRevision = await waitForSettledRevision();
+        let firstDiagnostics = await client.request('workspace/diagnostic', { previousResultIds: [] });
+        assert.doesNotMatch(JSON.stringify(firstDiagnostics.result), /URoundChild.*naming convention/i);
+        let tokenRefreshesAfterFirst = client.notifications.filter((message) => message.method == 'workspace/semanticTokens/refresh').length;
 
-        client.send({
-            jsonrpc: '2.0',
-            method: 'textDocument/didChange',
-            params: { textDocument: { uri: scriptUri, version: 3 }, contentChanges: [{ text: 'class UIndexAfter {}\n' }] },
-        });
-        let loadingStatus = (await client.request('angelscript/diagnosticsStatus')).result as typeof middleStatus;
-        assert.equal(loadingStatus.fullReady, false);
-        assert.ok(loadingStatus.semanticGeneration > loadingStatus.settledSemanticGeneration);
-        assert.ok(loadingStatus.semanticGeneration > stableBefore.semanticGeneration);
-
-        let crossingQuery = await client.request('angelscript/queryAPI', { query: 'UIndexAfter' });
-        assert.equal(crossingQuery.error, undefined);
-        let crossingAfter = (await client.request('angelscript/diagnosticsStatus')).result as typeof middleStatus;
-        assert.equal(crossingAfter.fullReady, true);
-        assert.equal(crossingAfter.semanticGeneration, crossingAfter.settledSemanticGeneration);
-        assert.notEqual(crossingAfter.semanticGeneration, stableBefore.semanticGeneration,
-            'A status-before/request/status-after client must reject a request that crossed semantic generations.');
-        let diagnosticsAfter = await client.request('textDocument/diagnostic', {
-            textDocument: { uri: scriptUri },
-            previousResultId: diagnosticsResultIdBefore,
-        });
-        assert.equal((diagnosticsAfter.result as { kind: string }).kind, 'full');
-        assert.notEqual((diagnosticsAfter.result as { resultId: string }).resultId, diagnosticsResultIdBefore,
-            'Zero-diagnostic semantic changes must still invalidate diagnostic result IDs.');
-
-        let afterRevision = beforeRevision;
-        let afterNames: string[] = [];
-        for (let attempt = 0; attempt < 120 && afterRevision == beforeRevision; attempt += 1)
-        {
-            await new Promise((resolve) => setTimeout(resolve, 25));
-            try
-            {
-                let index = decodeApiQueryIndex(fs.readFileSync(indexPath));
-                afterRevision = index.scriptContentRevision;
-                afterNames = index.records.map((record) => record.qualifiedName);
-            }
-            catch {}
-        }
-        assert.notEqual(afterRevision, beforeRevision);
-        assert.ok(afterNames.includes('UIndexAfter'));
-        assert.equal(afterNames.includes('UIndexBefore'), false);
+        let secondRevision = await waitForSettledRevision(firstRevision);
+        let secondDiagnostics = await client.request('workspace/diagnostic', { previousResultIds: [] });
+        assert.match(JSON.stringify(secondDiagnostics.result), /URoundChild.*naming convention/i);
+        let tokenRefreshesAfterSecond = client.notifications.filter((message) => message.method == 'workspace/semanticTokens/refresh').length;
+        assert.equal(tokenRefreshesAfterSecond, tokenRefreshesAfterFirst + 1);
     }
     finally
     {
         await client.close();
-        fs.rmSync(root, { recursive: true, force: true });
+        if (fake.exitCode == null)
+        {
+            fake.kill();
+            await new Promise<void>((resolve) => fake.once('exit', () => resolve()));
+        }
+        await removeDirectoryEventually(root);
+    }
+});
+
+test('same Editor PID recovers after a stale half-frame and an invalid finished generation', {
+    skip: process.platform != 'win32',
+    timeout: 30000,
+}, async () => {
+    let root = createProject();
+    let fixture = path.resolve('language-server', 'src', '__tests__', 'fixtures', 'fakeUnrealEditorRecovery.ps1');
+    let fakeEditor = path.join(root, 'UnrealEditor-Recovery.exe');
+    fs.copyFileSync('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', fakeEditor);
+    let uprojectPath = path.join(root, 'Transport.uproject');
+    let identity = projectIdentity(root);
+    let port = await new Promise<number>((resolve, reject) => {
+        let probe = net.createServer();
+        probe.once('error', reject);
+        probe.listen(0, '127.0.0.1', () => {
+            let address = probe.address() as net.AddressInfo;
+            probe.close((error) => error ? reject(error) : resolve(address.port));
+        });
+    });
+    let fake = spawn(fakeEditor, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixture, uprojectPath, String(port)], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+    });
+    let client = createClient('stdio');
+    try
+    {
+        await new Promise<void>((resolve, reject) => {
+            let timer = setTimeout(() => reject(new Error('Recovery fixture did not listen.')), 5000);
+            fake.stdout!.on('data', (data: Buffer) => {
+                if (data.toString('utf8').includes('READY'))
+                {
+                    clearTimeout(timer);
+                    resolve();
+                }
+            });
+            fake.once('error', reject);
+        });
+        let initialized = await client.request('initialize', {
+            processId: process.pid,
+            rootUri: `file:///${root.replace(/\\/g, '/')}`,
+            capabilities: {},
+            initializationOptions: {
+                role: 'vscode',
+                canonicalProjectRoot: root,
+                uprojectPath,
+                projectIdentity: identity,
+                unreal: { online: true, debuggerPort: port },
+            },
+        });
+        assert.equal(initialized.error, undefined);
+        client.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
+
+        let recovered = false;
+        for (let attempt = 0; attempt < 800 && !recovered; ++attempt)
+        {
+            let response = await client.request('angelscript/diagnosticsStatus');
+            let status = response.result as {
+                fullReady: boolean;
+                activeRevision?: string;
+                persistedRevision?: string;
+            };
+            let cache = loadDebugDatabaseCacheV2({
+                cachePath: path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz'),
+                access: 'read-write',
+                projectIdentity: identity,
+                budgets: DEFAULT_LANGUAGE_SERVER_BUDGETS,
+            });
+            recovered = status.fullReady
+                && !!status.activeRevision
+                && status.activeRevision == status.persistedRevision
+                && cache.ok
+                && JSON.stringify(cache.cache.debugDatabaseChunks).includes('URecoveredGeneration')
+                && !JSON.stringify(cache.cache.debugDatabaseChunks).includes('UStalePartial');
+            if (!recovered)
+                await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        assert.equal(recovered, true, 'The verified same-PID reconnect sequence did not recover to the valid generation.');
+    }
+    finally
+    {
+        await client.close();
+        if (fake.exitCode == null)
+        {
+            fake.kill();
+            await new Promise<void>((resolve) => fake.once('exit', () => resolve()));
+        }
+        await removeDirectoryEventually(root);
+    }
+});
+
+test('back-to-back A/B/C rounds settle and publish only generation C', {
+    skip: process.platform != 'win32',
+    timeout: 15000,
+}, async () => {
+    let root = createProject('class UBurstScriptType {}\n', 80);
+    let fixture = path.resolve('language-server', 'src', '__tests__', 'fixtures', 'fakeUnrealEditorBurst.ps1');
+    let fakeEditor = path.join(root, 'UnrealEditor-Burst.exe');
+    fs.copyFileSync('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', fakeEditor);
+    let uprojectPath = path.join(root, 'Transport.uproject');
+    let identity = projectIdentity(root);
+    let port = await new Promise<number>((resolve, reject) => {
+        let probe = net.createServer();
+        probe.once('error', reject);
+        probe.listen(0, '127.0.0.1', () => {
+            let address = probe.address() as net.AddressInfo;
+            probe.close((error) => error ? reject(error) : resolve(address.port));
+        });
+    });
+    let fake = spawn(fakeEditor, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixture, uprojectPath, String(port)], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+    });
+    let client = createClient('stdio');
+    try
+    {
+        await new Promise<void>((resolve, reject) => {
+            let timer = setTimeout(() => reject(new Error('Burst fixture did not listen.')), 5000);
+            fake.stdout!.on('data', (data: Buffer) => {
+                if (data.toString('utf8').includes('READY'))
+                {
+                    clearTimeout(timer);
+                    resolve();
+                }
+            });
+            fake.once('error', reject);
+        });
+        let initialized = await client.request('initialize', {
+            processId: process.pid,
+            rootUri: `file:///${root.replace(/\\/g, '/')}`,
+            capabilities: {},
+            initializationOptions: {
+                role: 'vscode',
+                canonicalProjectRoot: root,
+                uprojectPath,
+                projectIdentity: identity,
+                unreal: { online: true, debuggerPort: port },
+            },
+        });
+        assert.equal(initialized.error, undefined);
+        client.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
+
+        let cachePath = path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz');
+        let settled = false;
+        for (let attempt = 0; attempt < 300 && !settled; ++attempt)
+        {
+            let response = await client.request('angelscript/diagnosticsStatus');
+            let status = response.result as {
+                fullReady: boolean;
+                semanticGeneration: number;
+                settledSemanticGeneration: number;
+                activeRevision?: string;
+                persistedRevision?: string;
+            };
+            let cache = loadDebugDatabaseCacheV2({
+                cachePath,
+                access: 'read-write',
+                projectIdentity: identity,
+                budgets: DEFAULT_LANGUAGE_SERVER_BUDGETS,
+            });
+            settled = status.fullReady
+                && status.semanticGeneration == status.settledSemanticGeneration
+                && !!status.activeRevision
+                && status.activeRevision == status.persistedRevision
+                && cache.ok
+                && JSON.stringify(cache.cache.debugDatabaseChunks).includes('UBurstC');
+            if (!settled)
+                await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(settled, true);
+        let cache = loadDebugDatabaseCacheV2({
+            cachePath,
+            access: 'read-write',
+            projectIdentity: identity,
+            budgets: DEFAULT_LANGUAGE_SERVER_BUDGETS,
+        });
+        assert.equal(cache.ok, true);
+        if (cache.ok)
+        {
+            let serialized = JSON.stringify(cache.cache.debugDatabaseChunks);
+            assert.match(serialized, /UBurstC/);
+            assert.doesNotMatch(serialized, /UBurstA|UBurstB/);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        let tokenRefreshes = client.notifications.filter((message) => message.method == 'workspace/semanticTokens/refresh').length;
+        assert.equal(tokenRefreshes, 1);
+    }
+    finally
+    {
+        await client.close();
+        if (fake.exitCode == null)
+        {
+            fake.kill();
+            await new Promise<void>((resolve) => fake.once('exit', () => resolve()));
+        }
+        await removeDirectoryEventually(root);
+    }
+});
+
+test('a failed replacement resumes diagnostics for the restored active generation', {
+    skip: process.platform != 'win32',
+    timeout: 15000,
+}, async () => {
+    let root = createProject('class URestoreScriptType {}\n', 80);
+    let fixture = path.resolve('language-server', 'src', '__tests__', 'fixtures', 'fakeUnrealEditorRollback.ps1');
+    let fakeEditor = path.join(root, 'UnrealEditor-Rollback.exe');
+    fs.copyFileSync('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', fakeEditor);
+    let uprojectPath = path.join(root, 'Transport.uproject');
+    let identity = projectIdentity(root);
+    let port = await new Promise<number>((resolve, reject) => {
+        let probe = net.createServer();
+        probe.once('error', reject);
+        probe.listen(0, '127.0.0.1', () => {
+            let address = probe.address() as net.AddressInfo;
+            probe.close((error) => error ? reject(error) : resolve(address.port));
+        });
+    });
+    let fake = spawn(fakeEditor, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixture, uprojectPath, String(port)], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+    });
+    let client = createClient('stdio');
+    try
+    {
+        await new Promise<void>((resolve, reject) => {
+            let timer = setTimeout(() => reject(new Error('Rollback fixture did not listen.')), 5000);
+            fake.stdout!.on('data', (data: Buffer) => {
+                if (data.toString('utf8').includes('READY'))
+                {
+                    clearTimeout(timer);
+                    resolve();
+                }
+            });
+            fake.once('error', reject);
+        });
+        let initialized = await client.request('initialize', {
+            processId: process.pid,
+            rootUri: `file:///${root.replace(/\\/g, '/')}`,
+            capabilities: {},
+            initializationOptions: {
+                role: 'vscode',
+                canonicalProjectRoot: root,
+                uprojectPath,
+                projectIdentity: identity,
+                unreal: { online: true, debuggerPort: port },
+            },
+        });
+        assert.equal(initialized.error, undefined);
+        client.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
+        let cachePath = path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz');
+        let restored = false;
+        let lastObserved: unknown;
+        for (let attempt = 0; attempt < 300 && !restored; ++attempt)
+        {
+            let response = await client.request('angelscript/diagnosticsStatus');
+            let status = response.result as {
+                fullReady: boolean;
+                semanticGeneration: number;
+                settledSemanticGeneration: number;
+                activeRevision?: string;
+                persistedRevision?: string;
+            };
+            let cache = loadDebugDatabaseCacheV2({
+                cachePath,
+                access: 'read-write',
+                projectIdentity: identity,
+                budgets: DEFAULT_LANGUAGE_SERVER_BUDGETS,
+            });
+            restored = status.fullReady
+                && status.semanticGeneration == status.settledSemanticGeneration
+                && !!status.activeRevision
+                && status.activeRevision == status.persistedRevision
+                && cache.ok
+                && JSON.stringify(cache.cache.debugDatabaseChunks).includes('URestoredActive');
+            lastObserved = { status, cache };
+            if (!restored)
+                await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(restored, true, JSON.stringify(lastObserved));
+    }
+    finally
+    {
+        await client.close();
+        if (fake.exitCode == null)
+        {
+            fake.kill();
+            await new Promise<void>((resolve) => fake.once('exit', () => resolve()));
+        }
+        await removeDirectoryEventually(root);
     }
 });

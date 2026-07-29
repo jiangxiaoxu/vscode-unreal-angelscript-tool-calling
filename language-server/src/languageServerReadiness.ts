@@ -9,9 +9,15 @@ export type LanguageServerDiagnosticsStatus = {
     coverage: 'full' | 'partial' | 'none';
     unrealOnline: boolean;
     unrealConnected: boolean;
-    cache: 'not-checked' | 'loaded' | 'missing' | 'rejected' | 'published';
-    cacheReason?: string;
-    revision?: string;
+    editorProcessId?: number;
+    editorIdentityVerification?: 'pending' | 'verified' | 'unsupported-platform' | 'rejected';
+    cacheState: 'not-checked' | 'disabled' | 'missing' | 'rejected' | 'clean' | 'dirty' | 'publishing' | 'error';
+    cacheDirty: boolean;
+    persistenceAttempt: number;
+    cacheMessage?: string;
+    lastPersistenceError?: string;
+    activeRevision?: string;
+    persistedRevision?: string;
 };
 
 export type LanguageServerReadinessController = {
@@ -36,7 +42,10 @@ export function createLanguageServerReadinessController(
         coverage: 'none',
         unrealOnline: false,
         unrealConnected: false,
-        cache: 'not-checked',
+        editorProcessId: undefined,
+        cacheState: 'not-checked',
+        cacheDirty: false,
+        persistenceAttempt: 0,
     };
     function snapshot() : LanguageServerDiagnosticsStatus
     {
@@ -74,7 +83,7 @@ export function createLanguageServerReadinessController(
             ...(settleSemantics
                 ? { settledSemanticGeneration: status.semanticGeneration }
                 : {}),
-            ...(reason ? { cacheReason: reason } : {}),
+            ...(reason ? { cacheMessage: reason } : {}),
         });
     }
     function beginRefresh(generation: number) : void
@@ -85,9 +94,8 @@ export function createLanguageServerReadinessController(
             stage: 'loading-cache',
             fullReady: false,
             coverage: 'none',
-            cache: 'not-checked',
-            cacheReason: undefined,
-            revision: undefined,
+            cacheMessage: undefined,
+            activeRevision: undefined,
         });
     }
     function beginSemanticRefresh() : number

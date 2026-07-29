@@ -118,35 +118,36 @@ export class Message
     }
 }
 
-let pendingBuffer : Buffer = Buffer.alloc(0);
-
-export function readMessages(buffer : Buffer) : Array<Message>
+export class UnrealMessageDecoder
 {
-    let list : Array<Message> = [];
-    let offset = 0;
+    private pendingBuffer : Buffer = Buffer.alloc(0);
 
-    pendingBuffer = Buffer.concat([pendingBuffer, buffer])
-
-    while (pendingBuffer.length >= 5)
+    push(buffer : Buffer) : Array<Message>
     {
-        let offset = 0;
-        let msglen = pendingBuffer.readUIntLE(offset, 4);
-        offset += 4;
-        let msgtype = pendingBuffer.readInt8(offset);
-        offset += 1;
+        let list : Array<Message> = [];
+        this.pendingBuffer = Buffer.concat([this.pendingBuffer, buffer]);
 
-        if (msglen <= pendingBuffer.length - offset)
+        while (this.pendingBuffer.length >= 5)
         {
-            list.push(new Message(msgtype, offset, msglen, pendingBuffer));
-            pendingBuffer = pendingBuffer.slice(offset + msglen);
+            let offset = 0;
+            let msglen = this.pendingBuffer.readUIntLE(offset, 4);
+            offset += 4;
+            let msgtype = this.pendingBuffer.readInt8(offset);
+            offset += 1;
+
+            if (msglen <= this.pendingBuffer.length - offset)
+            {
+                list.push(new Message(msgtype, offset, msglen, this.pendingBuffer));
+                this.pendingBuffer = this.pendingBuffer.slice(offset + msglen);
+            }
+            else
+            {
+                return list;
+            }
         }
-        else
-        {
-            return list;
-        }
+
+        return list;
     }
-
-    return list;
 }
 
 function writeInt(value : number) : Buffer

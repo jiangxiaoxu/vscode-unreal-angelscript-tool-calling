@@ -1,7 +1,7 @@
 'use strict';
 
 import {
-    IPCMessageReader, IPCMessageWriter, createConnection, Connection, TextDocuments,
+    IPCMessageReader, IPCMessageWriter, StreamMessageReader, StreamMessageWriter, createConnection, Connection, TextDocuments,
     Diagnostic, DiagnosticSeverity, InitializeResult, TextDocumentPositionParams, CompletionItem,
     CompletionItemKind, SignatureHelp, Hover, DocumentSymbolParams, SymbolInformation,
     WorkspaceSymbolParams, Definition, ExecuteCommandParams, VersionedTextDocumentIdentifier, Location,
@@ -49,12 +49,15 @@ import * as workspaceLayout from './workspaceLayout';
 import { resolveLanguageServerInitializationOptions, ResolvedAngelScriptLanguageServerOptions } from './languageServerContract';
 import { createLanguageServerAutomationRuntime } from './languageServerAutomationRuntime';
 import { createActiveWorkTracker } from './activeWorkTracker';
+import { verifyEditorListenerIdentity, verifyEstablishedEditorConnectionIdentity } from './editorListenerIdentity';
+import { createConnectionAttemptFence } from './connectionAttemptFence';
+import { createPerSocketRequestScheduler } from './perSocketRequestScheduler';
 import glob from 'glob';
 
 const ExtensionVersion = String(require('../../package.json').version);
 
 import {
-    Message, MessageType, readMessages, buildGoTo,
+    Message, MessageType, UnrealMessageDecoder, buildGoTo,
     buildDisconnect, buildOpenAssets, buildCreateBlueprint
 } from './unreal-buffers';
 
@@ -65,10 +68,11 @@ import {
 const ipcSendAvailble = typeof process.send === 'function';
 let connection: Connection = ipcSendAvailble
     ? createConnection(new IPCMessageReader(process), new IPCMessageWriter(process))
-    : createConnection(process.stdin, process.stdout);
+    : createConnection(new StreamMessageReader(process.stdin), new StreamMessageWriter(process.stdout));
 
 // Create a connection to unreal
 let unreal : Socket;
+const requestDebugDatabaseScheduler = createPerSocketRequestScheduler<Socket>();
 
 const hostname = "127.0.0.1";
 let port : number = 27099;
@@ -89,22 +93,67 @@ let UnrealTypesTimedOut = false;
 let UnrealConnected = false;
 let CacheRootPath : string = null;
 let PendingReResolveAfterInitialParse = false;
+let PendingNativeDiagnosticsGeneration: number | null = null;
+let ActiveNativeDiagnosticsCancel: (() => void) | null = null;
 let SemanticTokensRefreshTimeout : any = null;
 let PendingSemanticModules = new Set<scriptfiles.ASModule>();
 
 let settings : any = null;
 let reconnectTimeoutId : any = undefined;
+const connectAttemptFence = createConnectionAttemptFence();
 let LanguageServerStopping = false;
+let LanguageServerShutdownPromise: Promise<boolean> | null = null;
+let ParentProcessWatch: NodeJS.Timeout | null = null;
 let LanguageServerOptions : ResolvedAngelScriptLanguageServerOptions | null = null;
 const automationRuntime = createLanguageServerAutomationRuntime(connection, ExtensionVersion);
 const unrealCacheController = automationRuntime.cache;
 const readinessController = automationRuntime.readiness;
 const reResolveWork = createActiveWorkTracker(TrySettleSemanticGeneration);
 
-function connect_unreal()
+function resumeRestoredNativeDiagnosticsIfNeeded() : void
 {
-    if (LanguageServerStopping || !LanguageServerOptions?.unrealOnline)
+    let activeGeneration = unrealCacheController.getActiveGeneration();
+    if (activeGeneration === undefined
+        || readinessController.snapshot().stage != 'resolving'
+        || PendingNativeDiagnosticsGeneration != null
+        || ActiveNativeDiagnosticsCancel)
         return;
+    automationRuntime.resumeNativeDiagnostics(activeGeneration);
+    ScheduleNativeDiagnosticsRefresh(activeGeneration);
+}
+
+function watchProjectDaemonParent(processId: number | null) : void
+{
+    if (!Number.isSafeInteger(processId) || processId! <= 0)
+        throw new Error("Role 'project-daemon' requires initialize.processId.");
+    if (ParentProcessWatch)
+        clearInterval(ParentProcessWatch);
+    ParentProcessWatch = setInterval(() => {
+        try { process.kill(processId!, 0); }
+        catch
+        {
+            void stopLanguageServerResources().finally(() => process.exit(0));
+        }
+    }, 1000);
+    ParentProcessWatch.unref();
+}
+
+function schedule_unreal_reconnect() : void
+{
+    if (!LanguageServerStopping && LanguageServerOptions?.unrealOnline && !reconnectTimeoutId)
+        reconnectTimeoutId = setTimeout(() => void connect_unreal(), 5000);
+}
+
+async function connect_unreal() : Promise<void>
+{
+    if (LanguageServerStopping || !LanguageServerOptions?.unrealOnline || connectAttemptFence.hasActive())
+        return;
+    let attemptOptions = LanguageServerOptions;
+    let attempt = connectAttemptFence.begin();
+    let isCurrentAttempt = () => !LanguageServerStopping
+        && LanguageServerOptions === attemptOptions
+        && attemptOptions.unrealOnline
+        && connectAttemptFence.isCurrent(attempt);
     // connection.console.log('Connecting to unreal editor on port '+port);
 
     if (reconnectTimeoutId)
@@ -113,17 +162,49 @@ function connect_unreal()
         reconnectTimeoutId = undefined;
     }
 
+    if (!LanguageServerOptions.uprojectPath)
+    {
+        connectAttemptFence.complete(attempt);
+        connection.console.error('Unreal connection refused: exact uprojectPath is unavailable.');
+        schedule_unreal_reconnect();
+        return;
+    }
+    let preflight = await verifyEditorListenerIdentity({
+        port,
+        uprojectPath: attemptOptions.uprojectPath,
+    });
+    if (!isCurrentAttempt())
+        return;
+    if (preflight.ok === false)
+    {
+        connectAttemptFence.complete(attempt);
+        readinessController.update({
+            unrealConnected: false,
+            editorProcessId: undefined,
+            editorIdentityVerification: preflight.code == 'unsupported-platform' ? 'unsupported-platform' : 'rejected',
+        });
+        connection.console.warn(preflight.reason);
+        if (preflight.code != 'unsupported-platform')
+            schedule_unreal_reconnect();
+        return;
+    }
+
     if (unreal != null)
     {
+        requestDebugDatabaseScheduler.cancel(unreal);
         unreal.removeAllListeners();
         unreal.write(Uint8Array.from(buildDisconnect()));
         unreal.destroy();
     }
     UnrealConnected = false;
-    unreal = new Socket;
+    let connectingSocket = new Socket;
+    let messageDecoder = new UnrealMessageDecoder();
+    unreal = connectingSocket;
 
-    unreal.on("data", function(data : Buffer) {
-        let messages : Array<Message> = readMessages(data);
+    connectingSocket.on("data", function(data : Buffer) {
+        if (unreal !== connectingSocket)
+            return;
+        let messages : Array<Message> = messageDecoder.push(data);
         for (let msg of messages)
         {
             if (msg.type == MessageType.Diagnostics)
@@ -179,6 +260,8 @@ function connect_unreal()
             }
             else if(msg.type == MessageType.DebugDatabase)
             {
+                if (!unrealCacheController.isRefreshInProgress())
+                    continue;
                 let dbStr = msg.readString();
                 let dbObj = JSON.parse(dbStr);
                 unrealCacheController.recordDebugDatabaseChunk(dbObj);
@@ -190,30 +273,27 @@ function connect_unreal()
             }
             else if(msg.type == MessageType.DebugDatabaseFinished)
             {
+                if (!unrealCacheController.isRefreshInProgress())
+                    continue;
                 if (ReceivingTypesTimeout)
                     clearTimeout(ReceivingTypesTimeout);
+                ReceivingTypesTimeout = null;
                 try
                 {
-                    unrealCacheController.hydrateRecordedGeneration();
+                    let accepted = automationRuntime.commitLiveRefresh();
+                    ScheduleNativeDiagnosticsRefresh(accepted.generation);
                 }
                 catch (error)
                 {
-                    automationRuntime.markHydrationFailed(error);
                     if (!typedb.HasTypesFromUnreal())
                         UnrealTypesTimedOut = true;
                     TrySettleSemanticGeneration();
-                    connection.console.error(`DebugDatabase hydration failed: ${String(error)}`);
+                    connection.console.error(`DebugDatabase transaction failed: ${String(error)}`);
+                    resumeRestoredNativeDiagnosticsIfNeeded();
+                    connectingSocket.destroy();
                     return;
                 }
-                automationRuntime.markResolving();
-
-                unrealCacheController.invalidateSearchCache();
-
-                if (IsServicingQueues)
-                    PendingReResolveAfterInitialParse = true;
-                else
-                    ReResolveAllModules();
-                automationRuntime.scheduleCacheWrite(UnrealConnected);
+                TrySettleSemanticGeneration();
             }
             else if(msg.type == MessageType.AssetDatabase)
             {
@@ -243,32 +323,33 @@ function connect_unreal()
             }
             else if(msg.type == MessageType.DebugDatabaseSettings)
             {
+                automationRuntime.beginLiveRefresh();
+                PendingNativeDiagnosticsGeneration = null;
+                ActiveNativeDiagnosticsCancel?.();
                 let version = msg.readInt();
 
-                let scriptSettings = scriptfiles.GetScriptSettings()
+                let pendingSettings: Record<string, boolean> = {};
                 /* automaticImports = */ msg.readBool(); // Unused, non-automatic imports are no longer supported
 
                 if (version >= 2)
-                    scriptSettings.floatIsFloat64 = msg.readBool();
+                    pendingSettings.floatIsFloat64 = msg.readBool();
                 if (version >= 3)
-                    scriptSettings.useAngelscriptHaze = msg.readBool();
-                scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint = (version >= 4);
+                    pendingSettings.useAngelscriptHaze = msg.readBool();
                 if (version >= 5)
                 {
-                    scriptSettings.deprecateStaticClass = msg.readBool();
-                    scriptSettings.disallowStaticClass = msg.readBool();
+                    pendingSettings.deprecateStaticClass = msg.readBool();
+                    pendingSettings.disallowStaticClass = msg.readBool();
                 }
                 if (version >= 6)
                 {
-                    scriptSettings.exposeGlobalFunctions = msg.readBool();
+                    pendingSettings.exposeGlobalFunctions = msg.readBool();
                 }
                 if (version >= 7)
                 {
-                    scriptSettings.deprecateActorGenerics = msg.readBool();
-                    scriptSettings.disallowActorGenerics = msg.readBool();
+                    pendingSettings.deprecateActorGenerics = msg.readBool();
+                    pendingSettings.disallowActorGenerics = msg.readBool();
                 }
-                unrealCacheController.invalidateSearchCache();
-                automationRuntime.scheduleCacheWrite(UnrealConnected);
+                unrealCacheController.recordDebugDatabaseSettings(pendingSettings, version >= 4);
             }
             else if(msg.type == MessageType.ReplaceAssetDefinition)
             {
@@ -283,47 +364,115 @@ function connect_unreal()
         }
     });
 
-    unreal.on("error", function() {
+    connectingSocket.on("error", function() {
+        requestDebugDatabaseScheduler.cancel(connectingSocket);
         // connection.console.log('Reconnecting to unreal due to error');
-        if (unreal != null)
+        if (unreal === connectingSocket)
         {
-            unreal.destroy();
+            connectingSocket.destroy();
             unreal = null;
+            connectAttemptFence.complete(attempt);
             UnrealConnected = false;
-            readinessController.update({ unrealConnected: false });
-            if (!LanguageServerStopping && LanguageServerOptions?.unrealOnline && !reconnectTimeoutId)
-                reconnectTimeoutId = setTimeout(connect_unreal, 5000);
+            if (ReceivingTypesTimeout)
+            {
+                clearTimeout(ReceivingTypesTimeout);
+                ReceivingTypesTimeout = null;
+            }
+            automationRuntime.abortLiveRefresh('Unreal TCP connection failed.');
+            resumeRestoredNativeDiagnosticsIfNeeded();
+            readinessController.update({ unrealConnected: false, editorProcessId: undefined, editorIdentityVerification: 'pending' });
+            schedule_unreal_reconnect();
         }
     });
 
-    unreal.on("close", function() {
+    connectingSocket.on("close", function() {
+        requestDebugDatabaseScheduler.cancel(connectingSocket);
         // connection.console.log('Ceconnecting to unreal due to close');
-        if (unreal != null)
+        if (unreal === connectingSocket)
         {
-            unreal.destroy();
+            connectingSocket.destroy();
             unreal = null;
+            connectAttemptFence.complete(attempt);
             UnrealConnected = false;
-            readinessController.update({ unrealConnected: false });
-            if (!LanguageServerStopping && LanguageServerOptions?.unrealOnline && !reconnectTimeoutId)
-                reconnectTimeoutId = setTimeout(connect_unreal, 5000);
+            if (ReceivingTypesTimeout)
+            {
+                clearTimeout(ReceivingTypesTimeout);
+                ReceivingTypesTimeout = null;
+            }
+            automationRuntime.abortLiveRefresh('Unreal TCP connection closed.');
+            resumeRestoredNativeDiagnosticsIfNeeded();
+            readinessController.update({ unrealConnected: false, editorProcessId: undefined, editorIdentityVerification: 'pending' });
+            schedule_unreal_reconnect();
         }
     });
 
-    unreal.connect(port, hostname, function()
+    connectingSocket.connect(port, hostname, async function()
     {
+        connectingSocket.pause();
+        if (!isCurrentAttempt())
+        {
+            connectingSocket.destroy();
+            return;
+        }
+        let tuple = {
+            localAddress: connectingSocket.localAddress,
+            localPort: connectingSocket.localPort,
+            remoteAddress: connectingSocket.remoteAddress ?? '',
+            remotePort: connectingSocket.remotePort ?? 0,
+        };
+        let postflight = await verifyEstablishedEditorConnectionIdentity({
+            port,
+            uprojectPath: attemptOptions.uprojectPath,
+        }, tuple, preflight.processId);
+        if (!isCurrentAttempt())
+        {
+            connectingSocket.destroy();
+            return;
+        }
+        if (!postflight.ok || unreal !== connectingSocket)
+        {
+            requestDebugDatabaseScheduler.cancel(connectingSocket);
+            connectAttemptFence.complete(attempt);
+            connectingSocket.destroy();
+            unreal = null;
+            readinessController.update({
+                unrealConnected: false,
+                editorProcessId: undefined,
+                editorIdentityVerification: postflight.ok === false && postflight.code == 'unsupported-platform'
+                    ? 'unsupported-platform'
+                    : 'rejected',
+            });
+            schedule_unreal_reconnect();
+            return;
+        }
+        connectingSocket.resume();
+        if (!isCurrentAttempt())
+        {
+            connectingSocket.destroy();
+            return;
+        }
+        connectAttemptFence.complete(attempt);
         // connection.console.log('Connection to unreal editor established.');
         UnrealConnected = true;
-        automationRuntime.beginLiveRefresh();
-        setTimeout(function()
+        readinessController.update({
+            unrealConnected: true,
+            editorProcessId: postflight.processId,
+            editorIdentityVerification: 'verified',
+        });
+        if (LanguageServerStopping || LanguageServerOptions !== attemptOptions || unreal !== connectingSocket)
         {
-            if (!unreal)
-                return;
+            connectingSocket.destroy();
+            return;
+        }
+        requestDebugDatabaseScheduler.schedule(connectingSocket, 1000,
+            () => unreal === connectingSocket && UnrealConnected && !LanguageServerStopping,
+            () => {
             let reqDb = Buffer.alloc(5);
             reqDb.writeUInt32LE(1, 0);
             reqDb.writeUInt8(MessageType.RequestDebugDatabase, 4);
 
-            unreal.write(Uint8Array.from(reqDb));
-        }, 1000);
+            connectingSocket.write(Uint8Array.from(reqDb));
+            });
     });
 }
 
@@ -387,6 +536,8 @@ connection.onInitialize((_params): InitializeResult => {
     let scriptRoots = ResolveScriptRoots(workspaceRoots);
     let inferredProjectRoot = ResolveCacheRoot(scriptRoots) || workspaceRoots[0] || process.cwd();
     LanguageServerOptions = resolveLanguageServerInitializationOptions(_params.initializationOptions, inferredProjectRoot);
+    if (LanguageServerOptions.role == 'project-daemon')
+        watchProjectDaemonParent(_params.processId);
     port = LanguageServerOptions.debuggerPort;
 
     const additionalFolders = LanguageServerOptions.additionalScriptRootFolders;
@@ -455,7 +606,7 @@ connection.onInitialize((_params): InitializeResult => {
 
     if (LanguageServerOptions.unrealOnline)
     {
-        setImmediate(connect_unreal);
+        setImmediate(() => void connect_unreal());
         setTimeout(DetectUnrealConnectionTimeout, 20000);
     }
     else if (!cacheOutcome.loaded)
@@ -536,21 +687,14 @@ function DetectUnrealConnectionTimeout()
 
 function DetectUnrealTypeListTimeout()
 {
-    try
-    {
-        unrealCacheController.hydrateRecordedGeneration();
-    }
-    catch (error)
-    {
-        automationRuntime.markHydrationFailed(error);
-        if (!typedb.HasTypesFromUnreal())
-            UnrealTypesTimedOut = true;
-        TrySettleSemanticGeneration();
-        return;
-    }
-
-    PendingReResolveAfterInitialParse = true;
-    MaybeReResolveAfterInitialParse();
+    ReceivingTypesTimeout = null;
+    automationRuntime.abortLiveRefresh('DebugDatabase stream timed out before DebugDatabaseFinished.');
+    resumeRestoredNativeDiagnosticsIfNeeded();
+    if (!typedb.HasTypesFromUnreal())
+        UnrealTypesTimedOut = true;
+    if (unreal)
+        unreal.destroy();
+    TrySettleSemanticGeneration();
 }
 
 function TickQueues()
@@ -661,6 +805,7 @@ function TickQueues()
     {
         IsServicingQueues = false;
         MaybeReResolveAfterInitialParse();
+        StartPendingNativeDiagnosticsRefresh();
         TrySettleSemanticGeneration();
         // console.log("Finished servicing queues");
     }
@@ -694,8 +839,20 @@ function DirtyAllDiagnostics()
     }
 }
 
-function ReResolveAllModules()
+function ScheduleNativeDiagnosticsRefresh(generation: number) : void
 {
+    PendingNativeDiagnosticsGeneration = generation;
+    ActiveNativeDiagnosticsCancel?.();
+    StartPendingNativeDiagnosticsRefresh();
+}
+
+function StartPendingNativeDiagnosticsRefresh() : void
+{
+    if (PendingNativeDiagnosticsGeneration == null || IsServicingQueues || ActiveNativeDiagnosticsCancel)
+        return;
+
+    let resolveGeneration = PendingNativeDiagnosticsGeneration;
+    PendingNativeDiagnosticsGeneration = null;
     if (IsServicingQueues)
         return;
 
@@ -705,20 +862,43 @@ function ReResolveAllModules()
     // Update diagnostics on all modules
     let moduleIndex = 0;
     let moduleList = scriptfiles.GetAllLoadedModules();
-    let resolveGeneration = unrealCacheController.getGeneration();
     let timerHandle = setInterval(ReResolveModules, 1);
+    let finished = false;
+    let cancelThisRefresh = () => finish(true);
+
+    function finish(stale: boolean) : void
+    {
+        if (finished)
+            return;
+        finished = true;
+        clearInterval(timerHandle);
+        if (ActiveNativeDiagnosticsCancel === cancelThisRefresh)
+            ActiveNativeDiagnosticsCancel = null;
+        if (!stale && resolveGeneration == unrealCacheController.getActiveGeneration())
+        {
+            automationRuntime.completeNativeRefresh(resolveGeneration);
+            ScheduleSemanticTokensRefresh();
+        }
+        else if (stale)
+        {
+            automationRuntime.cancelNativeDiagnostics(resolveGeneration);
+        }
+        finishReResolve();
+    }
+    ActiveNativeDiagnosticsCancel = cancelThisRefresh;
 
     function ReResolveModules()
     {
+        if (resolveGeneration != unrealCacheController.getActiveGeneration())
+        {
+            finish(true);
+            return;
+        }
         for (let i = 0; i < 20; ++i)
         {
             if (moduleIndex >= moduleList.length)
             {
-                clearInterval(timerHandle);
-                ScheduleSemanticTokensRefresh();
-                if (resolveGeneration == unrealCacheController.getGeneration())
-                    automationRuntime.completeNativeRefresh();
-                finishReResolve();
+                finish(false);
                 return;
             }
 
@@ -752,7 +932,10 @@ function FinishModuleSemanticRefresh(module : scriptfiles.ASModule) : void
 
 function TrySettleSemanticGeneration() : void
 {
+    if (LanguageServerStopping)
+        return;
     if (PendingSemanticModules.size != 0 || IsServicingQueues || reResolveWork.hasActiveWork()
+        || PendingNativeDiagnosticsGeneration != null
         || automationRuntime.nativeRefreshPending)
         return;
     if (CanResolveModules() && scriptfiles.GetAllLoadedModules().every((module) => module.resolved))
@@ -761,7 +944,7 @@ function TrySettleSemanticGeneration() : void
     }
     else if (readinessController.snapshot().stage == 'partial')
     {
-        readinessController.markPartialReady(readinessController.snapshot().cacheReason);
+        readinessController.markPartialReady(readinessController.snapshot().cacheMessage);
     }
     else if (LanguageServerOptions && (!LanguageServerOptions.unrealOnline || UnrealTypesTimedOut))
     {
@@ -797,7 +980,9 @@ function MaybeReResolveAfterInitialParse()
         return;
 
     PendingReResolveAfterInitialParse = false;
-    ReResolveAllModules();
+    let activeGeneration = unrealCacheController.getActiveGeneration();
+    if (activeGeneration !== undefined)
+        ScheduleNativeDiagnosticsRefresh(activeGeneration);
 }
 
 function IsInitialParseDone()
@@ -1239,7 +1424,6 @@ registerApiRequestHandlers({
     connection,
     isUnrealConnected: () => UnrealConnected,
     getFullReadyStatus: () => readinessController.snapshot(),
-    exportApiQueryIndex: () => automationRuntime.exportApiQueryIndex(),
 });
 
 connection.languages.inlineValue.on(function (params : InlineValueParams) : Array<InlineValue> {
@@ -1377,7 +1561,7 @@ connection.onDidChangeConfiguration(function (change : DidChangeConfigurationPar
 
         // If the port has changed, reconnect
         if (LanguageServerOptions?.unrealOnline)
-            connect_unreal();
+            void connect_unreal();
     }
 
     let completionSettings = parsedcompletion.GetCompletionSettings();
@@ -1497,16 +1681,25 @@ connection.languages.typeHierarchy.onSubtypes(function (params : TypeHierarchySu
     return typehierarchy.GetTypeHierarchySubtypes(params.item);
 });
 
-function stopLanguageServerResources() : void
+function stopLanguageServerResources() : Promise<boolean>
 {
-    if (LanguageServerStopping)
-        return;
+    if (LanguageServerShutdownPromise)
+        return LanguageServerShutdownPromise;
     LanguageServerStopping = true;
-    automationRuntime.shutdown();
+    connectAttemptFence.cancel();
+    PendingNativeDiagnosticsGeneration = null;
+    ActiveNativeDiagnosticsCancel?.();
+    ActiveNativeDiagnosticsCancel = null;
+    automationRuntime.abortLiveRefresh('Language Server is stopping.');
     if (reconnectTimeoutId)
     {
         clearTimeout(reconnectTimeoutId);
         reconnectTimeoutId = undefined;
+    }
+    if (ParentProcessWatch)
+    {
+        clearInterval(ParentProcessWatch);
+        ParentProcessWatch = null;
     }
     if (ReceivingTypesTimeout)
     {
@@ -1522,20 +1715,38 @@ function stopLanguageServerResources() : void
     {
         let socket = unreal;
         unreal = null;
+        requestDebugDatabaseScheduler.cancel(socket);
         socket.removeAllListeners();
         try { socket.write(Uint8Array.from(buildDisconnect())); } catch {}
         socket.destroy();
     }
+    requestDebugDatabaseScheduler.cancelAll();
     UnrealConnected = false;
+    readinessController.update({ unrealConnected: false, editorProcessId: undefined, editorIdentityVerification: 'pending' });
+    LanguageServerShutdownPromise = automationRuntime.shutdown(2000);
+    return LanguageServerShutdownPromise;
 }
 
-connection.onShutdown(() => {
-    stopLanguageServerResources();
+connection.onShutdown(async () => {
+    await stopLanguageServerResources();
 });
 
 connection.onExit(() => {
-    stopLanguageServerResources();
+    void stopLanguageServerResources();
 });
+
+if (!ipcSendAvailble)
+{
+    process.stdin.prependOnceListener('end', () => {
+        void stopLanguageServerResources().finally(() => process.exit(0));
+    });
+}
+else
+{
+    process.once('disconnect', () => {
+        void stopLanguageServerResources().finally(() => process.exit(0));
+    });
+}
 
 // Listen on the connection
 connection.listen();

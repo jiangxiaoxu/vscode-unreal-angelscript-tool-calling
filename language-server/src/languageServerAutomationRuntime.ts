@@ -1,33 +1,66 @@
 import * as path from 'node:path';
 import { Connection, Diagnostic } from 'vscode-languageserver/node';
-import { buildApiQueryIndex, writeApiQueryIndexAtomic } from './apiQueryIndexExporter';
-import { createDebouncedPublication } from './debouncedPublication';
 import { ResolvedAngelScriptLanguageServerOptions } from './languageServerContract';
 import { createLanguageServerReadinessController, LanguageServerDiagnosticsStatus } from './languageServerReadiness';
-import { createUnrealCacheController, UnrealCacheLoadOutcome } from './unrealCacheController';
+import { createUnrealCacheController, UnrealCacheLoadOutcome, UnrealCacheControllerOptions } from './unrealCacheController';
 import { createWorkspaceDiagnosticsRegistry, registerWorkspaceDiagnostics } from './workspaceDiagnostics';
+import { removeLegacyCacheAfterVerifiedPublish } from './legacyCacheCleanup';
 
-export type ApiQueryIndexExportResult = {
-    path?: string;
-    projectIdentity: string;
-    debugDatabaseRevision: string;
-    producerHash: string;
-    scriptContentRevision: string;
-    recordCount: number;
-    recordsHash: string;
-};
+export type LanguageServerAutomationRuntimeOptions = Pick<UnrealCacheControllerOptions,
+    'publishCache' | 'publisherRetryDelaysMs'>;
 
-export function createLanguageServerAutomationRuntime(connection: Connection, extensionVersion: string)
+export function createLanguageServerAutomationRuntime(
+    connection: Connection,
+    extensionVersion: string,
+    runtimeOptions: LanguageServerAutomationRuntimeOptions = {},
+)
 {
     let options: ResolvedAngelScriptLanguageServerOptions | null = null;
-    const cache = createUnrealCacheController();
-    const diagnostics = createWorkspaceDiagnosticsRegistry();
-    const publication = createDebouncedPublication();
     let preRefreshStatus: LanguageServerDiagnosticsStatus | null = null;
-    let nativeRefreshPending = false;
+    let nativeCandidateGeneration: number | null = null;
+    let nativeDiagnosticsGeneration: number | null = null;
     let nativeRefreshSemanticGeneration: number | null = null;
+    let lastLoggedPersistenceFailure: string | null = null;
+    const diagnostics = createWorkspaceDiagnosticsRegistry();
     const readiness = createLanguageServerReadinessController((status) => {
         connection.sendNotification('angelscript/diagnosticsStatus', status);
+    });
+    const cache = createUnrealCacheController({
+        ...runtimeOptions,
+        onPersistenceStatus: (status) => {
+            readiness.update({
+                cacheState: status.state,
+                cacheDirty: status.cacheDirty,
+                persistenceAttempt: status.persistenceAttempt,
+                cacheMessage: status.state == 'disabled' || status.state == 'missing'
+                    ? readiness.snapshot().cacheMessage
+                    : undefined,
+                activeRevision: status.activeRevision,
+                persistedRevision: status.persistedRevision,
+                lastPersistenceError: status.lastPersistenceError,
+            });
+            if (status.state == 'error' && status.lastPersistenceError)
+            {
+                let failureKey = `${status.pendingRevision}:${status.lastPersistenceError}`;
+                if (failureKey != lastLoggedPersistenceFailure)
+                {
+                    lastLoggedPersistenceFailure = failureKey;
+                    connection.console.error(`DebugDatabase cache publication stopped after bounded retries: ${status.lastPersistenceError}`);
+                }
+            }
+            else if (status.state == 'clean')
+            {
+                lastLoggedPersistenceFailure = null;
+            }
+        },
+        onPublished: () => {
+            if (options?.role != 'vscode')
+                return;
+            let legacyPath = path.join(options.canonicalProjectRoot, 'Script', '.vscode', 'angelscript', 'unreal-cache.json');
+            let cleanup = removeLegacyCacheAfterVerifiedPublish(legacyPath);
+            if (cleanup.ok === false)
+                connection.console.warn(cleanup.reason);
+        },
     });
     registerWorkspaceDiagnostics(connection, diagnostics, () => readiness.snapshot());
     connection.onRequest('angelscript/diagnosticsStatus', () => readiness.snapshot());
@@ -56,10 +89,16 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
             languageServerCommit: process.env.UNREAL_ANGELSCRIPT_LS_COMMIT || 'development',
         });
         let outcome = cache.loadCacheFromDisk();
+        let persistence = cache.getPersistenceStatus();
         readiness.update({
-            cache: outcome.loaded ? 'loaded' : (outcome.code == 'missing' ? 'missing' : 'rejected'),
-            cacheReason: outcome.message,
-            revision: outcome.revision,
+            cacheState: outcome.loaded
+                ? 'clean'
+                : (outcome.code == 'disabled' ? 'disabled' : (outcome.code == 'missing' ? 'missing' : 'rejected')),
+            cacheDirty: persistence.cacheDirty,
+            persistenceAttempt: persistence.persistenceAttempt,
+            cacheMessage: outcome.message,
+            activeRevision: outcome.revision,
+            persistedRevision: outcome.loaded ? outcome.revision : persistence.persistedRevision,
             stage: 'parsing',
         });
         return outcome;
@@ -67,138 +106,145 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
 
     function beginLiveRefresh() : number
     {
+        if (nativeCandidateGeneration != null)
+        {
+            cache.abortRefresh();
+            nativeCandidateGeneration = null;
+            preRefreshStatus = null;
+        }
         preRefreshStatus = readiness.snapshot();
         let generation = cache.beginRefresh();
-        readiness.beginRefresh(generation);
-        nativeRefreshPending = true;
+        if (cache.hasAcceptedGeneration())
+            readiness.update({ generation, unrealConnected: true, unrealOnline: true });
+        else
+            readiness.beginRefresh(generation);
+        nativeCandidateGeneration = generation;
         nativeRefreshSemanticGeneration = readiness.snapshot().semanticGeneration;
         readiness.update({ unrealConnected: true, unrealOnline: true });
-        publication.cancel();
         return generation;
     }
 
-    function markHydrationFailed(error: unknown) : void
+    function commitLiveRefresh() : { generation: number; revision: string }
     {
-        if (preRefreshStatus && cache.getRevision())
+        if (nativeCandidateGeneration == null || nativeCandidateGeneration != cache.getGeneration())
+            throw new Error('No native DebugDatabase refresh is pending.');
+        let accepted: { generation: number; revision: string };
+        try
+        {
+            accepted = cache.acceptCompleteCandidate();
+        }
+        catch (error)
+        {
+            markHydrationFailed(error);
+            throw error;
+        }
+
+        let status = readiness.snapshot();
+        let semanticGeneration = status.semanticGeneration + 1;
+        readiness.update({
+            generation: accepted.generation,
+            semanticGeneration,
+            stage: 'resolving',
+            fullReady: false,
+            coverage: 'none',
+            activeRevision: accepted.revision,
+            unrealConnected: true,
+        });
+        nativeCandidateGeneration = null;
+        nativeRefreshSemanticGeneration = null;
+        nativeDiagnosticsGeneration = accepted.generation;
+        preRefreshStatus = null;
+        return accepted;
+    }
+
+    function markHydrationFailed(error: unknown, unrealConnected = true, rejectCache = true) : void
+    {
+        if (preRefreshStatus && cache.getActiveRevision())
         {
             let currentStatus = readiness.snapshot();
             let semanticGeneration = currentStatus.semanticGeneration;
             let onlyNativeRefreshChangedSemantics = semanticGeneration == nativeRefreshSemanticGeneration;
             let priorSemanticsWereSettled = preRefreshStatus.semanticGeneration
                 == preRefreshStatus.settledSemanticGeneration;
-            nativeRefreshPending = false;
+            nativeCandidateGeneration = null;
             nativeRefreshSemanticGeneration = null;
             if (onlyNativeRefreshChangedSemantics)
             {
                 readiness.update({
-                    ...preRefreshStatus,
                     generation: cache.getGeneration(),
                     semanticGeneration,
                     settledSemanticGeneration: priorSemanticsWereSettled
                         ? semanticGeneration
                         : preRefreshStatus.settledSemanticGeneration,
-                    unrealConnected: true,
+                    stage: preRefreshStatus.stage,
+                    fullReady: preRefreshStatus.fullReady,
+                    coverage: preRefreshStatus.coverage,
+                    activeRevision: cache.getActiveRevision(),
+                    unrealConnected,
+                    ...(unrealConnected ? {} : { editorProcessId: undefined, editorIdentityVerification: 'pending' as const }),
                 });
             }
             else
             {
                 readiness.update({
                     generation: cache.getGeneration(),
-                    revision: cache.getRevision(),
-                    cache: preRefreshStatus.cache,
-                    cacheReason: preRefreshStatus.cacheReason,
-                    unrealConnected: true,
+                    activeRevision: cache.getActiveRevision(),
+                    unrealConnected,
+                    ...(unrealConnected ? {} : { editorProcessId: undefined, editorIdentityVerification: 'pending' as const }),
                 });
             }
             preRefreshStatus = null;
             return;
         }
-        nativeRefreshPending = false;
+        nativeCandidateGeneration = null;
         nativeRefreshSemanticGeneration = null;
         readiness.update({
             stage: 'partial',
             fullReady: false,
             coverage: 'partial',
-            cache: 'rejected',
-            cacheReason: `DebugDatabase hydration failed: ${String(error)}`,
-            revision: undefined,
+            cacheState: rejectCache ? 'rejected' : readiness.snapshot().cacheState,
+            cacheMessage: rejectCache
+                ? `DebugDatabase hydration failed: ${String(error)}`
+                : String(error),
+            activeRevision: undefined,
+            unrealConnected,
+            ...(unrealConnected ? {} : { editorProcessId: undefined, editorIdentityVerification: 'pending' as const }),
         });
+        preRefreshStatus = null;
+    }
+
+    function abortLiveRefresh(reason: string) : boolean
+    {
+        if (nativeCandidateGeneration == null || !cache.abortRefresh())
+        {
+            readiness.update({
+                unrealConnected: false,
+                editorProcessId: undefined,
+                editorIdentityVerification: 'pending',
+            });
+            return false;
+        }
+        markHydrationFailed(`DebugDatabase refresh aborted: ${reason}`, false, false);
+        return true;
     }
 
     function markResolving() : void
     {
         preRefreshStatus = null;
-        readiness.update({ stage: 'resolving', revision: cache.getRevision() });
-    }
-
-    function exportApiQueryIndex() : ApiQueryIndexExportResult
-    {
-        if (!options)
-            throw new Error('Language Server initialization is incomplete.');
-        let status = readiness.snapshot();
-        if (!status.fullReady || status.semanticGeneration != status.settledSemanticGeneration)
-            throw new Error(`Language Server is not fully ready (stage=${status.stage}).`);
-        let revision = cache.getRevision() ?? status.revision;
-        if (!revision)
-            throw new Error('Debug database revision is unavailable.');
-        let producerHash = process.env.UNREAL_ANGELSCRIPT_LS_COMMIT || 'development';
-        let index = buildApiQueryIndex(options.projectIdentity, revision, producerHash);
-        let indexPath: string | undefined;
-        if (options.cacheAccess == 'read-write')
-        {
-            indexPath = path.join(path.dirname(options.cachePath), 'api-query-index.v1.json.gz');
-            writeApiQueryIndexAtomic(indexPath, index);
-        }
-        return {
-            ...(indexPath ? { path: indexPath } : {}),
-            projectIdentity: index.projectIdentity,
-            debugDatabaseRevision: index.debugDatabaseRevision,
-            producerHash: index.producerHash,
-            scriptContentRevision: index.scriptContentRevision,
-            recordCount: index.records.length,
-            recordsHash: index.recordsHash,
-        };
-    }
-
-    function scheduleIndexExport() : void
-    {
-        let status = readiness.snapshot();
-        if (options?.role != 'ue-resident' || !status.fullReady
-            || status.semanticGeneration != status.settledSemanticGeneration)
-            return;
-        let semanticGeneration = status.semanticGeneration;
-        publication.schedule(semanticGeneration, () => {
-            let current = readiness.snapshot();
-            if (semanticGeneration != current.semanticGeneration || !current.fullReady
-                || current.semanticGeneration != current.settledSemanticGeneration)
-                return;
-            try { exportApiQueryIndex(); } catch (error) { connection.console.error(`API query index export failed: ${String(error)}`); }
-        });
-    }
-
-    function scheduleCacheWrite(unrealConnected: boolean) : void
-    {
-        cache.scheduleWrite(unrealConnected, (published) => {
-            readiness.update({ cache: 'published', revision: published.revision });
-            scheduleIndexExport();
-        }, (error) => {
-            readiness.update({ cache: 'rejected', cacheReason: `Cache publication failed: ${String(error)}` });
-            connection.console.error(`Debug database cache publication failed: ${String(error)}`);
-        });
+        readiness.update({ stage: 'resolving', activeRevision: cache.getActiveRevision() });
     }
 
     function markCurrentGenerationFullReady() : void
     {
-        if (nativeRefreshPending)
+        if (nativeCandidateGeneration != null || nativeDiagnosticsGeneration != null)
             return;
         let generation = cache.getGeneration();
-        let revision = cache.getRevision();
+        let revision = cache.getActiveRevision();
         let status = readiness.snapshot();
         if (status.generation != generation || !revision)
             return;
-        readiness.update({ generation, revision });
+        readiness.update({ generation, activeRevision: revision });
         readiness.markFullReady();
-        scheduleIndexExport();
     }
 
     function updateDiagnostics(uri: string, values: readonly Diagnostic[]) : void
@@ -208,21 +254,30 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
 
     function beginScriptSemanticRefresh() : number
     {
-        publication.cancel();
         return readiness.beginSemanticRefresh();
     }
 
-    function completeNativeRefresh() : void
+    function completeNativeRefresh(generation: number) : void
     {
-        nativeRefreshPending = false;
-        nativeRefreshSemanticGeneration = null;
+        if (nativeDiagnosticsGeneration == generation)
+            nativeDiagnosticsGeneration = null;
     }
 
-    function shutdown() : void
+    function cancelNativeDiagnostics(generation: number) : void
+    {
+        if (nativeDiagnosticsGeneration == generation)
+            nativeDiagnosticsGeneration = null;
+    }
+
+    function resumeNativeDiagnostics(generation: number) : void
+    {
+        nativeDiagnosticsGeneration = generation;
+    }
+
+    async function shutdown(timeoutMs = 2000) : Promise<boolean>
     {
         readiness.update({ stage: 'stopping', fullReady: false });
-        cache.cancelPendingWrite();
-        publication.cancel();
+        return cache.shutdownPersistence(timeoutMs);
     }
 
     return {
@@ -230,16 +285,17 @@ export function createLanguageServerAutomationRuntime(connection: Connection, ex
         readiness,
         configure,
         beginLiveRefresh,
+        commitLiveRefresh,
         markHydrationFailed,
+        abortLiveRefresh,
         markResolving,
         markCurrentGenerationFullReady,
-        scheduleCacheWrite,
-        scheduleIndexExport,
-        exportApiQueryIndex,
         updateDiagnostics,
         beginScriptSemanticRefresh,
         completeNativeRefresh,
-        get nativeRefreshPending() { return nativeRefreshPending; },
+        cancelNativeDiagnostics,
+        resumeNativeDiagnostics,
+        get nativeRefreshPending() { return nativeCandidateGeneration != null || nativeDiagnosticsGeneration != null; },
         shutdown,
         get options() { return options; },
     };

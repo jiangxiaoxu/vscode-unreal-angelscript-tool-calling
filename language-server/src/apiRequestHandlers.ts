@@ -7,7 +7,6 @@ export type ApiRequestHandlerDeps = {
     connection: Connection;
     isUnrealConnected: () => boolean;
     getFullReadyStatus?: () => { fullReady: boolean; stage: string; coverage: string };
-    exportApiQueryIndex?: () => unknown | Promise<unknown>;
     typesReadyWait?: {
         maxTries?: number;
         delayMs?: number;
@@ -168,9 +167,4 @@ export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
         return runReady(() => runApiCoreRequest(() => api_docs.GetAPIClassHierarchy(params)));
     });
 
-    connection.onRequest("angelscript/exportApiQueryIndex", () : any => {
-        if (!deps.exportApiQueryIndex)
-            return new ResponseError<void>(-32601, 'API query index export is not configured.');
-        return runReady(() => deps.exportApiQueryIndex());
-    });
 }

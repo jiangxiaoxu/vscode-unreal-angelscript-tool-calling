@@ -83,21 +83,29 @@ Themes do not always distinguish every AngelScript semantic scope. Add `editor.t
 ```
 
 ### Offline Cache
-The extension restores cache data at startup to provide baseline capabilities without an active engine connection.
+The language server restores its role-owned cache at startup to provide baseline capabilities without an active engine connection.
 
-- Cache path: `<Project>/Saved/ASEditorAutomation/LanguageServer/debug-database.v2.json.gz`
-- The `ue-resident` client is the only writer; VS Code and `cli-direct` clients are read-only.
+- Roles are limited to `vscode` and `project-daemon`; both keep the Unreal connection online and publish an independent v2 cache.
+- VS Code cache: `<Project>/Script/.vscode/angelscript/debug-database.v2.json.gz`.
+- Project daemon cache: `<Project>/Saved/ASEditorAutomation/LanguageServer/debug-database.v2.json.gz`.
+- VS Code enables cache access only when its workspace resolves to exactly one physical `.uproject`; otherwise it keeps language features active, disables cache I/O, and warns.
 - The compact gzip envelope preserves ordered DebugDatabase chunks and records project identity, revision, content hash, producer metadata, script settings, and completion state.
 - Corrupt, oversized, incomplete, identity-mismatched, or unsupported cache files are ignored safely.
-- Publication uses a unique same-directory temporary file, fsync, and atomic rename. The legacy `.vscode/angelscript/unreal-cache.json` is neither read nor deleted.
-- The language server also exports `api-query-index.v1.json.gz`, bound to both the native DebugDatabase revision and loaded script-content revision; its standalone runtime can answer API queries without loading the global TypeDB.
+- A complete native generation is validated and accepted into the in-memory TypeDB before cache I/O. API queries continue to use that active generation while an immutable snapshot is published asynchronously.
+- A worker thread serializes, hashes, compresses, writes, fsyncs, and verifies a unique same-directory temporary file. The main thread then rechecks the generation token, atomically replaces the final cache, and asynchronously fsyncs the parent directory. A superseded or invalid temporary file never touches the prior final cache.
+- The single writer retries the latest generation after 1s, 3s, and 5s. Permanent failure keeps the active TypeDB and prior final cache, reports the cache as dirty, and waits for the next complete native generation or bounded shutdown flush.
+- After this VS Code process successfully publishes a live v2 generation, it safely removes the exact legacy `Script/.vscode/angelscript/unreal-cache.json` regular file.
+- Before and after each Windows TCP connection, the server verifies that the listener belongs to the same Unreal Editor process whose command line contains the exact physical `.uproject`.
+- Platforms without strict listener-owner verification fail closed for live TCP refresh and report `unsupported-platform`; a compatible existing v2 cache remains available offline.
+- `project-daemon` requires `initialize.processId`; the child performs a bounded cache flush and exits when its daemon parent dies or its stdio stream closes.
+- API queries use the live in-memory TypeDB. There is no API query index export or standalone index bundle.
 - Standard `textDocument/diagnostic` and `workspace/diagnostic` pull requests return deterministic result IDs and support unchanged reports through previous-result IDs.
-- `angelscript/diagnosticsStatus` exposes monotonic `semanticGeneration` and `settledSemanticGeneration` counters. A request snapshot is stable only when both counters match, `fullReady` is true, and the counters remain unchanged across status-before/request/status-after.
+- `angelscript/diagnosticsStatus` exposes monotonic `semanticGeneration` and `settledSemanticGeneration` counters plus `activeRevision`, `persistedRevision`, `cacheState`, `cacheDirty`, `persistenceAttempt`, and `lastPersistenceError`. Persistence failure does not reduce semantic readiness. A request snapshot is stable only when both semantic counters match, `fullReady` is true, and the counters remain unchanged across status-before/request/status-after.
+- Each `DebugDatabaseSettings` message starts a new native transaction on the verified socket. A completed generation becomes queryable immediately, while full readiness and pull diagnostics wait for its generation-bound script resolution and diagnostics pass; superseded passes cannot settle readiness or request a semantic-token refresh.
 
 ### Build
 - `npm install` installs the root dependencies and the nested `extension` and `language-server` packages via `postinstall`.
 - `npm run compile` builds both the extension bundle and the language server bundle.
-- The language-server build also emits the standalone `language-server/dist/api-query-index.js` runtime.
 - `npm run watch` watches both bundles during development.
 - `npm test` runs the full test suite.
 - `npm run test:fork-boundary` runs the fork-boundary regression suite for the language-server API query core and workspace layout behavior.
@@ -154,21 +162,29 @@ Language server 还提供 signature help、code actions 和 quick fixes. 部分�
 Color theme 不一定能区分所有 AngelScript semantic scope. 如需更明显的视觉区分,可在 workspace settings 中配置 `editor.tokenColorCustomizations`;常用 scope 与上方 English 示例相同.
 
 ### 离线缓存
-扩展启动时会恢复缓存,在未连接引擎时提供基础能力.
+Language Server 启动时会恢复当前 role 独占的缓存,在未连接引擎时提供基础能力.
 
-- 缓存路径: `<Project>/Saved/ASEditorAutomation/LanguageServer/debug-database.v2.json.gz`.
-- 只有 `ue-resident` client 可以写入;VS Code 和 `cli-direct` client 只读.
+- Role 仅保留 `vscode` 和 `project-daemon`;两者都保持 Unreal connection online,并发布彼此独立的 v2 cache.
+- VS Code cache: `<Project>/Script/.vscode/angelscript/debug-database.v2.json.gz`.
+- Project daemon cache: `<Project>/Saved/ASEditorAutomation/LanguageServer/debug-database.v2.json.gz`.
+- VS Code workspace 只有解析到唯一 physical `.uproject` 时才启用 cache I/O;否则保留语言功能、禁用 cache 并警告.
 - compact gzip envelope 保留 DebugDatabase chunks 的原始顺序,并记录 project identity、revision、content hash、producer metadata、script settings 和完成状态.
 - 损坏、超预算、不完整、identity 不匹配或 schema 不受支持的缓存会被安全忽略.
-- 发布使用同目录唯一临时文件、fsync 和 atomic rename. 旧 `.vscode/angelscript/unreal-cache.json` 不再读取,也不会自动删除.
-- Language Server 还会导出同时绑定 native DebugDatabase revision 与已加载 script-content revision 的 `api-query-index.v1.json.gz`;standalone runtime 无需加载 global TypeDB 即可执行 API query.
+- 完整 native generation 会先完成校验并成为 in-memory TypeDB 的 active authority,之后才进行 cache I/O. Immutable snapshot 异步发布期间,API query 继续使用该 active generation.
+- Worker thread 负责 serialize、hash、compress、写入、fsync 并验证同目录唯一临时文件. Main thread 随后再次检查 generation token、atomic replace final cache,再异步 fsync parent directory. 已被替代或无效的临时文件不会触碰旧 final cache.
+- Single writer 会在 1s、3s、5s 后重试 latest generation. 永久失败时保留 active TypeDB 与旧 final cache,报告 cache dirty,并等待下一轮完整 native generation 或 bounded shutdown flush.
+- 当前 VS Code process 成功发布 live v2 generation 后,才会安全删除 exact legacy `Script/.vscode/angelscript/unreal-cache.json` regular file.
+- Windows 下每次 TCP connect 前后都会验证 listener owner 是同一个 Unreal Editor process,且其 command line 包含 exact physical `.uproject`.
+- 无 strict listener-owner verification 的平台会拒绝 live TCP refresh 并报告 `unsupported-platform`;已有 compatible v2 cache 仍可用于 offline 能力.
+- `project-daemon` 必须提供 `initialize.processId`;daemon parent 退出或 stdio 关闭时 child 会执行 bounded cache flush 后退出.
+- API query 直接使用常驻内存 TypeDB,不再导出 API query index 或 standalone index bundle.
 - 标准 `textDocument/diagnostic` 与 `workspace/diagnostic` pull request 会返回确定性的 result ID,并通过 previous-result ID 支持 unchanged report.
-- `angelscript/diagnosticsStatus` 提供单调递增的 `semanticGeneration` 与 `settledSemanticGeneration`. 只有两者相等、`fullReady` 为 true,且 status-before/request/status-after 的计数保持不变时,request snapshot 才稳定.
+- `angelscript/diagnosticsStatus` 提供单调递增的 `semanticGeneration` 与 `settledSemanticGeneration`,以及 `activeRevision`、`persistedRevision`、`cacheState`、`cacheDirty`、`persistenceAttempt` 和 `lastPersistenceError`. Persistence failure 不会降低 semantic readiness. 只有两个 semantic counter 相等、`fullReady` 为 true,且 status-before/request/status-after 的计数保持不变时,request snapshot 才稳定.
+- Verified socket 上每个 `DebugDatabaseSettings` message 都会开始新的 native transaction. 完整 generation 会立即用于 query,但 full readiness 与 pull diagnostics 必须等待绑定该 generation 的 script resolve/diagnostics pass;被 supersede 的 pass 不能 settle readiness 或请求 semantic-token refresh.
 
 ### 构建
 - `npm install` 会安装根目录依赖,并通过 `postinstall` 安装嵌套的 `extension` 和 `language-server` 包依赖.
 - `npm run compile` 会同时构建 extension bundle 和 language server bundle.
-- Language Server build 还会生成 standalone `language-server/dist/api-query-index.js` runtime.
 - `npm run watch` 会在开发时同时监听这两个 bundle.
 - `npm test` 会运行完整测试集.
 - `npm run test:fork-boundary` 会运行 fork boundary 回归测试,重点覆盖 language-server API query core 和 workspace layout 行为.

@@ -23,13 +23,6 @@ import {
     GetAPISymbolMembers,
 } from '../api_docs';
 import { registerApiRequestHandlers } from '../apiRequestHandlers';
-import { buildApiQueryIndex } from '../apiQueryIndexExporter';
-import {
-    queryApiQueryIndex,
-    queryApiQueryIndexHierarchy,
-    queryApiQueryIndexMembers,
-    readApiQueryIndexSymbol,
-} from '../apiQueryIndexRuntime';
 
 function namespace(qualifiedName: string, declaredModule?: string | null): DBNamespace
 {
@@ -909,6 +902,7 @@ test('core LSP handlers are registered and execute through the ready path', asyn
         connection: connection as any,
         isUnrealConnected: () => true,
     });
+    assert.equal(handlers.has('angelscript/exportApiQueryIndex'), false);
     for (const name of [
         'angelscript/queryAPI',
         'angelscript/readAPISymbol',
@@ -952,104 +946,4 @@ test('API handlers return a bounded NotReady ResponseError when Unreal types nev
         assert.equal(result?.code, -32002, name);
         assert.match(result?.message ?? '', /NotReady/u, name);
     }
-});
-
-test('exported API query index preserves representative direct query and exact-read results', () =>
-{
-    const index = buildApiQueryIndex('project-a', 'revision-a', 'producer-a');
-    const params = {
-        query: 'Core::UDerived.Run',
-        kinds: ['method' as const],
-        source: 'script' as const,
-        includeDocs: true,
-        limit: 20,
-    };
-    const direct = GetAPIQuery(params);
-    const indexed = queryApiQueryIndex(index, params);
-    assert.deepEqual(
-        indexed.data.matches.map((match) => [match.qualifiedName, match.source, match.kind, match.signature]),
-        direct.data.matches.map((match) => [match.qualifiedName, match.source, match.kind, match.signature]),
-    );
-
-    const directExact = GetAPIExactSymbols({ name: 'Core::FThing.DoThing', kind: 'method', source: 'native', includeDocs: true });
-    const indexedExact = readApiQueryIndexSymbol(index, { name: 'Core::FThing.DoThing', kind: 'method', source: 'native', includeDocs: true });
-    assert.equal(indexedExact.ok, directExact.ok);
-    if (directExact.ok && indexedExact.ok)
-    {
-        assert.deepEqual(
-            indexedExact.data.symbols.map((match) => [match.qualifiedName, match.source, match.kind, match.signature]),
-            directExact.data.symbols.map((match) => [match.qualifiedName, match.source, match.kind, match.signature]),
-        );
-    }
-});
-
-test('API query index matches direct query behavior across filters, scopes, inheritance, mixins, visibility, and paging', () =>
-{
-    const index = buildApiQueryIndex('project-a', 'revision-a', 'producer-a');
-    const cases = [
-        { query: 'Core::UDerived.Run', kinds: ['method' as const], source: 'script' as const, includeDocs: true, limit: 20 },
-        { query: 'Run', kinds: ['method' as const], source: 'script' as const, limit: 20 },
-        { query: '/Thing/', mode: 'regex' as const, source: 'both' as const, limit: 7, offset: 1 },
-        { query: 'Tick', scope: 'Core::UDerived', kinds: ['method' as const], limit: 20 },
-        { query: 'Tick', scope: 'Core::UDerived', excludeInherited: true, kinds: ['method' as const], limit: 20 },
-        { query: 'ApplyBase', scope: 'Core::UDerived', kinds: ['function' as const], limit: 20 },
-        { query: 'Secret', scope: 'Core::UDerived', includeNonPublic: false, limit: 20 },
-        { query: 'Secret', scope: 'Core::UDerived', includeNonPublic: true, limit: 20 },
-        { query: 'Run', symbolLevel: 'type' as const, kinds: ['class' as const], limit: 20 },
-        { query: 'FThing', scope: 'Core::FThing', declaredOnly: true, kinds: ['constructor' as const], limit: 1 },
-        { query: '/(DoThing|Build|Count)$/', mode: 'regex' as const, scope: 'Core::FThing', declaredOnly: true, limit: 1, offset: 0 },
-        { query: '/(DoThing|Build|Count)$/', mode: 'regex' as const, scope: 'Core::FThing', declaredOnly: true, limit: 1, offset: 1 },
-        { query: '/(DoThing|Build|Count)$/', mode: 'regex' as const, scope: 'Core::FThing', declaredOnly: true, limit: 1, offset: 2 },
-        { query: '/(DoThing|Build|Count)$/', mode: 'regex' as const, scope: 'Core::FThing', declaredOnly: true, limit: 2, offset: 0 },
-        { query: '/(DoThing|Build|Count)$/', mode: 'regex' as const, scope: 'Core::FThing', declaredOnly: true, limit: 2, offset: 1 },
-    ];
-    for (const params of cases)
-    {
-        const direct = GetAPIQuery(params);
-        const indexed = queryApiQueryIndex(index, params);
-        assert.deepEqual(indexed, direct, JSON.stringify(params));
-    }
-});
-
-test('API query index matches exact constructor families, symbol ID prefixes, and ambiguity errors', () =>
-{
-    const index = buildApiQueryIndex('project-a', 'revision-a', 'producer-a');
-    const baseCases = [
-        { name: 'Core::FThing.FThing', kind: 'constructor' as const },
-        { name: 'Core::FThing.FThing', kind: 'constructor' as const, includeNonPublic: true, includeDocs: true },
-        { name: 'Core::FCollision.FCollision', kind: 'constructor' as const, includeNonPublic: true },
-        { name: 'Core::FThing.FThing', kind: 'constructor' as const, source: 'script' as const, includeNonPublic: true },
-    ];
-    for (const params of baseCases)
-        assert.deepEqual(readApiQueryIndexSymbol(index, params), GetAPIExactSymbols(params), JSON.stringify(params));
-
-    const publicFamily = GetAPIExactSymbols({ name: 'Core::FThing.FThing', kind: 'constructor' });
-    assert.equal(publicFamily.ok, true);
-    if (publicFamily.ok)
-    {
-        const prefix = publicFamily.data.symbols[1].symbolIdPrefix!;
-        const params = { name: 'Core::FThing.FThing', symbolId: ` ${prefix.toUpperCase()} ` };
-        assert.deepEqual(readApiQueryIndexSymbol(index, params), GetAPIExactSymbols(params));
-    }
-    const ambiguous = { name: 'Core::FCollision.FCollision', kind: 'constructor' as const, symbolId: '6E31BFEC' };
-    assert.deepEqual(readApiQueryIndexSymbol(index, ambiguous), GetAPIExactSymbols(ambiguous));
-});
-
-test('API query index matches direct members grouping/options/paging and hierarchy limits', () =>
-{
-    const index = buildApiQueryIndex('project-a', 'revision-a', 'producer-a');
-    const memberCases = [
-        { name: 'Core::FThing', source: 'both' as const, ownerKind: 'all' as const, members: ['all'] as ['all'], includeDocs: true, includeNonPublic: true, limit: 200, offset: 0 },
-        { name: 'Core::UDerived', source: 'both' as const, ownerKind: 'type' as const, members: ['callable' as const], includeInherited: true, includeDocs: false, limit: 3, offset: 1 },
-        { name: 'Core::FThing', source: 'native' as const, ownerKind: 'namespace' as const, members: ['callable' as const, 'data' as const], includeDocs: true, limit: 2, offset: 0 },
-    ];
-    for (const params of memberCases)
-        assert.deepEqual(queryApiQueryIndexMembers(index, params), GetAPISymbolMembers(params), JSON.stringify(params));
-
-    const hierarchyCases = [
-        { name: 'Core::UBase', maxSuperDepth: 0, maxSubDepth: 1, maxSubBreadth: 1 },
-        { name: 'Core::UDerived', source: 'script' as const, maxSuperDepth: 3, maxSubDepth: 0, maxSubBreadth: 10 },
-    ];
-    for (const params of hierarchyCases)
-        assert.deepEqual(queryApiQueryIndexHierarchy(index, params), GetAPIClassHierarchy(params), JSON.stringify(params));
 });

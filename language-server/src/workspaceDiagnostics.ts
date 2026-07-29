@@ -54,11 +54,25 @@ export function registerWorkspaceDiagnostics(
     getStatus: () => LanguageServerDiagnosticsStatus
 ) : void
 {
-    let resultId = (contentHash: string, status: LanguageServerDiagnosticsStatus) =>
-        `${status.generation}:${status.semanticGeneration}:${status.revision ?? 'partial'}:${contentHash}`;
+    async function waitForSettledStatus() : Promise<LanguageServerDiagnosticsStatus>
+    {
+        while (true)
+        {
+            let status = getStatus();
+            if (status.semanticGeneration == status.settledSemanticGeneration
+                && status.stage != 'loading-cache'
+                && status.stage != 'parsing'
+                && status.stage != 'resolving')
+                return status;
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+    }
 
-    connection.languages.diagnostics.on((params) : DocumentDiagnosticReport => {
-        let status = getStatus();
+    let resultId = (contentHash: string, status: LanguageServerDiagnosticsStatus) =>
+        `${status.generation}:${status.semanticGeneration}:${status.activeRevision ?? 'partial'}:${contentHash}`;
+
+    connection.languages.diagnostics.on(async (params) : Promise<DocumentDiagnosticReport> => {
+        let status = await waitForSettledStatus();
         let entry = registry.get(params.textDocument.uri);
         let currentResultId = resultId(entry?.contentHash ?? 'empty', status);
         if (params.previousResultId == currentResultId)
@@ -70,8 +84,8 @@ export function registerWorkspaceDiagnostics(
         };
     });
 
-    connection.languages.diagnostics.onWorkspace((params) : WorkspaceDiagnosticReport => {
-        let status = getStatus();
+    connection.languages.diagnostics.onWorkspace(async (params) : Promise<WorkspaceDiagnosticReport> => {
+        let status = await waitForSettledStatus();
         let previousByUri = new Map((params.previousResultIds ?? []).map((previous) => [previous.uri, previous.value]));
         let items = registry.snapshot().map(({ uri, diagnostics, contentHash }) => {
             let currentResultId = resultId(contentHash, status);

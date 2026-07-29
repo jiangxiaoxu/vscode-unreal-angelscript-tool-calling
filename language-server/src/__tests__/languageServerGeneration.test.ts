@@ -6,11 +6,10 @@ import * as path from 'node:path';
 import { createLanguageServerReadinessController } from '../languageServerReadiness';
 import { createUnrealCacheController } from '../unrealCacheController';
 import { DEFAULT_LANGUAGE_SERVER_BUDGETS } from '../languageServerContract';
-import { loadDebugDatabaseCacheV2, saveDebugDatabaseCacheV2 } from '../debugDatabaseCacheV2';
+import { loadDebugDatabaseCacheV2, saveDebugDatabaseCacheV2, saveDebugDatabaseCacheV2Async } from '../debugDatabaseCacheV2';
 import { AddTypeToDatabase, DBType, GetRootNamespace, GetTypeByName, ResetDatabaseForTests } from '../database';
 import * as scriptfiles from '../as_parser';
 import { resetTypeDatabaseForGeneration } from '../typeDatabaseGeneration';
-import { createDebouncedPublication } from '../debouncedPublication';
 import { Complete } from '../parsed_completion';
 import { ResolveSymbolAtPosition } from '../symbols';
 import { URI } from 'vscode-uri';
@@ -30,7 +29,7 @@ function nativeType(name: string, methodName?: string) : Record<string, unknown>
 test('beginRefresh atomically revokes ready coverage and the prior revision', () => {
     let notifications: unknown[] = [];
     let readiness = createLanguageServerReadinessController((status) => notifications.push(status));
-    readiness.update({ generation: 3, stage: 'ready', fullReady: true, coverage: 'full', revision: 'old' });
+    readiness.update({ generation: 3, stage: 'ready', fullReady: true, coverage: 'full', activeRevision: 'old' });
     readiness.beginRefresh(4);
     assert.deepEqual(readiness.snapshot(), {
         generation: 4,
@@ -41,9 +40,12 @@ test('beginRefresh atomically revokes ready coverage and the prior revision', ()
         coverage: 'none',
         unrealOnline: false,
         unrealConnected: false,
-        cache: 'not-checked',
-        cacheReason: undefined,
-        revision: undefined,
+        editorProcessId: undefined,
+        cacheState: 'not-checked',
+        cacheDirty: false,
+        persistenceAttempt: 0,
+        cacheMessage: undefined,
+        activeRevision: undefined,
     });
     assert.equal(notifications.length, 2);
 });
@@ -64,7 +66,10 @@ test('semantic generations remain unsettled until parsing and resolution explici
         coverage: 'none',
         unrealOnline: false,
         unrealConnected: false,
-        cache: 'not-checked',
+        editorProcessId: undefined,
+        cacheState: 'not-checked',
+        cacheDirty: false,
+        persistenceAttempt: 0,
     });
 
     readiness.markFullReady();
@@ -85,7 +90,7 @@ test('semantic generations remain unsettled until parsing and resolution explici
 
 test('cache publication is fenced by generation and cannot publish mixed chunks', async () => {
     let directory = fs.mkdtempSync(path.join(os.tmpdir(), 'as-ls-generation-'));
-    let cachePath = path.join(directory, 'debug-database.v2.json.gz');
+    let cachePath = path.join(directory, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.v2.json.gz');
     let context = {
         cachePath,
         access: 'read-write' as const,
@@ -98,20 +103,14 @@ test('cache publication is fenced by generation and cannot publish mixed chunks'
     {
         let generation1 = controller.beginRefresh();
         controller.recordDebugDatabaseChunk(nativeType('UGeneration1'));
-        controller.hydrateRecordedGeneration();
-        let stalePublished = false;
-        controller.scheduleWrite(true, () => { stalePublished = true; });
-
+        controller.acceptCompleteCandidate();
         let generation2 = controller.beginRefresh();
         assert.equal(generation2, generation1 + 1);
         controller.recordDebugDatabaseChunk(nativeType('UGeneration2First'));
         controller.recordDebugDatabaseChunk(nativeType('UGeneration2Second'));
-        controller.hydrateRecordedGeneration();
-        await new Promise<void>((resolve, reject) => {
-            controller.scheduleWrite(true, () => resolve(), reject);
-        });
+        controller.acceptCompleteCandidate();
+        assert.equal(await controller.flushPersistence(5000), true);
 
-        assert.equal(stalePublished, false);
         let loaded = loadDebugDatabaseCacheV2(context);
         assert.equal(loaded.ok, true);
         if (loaded.ok)
@@ -122,9 +121,126 @@ test('cache publication is fenced by generation and cannot publish mixed chunks'
     }
     finally
     {
-        controller.cancelPendingWrite();
+        await controller.shutdownPersistence(1000);
         fs.rmSync(directory, { recursive: true, force: true });
     }
+});
+
+test('VS Code removes the exact legacy v1 file only after a live v2 publication readback', async () => {
+    ResetDatabaseForTests();
+    let root = fs.mkdtempSync(path.join(os.tmpdir(), 'as-vscode-v2-'));
+    let uprojectPath = path.join(root, 'Example.uproject');
+    let projectIdentity = process.platform == 'win32' ? uprojectPath.toLowerCase() : uprojectPath;
+    let legacyPath = path.join(root, 'Script', '.vscode', 'angelscript', 'unreal-cache.json');
+    fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+    fs.writeFileSync(uprojectPath, '{}');
+    fs.writeFileSync(legacyPath, '{}');
+    let warnings: string[] = [];
+    let connection = {
+        sendNotification() {},
+        onRequest() {},
+        languages: { diagnostics: { on() {}, onWorkspace() {} } },
+        console: { error() {}, warn(value: string) { warnings.push(value); } },
+    } as any;
+    let runtime = createLanguageServerAutomationRuntime(connection, '1.9.3072');
+    try
+    {
+        runtime.configure({
+            additionalScriptRootFolders: [],
+            role: 'vscode',
+            canonicalProjectRoot: root,
+            uprojectPath,
+            projectIdentity,
+            unrealOnline: true,
+            debuggerPort: 27099,
+            cachePath: path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz'),
+            cacheAccess: 'read-write',
+            budgets: DEFAULT_LANGUAGE_SERVER_BUDGETS,
+        });
+        assert.equal(fs.existsSync(legacyPath), true, 'Startup cache load must not remove v1.');
+        runtime.beginLiveRefresh();
+        runtime.cache.recordDebugDatabaseChunk(nativeType('UV2Published'));
+        runtime.commitLiveRefresh();
+        assert.equal(await runtime.cache.flushPersistence(5000), true);
+        assert.equal(fs.existsSync(legacyPath), false);
+        assert.equal(fs.existsSync(path.join(path.dirname(legacyPath), 'debug-database.v2.json.gz')), true);
+        assert.deepEqual(warnings, []);
+    }
+    finally
+    {
+        await runtime.shutdown();
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('disconnect abort restores the prior full-ready revision when no live chunks completed', () => {
+    ResetDatabaseForTests();
+    let connection = {
+        sendNotification() {},
+        onRequest() {},
+        languages: { diagnostics: { on() {}, onWorkspace() {} } },
+        console: { error() {}, warn() {} },
+    } as any;
+    let runtime = createLanguageServerAutomationRuntime(connection, '1.9.3072');
+    runtime.cache.beginRefresh();
+    runtime.cache.recordDebugDatabaseChunk(nativeType('UPriorAccepted'));
+    runtime.cache.acceptCompleteCandidate();
+    let priorRevision = runtime.cache.getActiveRevision()!;
+    runtime.readiness.update({
+        generation: runtime.cache.getGeneration(),
+        stage: 'ready',
+        fullReady: true,
+        coverage: 'full',
+        activeRevision: priorRevision,
+    });
+
+    runtime.beginLiveRefresh();
+    assert.equal(runtime.readiness.snapshot().fullReady, true);
+    assert.equal(runtime.abortLiveRefresh('test disconnect'), true);
+    let restored = runtime.readiness.snapshot();
+    assert.equal(restored.fullReady, true);
+    assert.equal(restored.activeRevision, priorRevision);
+    assert.equal(restored.unrealConnected, false);
+    assert.equal(runtime.nativeRefreshPending, false);
+    assert.ok(GetTypeByName('UPriorAccepted'));
+});
+
+test('an incomplete timed-out generation is never accepted and a later finished generation can replace it', () => {
+    ResetDatabaseForTests();
+    let controller = createUnrealCacheController();
+    controller.beginRefresh();
+    controller.recordDebugDatabaseChunk(nativeType('UPriorComplete'));
+    controller.acceptCompleteCandidate();
+    let priorRevision = controller.getActiveRevision();
+
+    controller.beginRefresh();
+    controller.recordDebugDatabaseChunk(nativeType('UPartialMustNotCommit'));
+    assert.equal(controller.abortRefresh(), true);
+    assert.equal(controller.getActiveRevision(), priorRevision);
+    assert.ok(GetTypeByName('UPriorComplete'));
+    assert.equal(GetTypeByName('UPartialMustNotCommit') == null, true);
+
+    controller.recordDebugDatabaseChunk(nativeType('UIgnoredAfterAbort'));
+    assert.equal(controller.isRefreshInProgress(), false);
+    controller.beginRefresh();
+    controller.recordDebugDatabaseChunk(nativeType('UNextFinished'));
+    controller.acceptCompleteCandidate();
+    assert.ok(GetTypeByName('UNextFinished'));
+    assert.equal(GetTypeByName('UPriorComplete') == null, true);
+    assert.equal(GetTypeByName('UIgnoredAfterAbort') == null, true);
+});
+
+test('an empty finished candidate closes its transaction and allows the next generation', () => {
+    ResetDatabaseForTests();
+    let controller = createUnrealCacheController();
+    controller.beginRefresh();
+    assert.throws(() => controller.acceptCompleteCandidate(), /no chunks/);
+    assert.equal(controller.isRefreshInProgress(), false);
+
+    controller.beginRefresh();
+    controller.recordDebugDatabaseChunk(nativeType('URecoveredAfterEmpty'));
+    controller.acceptCompleteCandidate();
+    assert.ok(GetTypeByName('URecoveredAfterEmpty'));
 });
 
 test('live refresh preserves the accepted TypeDB and invalid replacement fully restores script resolution', () => {
@@ -133,8 +249,8 @@ test('live refresh preserves the accepted TypeDB and invalid replacement fully r
     let controller = createUnrealCacheController();
     controller.beginRefresh();
     controller.recordDebugDatabaseChunk(nativeType('UOldGenerationOnly', 'OldMethod'));
-    controller.hydrateRecordedGeneration();
-    let acceptedRevision = controller.getRevision();
+    controller.acceptCompleteCandidate();
+    let acceptedRevision = controller.getActiveRevision();
 
     let content = [
         'void Probe()',
@@ -163,8 +279,8 @@ test('live refresh preserves the accepted TypeDB and invalid replacement fully r
     assert.ok(Complete(module, completionPosition)?.some((item) => item.label == 'OldMethod'));
 
     controller.recordDebugDatabaseChunk({ UInvalidReplacement: { properties: { Broken: null }, methods: {} } });
-    assert.throws(() => controller.hydrateRecordedGeneration());
-    assert.equal(controller.getRevision(), acceptedRevision);
+    assert.throws(() => controller.acceptCompleteCandidate());
+    assert.equal(controller.getActiveRevision(), acceptedRevision);
     assert.ok(GetTypeByName('UOldGenerationOnly'));
     assert.equal(GetTypeByName('UNewGenerationBuffered') == null, true);
     assert.equal(module.resolved, true);
@@ -183,29 +299,80 @@ test('failed live refresh restores the prior full-ready status and revision', ()
     let runtime = createLanguageServerAutomationRuntime(connection, '1.9.3070');
     runtime.cache.beginRefresh();
     runtime.cache.recordDebugDatabaseChunk(nativeType('URuntimeAccepted'));
-    runtime.cache.hydrateRecordedGeneration();
-    let revision = runtime.cache.getRevision()!;
-    runtime.readiness.update({ generation: 1, stage: 'ready', fullReady: true, coverage: 'full', revision });
+    runtime.cache.acceptCompleteCandidate();
+    let revision = runtime.cache.getActiveRevision()!;
+    runtime.readiness.update({ generation: 1, stage: 'ready', fullReady: true, coverage: 'full', activeRevision: revision });
 
     runtime.beginLiveRefresh();
     runtime.cache.recordDebugDatabaseChunk({ UInvalidRuntimeReplacement: { properties: { Broken: null }, methods: {} } });
     let failure: unknown;
-    try { runtime.cache.hydrateRecordedGeneration(); } catch (error) { failure = error; }
+    try { runtime.cache.acceptCompleteCandidate(); } catch (error) { failure = error; }
     assert.ok(failure);
     runtime.markHydrationFailed(failure);
-    assert.deepEqual(runtime.readiness.snapshot(), {
-        generation: 2,
-        semanticGeneration: 1,
-        settledSemanticGeneration: 1,
-        stage: 'ready',
-        fullReady: true,
-        coverage: 'full',
-        unrealOnline: false,
-        unrealConnected: true,
-        cache: 'not-checked',
-        cacheReason: undefined,
-        revision,
+    let restored = runtime.readiness.snapshot();
+    assert.equal(restored.generation, 2);
+    assert.equal(restored.stage, 'ready');
+    assert.equal(restored.fullReady, true);
+    assert.equal(restored.coverage, 'full');
+    assert.equal(restored.unrealConnected, true);
+    assert.equal(restored.activeRevision, revision);
+});
+
+test('failed candidate does not roll persistence status back over a completed writer', async () => {
+    ResetDatabaseForTests();
+    let directory = fs.mkdtempSync(path.join(os.tmpdir(), 'as-persistence-status-'));
+    let release: (() => void) | undefined;
+    let connection = {
+        sendNotification() {},
+        onRequest() {},
+        languages: { diagnostics: { on() {}, onWorkspace() {} } },
+        console: { error() {}, warn() {} },
+    } as any;
+    let runtime = createLanguageServerAutomationRuntime(connection, '1.9.3072', {
+        publishCache: async (context, payload, shouldCommit) => {
+            await new Promise<void>((resolve) => { release = resolve; });
+            return saveDebugDatabaseCacheV2Async(context, payload, shouldCommit);
+        },
+        publisherRetryDelaysMs: [],
     });
+    try
+    {
+        runtime.configure({
+            additionalScriptRootFolders: [],
+            role: 'project-daemon',
+            canonicalProjectRoot: directory,
+            uprojectPath: path.join(directory, 'Example.uproject'),
+            projectIdentity: 'status-project',
+            unrealOnline: true,
+            debuggerPort: 27099,
+            cachePath: path.join(directory, 'debug-database.v2.json.gz'),
+            cacheAccess: 'read-write',
+            budgets: DEFAULT_LANGUAGE_SERVER_BUDGETS,
+        });
+        runtime.beginLiveRefresh();
+        runtime.cache.recordDebugDatabaseChunk(nativeType('UStatusAccepted'));
+        let accepted = runtime.commitLiveRefresh();
+        runtime.completeNativeRefresh(accepted.generation);
+        runtime.markCurrentGenerationFullReady();
+
+        runtime.beginLiveRefresh();
+        release?.();
+        assert.equal(await runtime.cache.flushPersistence(1000), true);
+        runtime.cache.recordDebugDatabaseChunk({ UInvalidStatusCandidate: { properties: { Broken: null }, methods: {} } });
+        assert.throws(() => runtime.commitLiveRefresh());
+
+        let status = runtime.readiness.snapshot();
+        assert.equal(status.cacheState, 'clean');
+        assert.equal(status.cacheDirty, false);
+        assert.equal(status.activeRevision, accepted.revision);
+        assert.equal(status.persistedRevision, accepted.revision);
+        assert.equal(status.fullReady, true);
+    }
+    finally
+    {
+        await runtime.shutdown();
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
 });
 
 test('hydration failure without a prior cache does not settle unfinished script parsing', () => {
@@ -235,9 +402,9 @@ test('script changes during a failed native refresh remain fenced until separate
     let runtime = createLanguageServerAutomationRuntime(connection, '1.9.3070');
     runtime.cache.beginRefresh();
     runtime.cache.recordDebugDatabaseChunk(nativeType('UInterleavedAccepted'));
-    runtime.cache.hydrateRecordedGeneration();
-    let revision = runtime.cache.getRevision()!;
-    runtime.readiness.update({ generation: 1, stage: 'ready', fullReady: true, coverage: 'full', revision });
+    runtime.cache.acceptCompleteCandidate();
+    let revision = runtime.cache.getActiveRevision()!;
+    runtime.readiness.update({ generation: 1, stage: 'ready', fullReady: true, coverage: 'full', activeRevision: revision });
 
     runtime.beginLiveRefresh();
     runtime.beginScriptSemanticRefresh();
@@ -247,14 +414,14 @@ test('script changes during a failed native refresh remain fenced until separate
 
     runtime.cache.recordDebugDatabaseChunk({ UInvalidInterleavedReplacement: { properties: { Broken: null }, methods: {} } });
     let failure: unknown;
-    try { runtime.cache.hydrateRecordedGeneration(); } catch (error) { failure = error; }
+    try { runtime.cache.acceptCompleteCandidate(); } catch (error) { failure = error; }
     runtime.markHydrationFailed(failure);
     let failed = runtime.readiness.snapshot();
     assert.equal(runtime.nativeRefreshPending, false);
     assert.equal(failed.fullReady, false);
     assert.equal(failed.stage, 'parsing');
     assert.ok(failed.semanticGeneration > failed.settledSemanticGeneration);
-    assert.equal(failed.revision, revision);
+    assert.equal(failed.activeRevision, revision);
 
     runtime.markCurrentGenerationFullReady();
     let settled = runtime.readiness.snapshot();
@@ -273,9 +440,9 @@ test('a stale re-resolve completion settles work left pending by a failed newer 
     let runtime = createLanguageServerAutomationRuntime(connection, '1.9.3070');
     runtime.cache.beginRefresh();
     runtime.cache.recordDebugDatabaseChunk(nativeType('UStaleResolveAccepted'));
-    runtime.cache.hydrateRecordedGeneration();
-    let revision = runtime.cache.getRevision()!;
-    runtime.readiness.update({ generation: 1, stage: 'ready', fullReady: true, coverage: 'full', revision });
+    runtime.cache.acceptCompleteCandidate();
+    let revision = runtime.cache.getActiveRevision()!;
+    runtime.readiness.update({ generation: 1, stage: 'ready', fullReady: true, coverage: 'full', activeRevision: revision });
 
     let settledCount = 0;
     let tracker = createActiveWorkTracker(() => {
@@ -288,7 +455,7 @@ test('a stale re-resolve completion settles work left pending by a failed newer 
     runtime.beginScriptSemanticRefresh();
     runtime.cache.recordDebugDatabaseChunk({ UInvalidNewerRefresh: { properties: { Broken: null }, methods: {} } });
     let failure: unknown;
-    try { runtime.cache.hydrateRecordedGeneration(); } catch (error) { failure = error; }
+    try { runtime.cache.acceptCompleteCandidate(); } catch (error) { failure = error; }
     runtime.markHydrationFailed(failure);
     assert.equal(runtime.nativeRefreshPending, false);
     assert.equal(runtime.readiness.snapshot().fullReady, false);
@@ -307,7 +474,8 @@ test('cached startup refresh failure advances the restored generation and can fi
     ResetDatabaseForTests();
     let directory = fs.mkdtempSync(path.join(os.tmpdir(), 'as-ls-startup-rollback-'));
     let cachePath = path.join(directory, 'debug-database.v2.json.gz');
-    let projectIdentity = 'startup-rollback-project';
+    let uprojectPath = path.join(directory, 'Example.uproject');
+    let projectIdentity = process.platform == 'win32' ? uprojectPath.toLowerCase() : uprojectPath;
     saveDebugDatabaseCacheV2({
         cachePath,
         access: 'read-write',
@@ -316,7 +484,15 @@ test('cached startup refresh failure advances the restored generation and can fi
     }, {
         projectIdentity,
         producer: { extensionVersion: '1.9.3070', languageServerCommit: 'development' },
-        scriptSettings: { floatIsFloat64: false },
+        scriptSettings: {
+            floatIsFloat64: false,
+            useAngelscriptHaze: false,
+            deprecateStaticClass: false,
+            disallowStaticClass: false,
+            exposeGlobalFunctions: false,
+            deprecateActorGenerics: false,
+            disallowActorGenerics: false,
+        },
         engineSupportsCreateBlueprint: false,
         debugDatabaseChunks: [nativeType('UStartupCached')],
     });
@@ -331,8 +507,9 @@ test('cached startup refresh failure advances the restored generation and can fi
     {
         let loaded = runtime.configure({
             additionalScriptRootFolders: [],
-            role: 'ue-resident',
+            role: 'project-daemon',
             canonicalProjectRoot: directory,
+            uprojectPath,
             projectIdentity,
             unrealOnline: true,
             debuggerPort: 27099,
@@ -346,14 +523,14 @@ test('cached startup refresh failure advances the restored generation and can fi
         runtime.beginLiveRefresh();
         runtime.cache.recordDebugDatabaseChunk({ UInvalidStartupReplacement: { properties: { Broken: null }, methods: {} } });
         let failure: unknown;
-        try { runtime.cache.hydrateRecordedGeneration(); } catch (error) { failure = error; }
+        try { runtime.cache.acceptCompleteCandidate(); } catch (error) { failure = error; }
         runtime.markHydrationFailed(failure);
         assert.equal(runtime.readiness.snapshot().generation, runtime.cache.getGeneration());
         assert.equal(runtime.readiness.snapshot().stage, 'parsing');
-        assert.equal(runtime.readiness.snapshot().revision, oldRevision);
+        assert.equal(runtime.readiness.snapshot().activeRevision, oldRevision);
         runtime.markCurrentGenerationFullReady();
         assert.equal(runtime.readiness.snapshot().fullReady, true);
-        assert.equal(runtime.readiness.snapshot().revision, oldRevision);
+        assert.equal(runtime.readiness.snapshot().activeRevision, oldRevision);
     }
     finally
     {
@@ -380,15 +557,4 @@ test('TypeDB refresh replaces the whole generation and reparses script-owned typ
     assert.ok(reset.reparsedModuleCount >= 1);
     assert.equal(GetTypeByName('UOldGenerationOnly') == null, true);
     assert.ok(GetTypeByName('UGenerationScriptType'));
-});
-
-test('debounced index publication drops stale generations and coalesces file changes', async () => {
-    let publication = createDebouncedPublication(10);
-    let published: number[] = [];
-    publication.schedule(1, () => published.push(1));
-    publication.schedule(2, () => published.push(2));
-    publication.schedule(2, () => published.push(2));
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.deepEqual(published, [2]);
-    publication.cancel();
 });

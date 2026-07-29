@@ -18,6 +18,7 @@ import {
 } from './apiRequests';
 import { registerApiPanel } from './apiPanel';
 import { createScriptFileEventWatchers } from './scriptRoots';
+import { resolveWorkspaceProjectIdentity } from './projectIdentity';
 
 const CONFLICT_EXTENSION_ID = 'Hazelight.unreal-angelscript';
 
@@ -57,6 +58,9 @@ export function activate(context: ExtensionContext)
     if (!Array.isArray(scriptIgnorePatterns))
         scriptIgnorePatterns = [];
     let unrealConnectionPort = workspace.getConfiguration('UnrealAngelscript').get<number>('unrealConnectionPort', 27099);
+    let project = resolveWorkspaceProjectIdentity((workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath));
+    if (project.ok === false)
+        void vscode.window.showWarningMessage(`Unreal Angelscript v2 cache publication is disabled: ${project.reason}`);
     let scriptFileEventWatchers = createScriptFileEventWatchers(workspace.workspaceFolders);
     context.subscriptions.push(...scriptFileEventWatchers);
 
@@ -67,8 +71,13 @@ export function activate(context: ExtensionContext)
         initializationOptions: {
             scriptIgnorePatterns: scriptIgnorePatterns,
             role: 'vscode',
+            ...(project.ok ? {
+                canonicalProjectRoot: project.canonicalProjectRoot,
+                uprojectPath: project.uprojectPath,
+                projectIdentity: project.projectIdentity,
+            } : {}),
             unreal: { online: true, debuggerPort: unrealConnectionPort },
-            cache: { access: 'read-only' },
+            cache: { enabled: project.ok },
         },
         synchronize: {
             fileEvents: scriptFileEventWatchers,

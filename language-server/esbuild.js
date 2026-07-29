@@ -1,4 +1,6 @@
 const esbuild = require("esbuild");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -24,10 +26,14 @@ const esbuildProblemMatcherPlugin = {
 };
 
 async function main() {
+	if (!watch) {
+		for (const obsolete of ['api-query-index.js', 'api-query-index.js.map'])
+			fs.rmSync(path.join('dist', obsolete), { force: true });
+	}
 	const ctx = await esbuild.context({
 		entryPoints: {
 			server: 'src/server.ts',
-			'api-query-index': 'src/apiQueryIndexRuntime.ts',
+			'debug-database-cache-worker': 'src/debugDatabaseCacheWorker.ts',
 		},
 		bundle: true,
 		format: 'cjs',

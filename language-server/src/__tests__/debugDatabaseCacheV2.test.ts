@@ -3,9 +3,10 @@ import test from 'node:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import {
     loadDebugDatabaseCacheV2,
+    commitPreparedDebugDatabaseCacheV2,
     saveDebugDatabaseCacheV2,
     type AtomicWriteOperations,
     type DebugDatabaseCacheContext,
@@ -29,6 +30,19 @@ function makeContext(directory: string, overrides: Partial<DebugDatabaseCacheCon
     };
 }
 
+function scriptSettings(floatIsFloat64 = false) : Record<string, boolean>
+{
+    return {
+        floatIsFloat64,
+        useAngelscriptHaze: false,
+        deprecateStaticClass: false,
+        disallowStaticClass: false,
+        exposeGlobalFunctions: false,
+        deprecateActorGenerics: false,
+        disallowActorGenerics: false,
+    };
+}
+
 function failingOperations(stage: 'write' | 'fsync') : AtomicWriteOperations
 {
     return {
@@ -47,14 +61,14 @@ test('debug database cache v2 round-trips ordered chunks and atomically replaces
         let first = saveDebugDatabaseCacheV2(context, {
             projectIdentity: 'project-a',
             producer: { extensionVersion: '1.9.3070', languageServerCommit: 'abc' },
-            scriptSettings: { floatIsFloat64: true },
+            scriptSettings: scriptSettings(true),
             engineSupportsCreateBlueprint: true,
             debugDatabaseChunks: [{ USecond: { id: 2 } }, { UFirst: { id: 1 } }],
         });
         let second = saveDebugDatabaseCacheV2(context, {
             projectIdentity: 'project-a',
             producer: { extensionVersion: '1.9.3070', languageServerCommit: 'abc' },
-            scriptSettings: { floatIsFloat64: false },
+            scriptSettings: scriptSettings(false),
             engineSupportsCreateBlueprint: false,
             debugDatabaseChunks: [{ UThird: { id: 3 } }],
         });
@@ -73,7 +87,7 @@ test('debug database cache v2 rejects identity mismatch, corruption, and size bu
         saveDebugDatabaseCacheV2(context, {
             projectIdentity: 'project-a',
             producer: { extensionVersion: '1.9.3070', languageServerCommit: 'abc' },
-            scriptSettings: {},
+            scriptSettings: scriptSettings(),
             engineSupportsCreateBlueprint: false,
             debugDatabaseChunks: [{ AActor: { type: 'AActor' } }],
         });
@@ -107,16 +121,65 @@ test('debug database cache v2 rejects identity mismatch, corruption, and size bu
     });
 });
 
+test('semantic content hash rejects script settings and Blueprint support tampering', () => {
+    withTempDir((directory) => {
+        let context = makeContext(directory);
+        saveDebugDatabaseCacheV2(context, {
+            projectIdentity: 'project-a',
+            producer: { extensionVersion: '1.9.3072', languageServerCommit: 'abc' },
+            scriptSettings: scriptSettings(),
+            engineSupportsCreateBlueprint: false,
+            debugDatabaseChunks: [{ AActor: {} }],
+        });
+        let parsed = JSON.parse(gunzipSync(fs.readFileSync(context.cachePath)).toString('utf8'));
+        parsed.scriptSettings.floatIsFloat64 = true;
+        parsed.engineSupportsCreateBlueprint = true;
+        fs.writeFileSync(context.cachePath, gzipSync(Buffer.from(JSON.stringify(parsed))));
+        let loaded = loadDebugDatabaseCacheV2(context);
+        assert.equal(loaded.ok, false);
+        if (!loaded.ok)
+            assert.equal(loaded.code, 'hash-mismatch');
+    });
+});
+
+test('debug database cache v2 rejects unknown root fields and non-canonical timestamps', () => {
+    withTempDir((directory) => {
+        let context = makeContext(directory);
+        saveDebugDatabaseCacheV2(context, {
+            projectIdentity: 'project-a',
+            producer: { extensionVersion: '1.9.3072', languageServerCommit: 'abc' },
+            scriptSettings: scriptSettings(),
+            engineSupportsCreateBlueprint: false,
+            debugDatabaseChunks: [{ AActor: {} }],
+        });
+        let original = JSON.parse(gunzipSync(fs.readFileSync(context.cachePath)).toString('utf8'));
+        for (let mutate of [
+            (value: Record<string, unknown>) => { value.unknownRootField = true; },
+            (value: Record<string, unknown>) => { value.createdAt = '2026-07-29T00:00:00Z'; },
+            (value: Record<string, unknown>) => { value.createdAt = 123; },
+        ])
+        {
+            let tampered = structuredClone(original);
+            mutate(tampered);
+            fs.writeFileSync(context.cachePath, gzipSync(Buffer.from(JSON.stringify(tampered))));
+            let loaded = loadDebugDatabaseCacheV2(context);
+            assert.equal(loaded.ok, false);
+            if (!loaded.ok)
+                assert.equal(loaded.code, 'invalid-schema');
+        }
+    });
+});
+
 test('debug database cache v2 enforces writer ownership', () => {
     withTempDir((directory) => {
-        let context = makeContext(directory, { access: 'read-only' });
+        let context = makeContext(directory, { access: 'disabled' });
         assert.throws(() => saveDebugDatabaseCacheV2(context, {
             projectIdentity: 'project-a',
             producer: { extensionVersion: '1.9.3070', languageServerCommit: 'abc' },
-            scriptSettings: {},
+            scriptSettings: scriptSettings(),
             engineSupportsCreateBlueprint: false,
             debugDatabaseChunks: [{ AActor: {} }],
-        }), /read-only/);
+        }), /disabled/);
     });
 });
 
@@ -128,11 +191,49 @@ test('debug database atomic writer cleans GUID temp files after write and fsync 
             assert.throws(() => saveDebugDatabaseCacheV2(context, {
                 projectIdentity: 'project-a',
                 producer: { extensionVersion: '1.9.3070', languageServerCommit: 'abc' },
-                scriptSettings: {},
+                scriptSettings: scriptSettings(),
                 engineSupportsCreateBlueprint: false,
                 debugDatabaseChunks: [{ AActor: {} }],
             }, failingOperations(stage)), new RegExp(`injected ${stage} failure`));
             assert.deepEqual(fs.readdirSync(directory), []);
         });
     }
+});
+
+test('async publication checks the token, atomically renames, and fsyncs the parent before reporting success', async () => {
+    let events: string[] = [];
+    let context = makeContext('C:\\cache-root');
+    await commitPreparedDebugDatabaseCacheV2({
+        tempPath: 'prepared.tmp',
+        envelope: {
+            schema: 'unreal-angelscript-debug-database',
+            version: 2,
+            projectIdentity: 'project-a',
+            revision: 'revision',
+            contentHash: 'content',
+            createdAt: '2026-07-29T00:00:00.000Z',
+            producer: { extensionVersion: 'test', languageServerCommit: 'test' },
+            scriptSettings: scriptSettings(),
+            engineSupportsCreateBlueprint: false,
+            complete: true,
+        },
+    }, context, () => { events.push('token'); return true; }, {
+        rename() { events.push('rename'); },
+        async openDirectory() {
+            events.push('open-directory');
+            return {
+                async sync() { events.push('fsync-directory'); },
+                async close() { events.push('close-directory'); },
+            };
+        },
+        async unlink() { events.push('cleanup-temp'); },
+    });
+    assert.deepEqual(events, [
+        'token',
+        'rename',
+        'open-directory',
+        'fsync-directory',
+        'close-directory',
+        'cleanup-temp',
+    ]);
 });
