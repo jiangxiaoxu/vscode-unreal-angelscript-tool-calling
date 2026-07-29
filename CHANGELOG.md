@@ -11,11 +11,15 @@ Maintenance rule:
 ### English
 
 #### Changed
-- Added typed `ue-resident`, `cli-direct`, and `vscode` Language Server initialization roles while preserving both stdio and IPC transports. Unreal connection startup now happens after `initialize`, and offline direct clients no longer wait for the Unreal connection timeout.
-- Replaced the legacy `.vscode` cache with a read-only-by-default, revisioned gzip v2 cache under `Saved/ASEditorAutomation/LanguageServer`; only `ue-resident` may publish it.
+- Replaced the prior roles with `vscode` and `project-daemon` while preserving stdio and IPC transports. Both roles maintain the Unreal connection and publish independent v2 caches at fixed VS Code and Saved paths.
+- VS Code now resolves one exact physical `.uproject` before enabling cache I/O. Windows TCP connections validate the same listener owner and project command line before and after connect.
+- Platforms without strict listener-owner verification now fail closed for live TCP refresh instead of accepting a blind port connection.
+- The project-daemon child now watches `initialize.processId` and stdio EOF so daemon failure cannot leave an orphan Language Server.
 - Added readiness status, standard `textDocument/diagnostic` and `workspace/diagnostic` pull support with unchanged reports, full-ready API request gating, and bounded shutdown cleanup.
 - Readiness now fences script reloads with monotonic active and settled semantic generations, so stdio clients can reject requests that cross a parse or resolve generation without relying on notification ordering.
-- Added an API query index bound to both native and script-content revisions, an export request, and a standalone pure query runtime that does not load the global TypeDB.
+- Complete native generations now become the active in-memory TypeDB before asynchronous cache publication. The single writer keeps only the latest immutable snapshot, retries after 1s/3s/5s, preserves the prior final cache on failure or supersession, and exposes active versus persisted revisions and dirty/error state.
+- Cache preparation now runs in a worker thread, and each same-socket `DebugDatabaseSettings` marker starts a generation-fenced refresh whose script diagnostics must settle before full readiness.
+- Removed API query index publication, export requests, workers, and the standalone index bundle. API requests use the live in-memory TypeDB.
 - Removed the VS Code LM tool integration and implementation. The reusable language-server API query core remains available through dedicated request handlers.
 - Removed the lookup-time fallback retry for local `auto` variable inference. `auto` member access now relies on declaration-time synchronization of the resolved initializer type into the local variable model.
 - VS Code Marketplace pre-release publication now packages the VSIX with `vsce package --pre-release` on the `pre-release` branch before publishing, so package metadata stays aligned with the marketplace channel.
@@ -31,7 +35,8 @@ Maintenance rule:
 - CI release workflow migrated from `beta/release` to `pre-release/release`: it publishes only to VS Code Marketplace, packages VSIX without a platform target, and force-updates the `pre-release`/`release` branch tags after successful runs.
 
 #### Breaking Changes
-- The v1 `.vscode/angelscript/unreal-cache.json` cache is no longer read or migrated. Integrations must pass the typed initialization options and use the Saved v2 cache contract.
+- The v1 `.vscode/angelscript/unreal-cache.json` cache is no longer read or migrated. Integrations must pass typed initialization options and use the role-owned v2 cache contract.
+- Removed the `ue-resident` and `cli-direct` roles and the API query index contract without compatibility aliases.
 - VS Code LM tool integration and implementation were removed without a compatibility layer.
 - The old `angelscript/getTypeMembers` and `angelscript/getTypeHierarchy` request handlers were replaced by `angelscript/getAPISymbolMembers` and `angelscript/getAPIClassHierarchy`.
 - `GetAPISearch` now auto-expands inherited methods/properties when `includeInheritedFromScope` is omitted for a resolved class scope.
@@ -39,11 +44,15 @@ Maintenance rule:
 ### 中文
 
 #### 变更
-- 新增 typed `ue-resident`、`cli-direct` 和 `vscode` Language Server initialization roles,同时保留 stdio 与 IPC transports. Unreal connection 改为在 `initialize` 后启动,offline direct client 不再等待 Unreal connection timeout.
-- 旧 `.vscode` cache 已替换为 `Saved/ASEditorAutomation/LanguageServer` 下默认只读且绑定 revision 的 gzip v2 cache;只有 `ue-resident` 可以发布.
+- 旧 roles 已替换为 `vscode` 和 `project-daemon`,同时保留 stdio 与 IPC transports. 两种 role 都维持 Unreal connection,并在固定的 VS Code 与 Saved 路径发布独立 v2 cache.
+- VS Code 只有解析到唯一 exact physical `.uproject` 后才启用 cache I/O. Windows TCP connection 会在 connect 前后验证同一个 listener owner 与项目 command line.
+- 无 strict listener-owner verification 的平台现在会拒绝 live TCP refresh,不再接受未经验证的 port connection.
+- Project-daemon child 现在监听 `initialize.processId` 和 stdio EOF,daemon 异常退出时不会留下 orphan Language Server.
 - 新增 readiness status、支持 unchanged report 的标准 `textDocument/diagnostic` 与 `workspace/diagnostic` pull、full-ready API request gate 和 bounded shutdown cleanup.
 - Readiness 现在使用单调递增的 active/settled semantic generations 隔离 script reload,stdio client 无需依赖 notification 顺序即可拒绝跨 parse 或 resolve generation 的 request.
-- 新增同时绑定 native 与 script-content revision 的 API query index、export request 和不加载 global TypeDB 的 standalone pure query runtime.
+- 完整 native generation 现在会先成为 active in-memory TypeDB,再异步发布 cache. Single writer 只保留 latest immutable snapshot,按 1s/3s/5s 重试,在失败或 supersede 时保留旧 final cache,并公开 active/persisted revision 与 dirty/error state.
+- Cache preparation 现在在 worker thread 中执行;同一 socket 上每个 `DebugDatabaseSettings` marker 都会启动 generation-fenced refresh,script diagnostics settle 后才进入 full readiness.
+- 已移除 API query index publication、export request、worker 和 standalone index bundle. API request 直接使用常驻内存 TypeDB.
 - 已删除 VS Code LM tool 集成与实现. 可复用的 language-server API query core 继续通过独立 request handlers 保留.
 - 已移除 local `auto` 变量推断的 lookup 阶段 fallback retry. `auto` member access 现在依赖声明期同步,直接把已解析的 initializer 类型写回 local variable 模型.
 - VS Code Marketplace 的 pre-release 发布现在会在 `pre-release` 分支先用 `vsce package --pre-release` 生成 VSIX 再执行发布,确保包内 metadata 与 Marketplace 渠道一致.
@@ -59,7 +68,8 @@ Maintenance rule:
 - CI 发布流程已从 `beta/release` 迁移到 `pre-release/release`:仅发布到 VS Code Marketplace,VSIX 不限定 platform target,成功后强制更新 `pre-release`/`release` branch tags.
 
 #### Breaking Changes
-- v1 `.vscode/angelscript/unreal-cache.json` 不再读取或迁移. 集成方必须传入 typed initialization options 并使用 Saved v2 cache contract.
+- v1 `.vscode/angelscript/unreal-cache.json` 不再读取或迁移. 集成方必须传入 typed initialization options 并使用 role-owned v2 cache contract.
+- 已删除 `ue-resident`、`cli-direct` role 与 API query index contract,不保留 compatibility alias.
 - VS Code LM tool 集成与实现已删除,不提供 compatibility layer.
 - 旧 `angelscript/getTypeMembers` 和 `angelscript/getTypeHierarchy` request handlers 已由 `angelscript/getAPISymbolMembers` 和 `angelscript/getAPIClassHierarchy` 替代.
 - `GetAPISearch` 现在会在解析到 class scope 且省略 `includeInheritedFromScope` 时自动展开 inherited methods/properties.
