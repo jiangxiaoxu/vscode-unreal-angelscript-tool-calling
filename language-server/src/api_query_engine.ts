@@ -222,6 +222,7 @@ type SearchIndex = {
     entries: SearchIndexEntry[];
     scopeCandidates: ScopeCandidate[];
     typeEntriesByQualifiedName: Map<string, SearchIndexEntry>;
+    constructorSymbolIdPrefixesByOwner: Map<string, Map<string, string>>;
 };
 
 type SearchCandidate = {
@@ -970,6 +971,7 @@ export function GetAPIQuery(payload: unknown) : GetAPIQueryResult
         : filterCoreScopeMode(dedupeCoreMatches(raw.matches
             .map(projectCoreMatch)
             .filter((match) => !kinds || kinds.includes(match.kind))), scopeMode);
+    allMatches = addConstructorSymbolIdPrefixes(allMatches);
     let pageMatches = allMatches.slice(offset, offset + limit);
     let pageSelections = orderedMergedUniqueMatches?.slice(offset, offset + limit);
     let scopeGroups = mergedScopeGroups?.map((group, groupIndex) =>
@@ -977,7 +979,7 @@ export function GetAPIQuery(payload: unknown) : GetAPIQueryResult
         let groupMatches = orderedMergedUniqueMatches?.filter((selected) => selected.groupIndex == groupIndex) ?? [];
         let groupPage = pageSelections
             ?.filter((selected) => selected.groupIndex == groupIndex)
-            .map((selected) => selected.item.match) ?? [];
+            .map((selected) => addConstructorSymbolIdPrefix(selected.item.match)) ?? [];
         return {
             scope: group.scope,
             matches: groupPage,
@@ -1067,17 +1069,24 @@ function getShortestUniqueConstructorSymbolIdPrefix(
     return undefined;
 }
 
+export function GetConstructorSymbolIdPrefix(ownerQualifiedName: string, symbolId: string) : string | undefined
+{
+    return getSearchIndex().constructorSymbolIdPrefixesByOwner
+        .get(ownerQualifiedName)
+        ?.get(symbolId.toLowerCase());
+}
+
+function addConstructorSymbolIdPrefix(match: ApiQueryMatch) : ApiQueryMatch
+{
+    if (match.kind != 'constructor' || !match.ownerQualifiedName || !match.symbolId)
+        return match;
+    let symbolIdPrefix = GetConstructorSymbolIdPrefix(match.ownerQualifiedName, match.symbolId);
+    return symbolIdPrefix ? { ...match, symbolIdPrefix } : match;
+}
+
 function addConstructorSymbolIdPrefixes(matches: ApiQueryMatch[]) : ApiQueryMatch[]
 {
-    let symbolIds = matches
-        .filter((match) => match.kind == 'constructor' && typeof match.symbolId == 'string')
-        .map((match) => match.symbolId as string);
-    return matches.map((match) => {
-        if (match.kind != 'constructor' || !match.symbolId)
-            return match;
-        let symbolIdPrefix = getShortestUniqueConstructorSymbolIdPrefix(match.symbolId, symbolIds);
-        return symbolIdPrefix ? { ...match, symbolIdPrefix } : match;
-    });
+    return matches.map(addConstructorSymbolIdPrefix);
 }
 
 function dedupeConstructorMatchesBySymbolId(matches: ApiQueryMatch[]) : ApiQueryMatch[]
@@ -1131,10 +1140,10 @@ export function GetAPIExactSymbols(payload: unknown) : GetAPIExactSymbolsResult
         let queryParams: GetAPIQueryParams = {
             query: name,
             mode: 'smart',
-            source,
+            source: hasSymbolId ? 'both' : source,
             ...(kind ? { kinds: [kind] } : constructorOwner ? { kinds: ['constructor'] } : {}),
             includeDocs,
-            includeNonPublic,
+            includeNonPublic: hasSymbolId ? true : includeNonPublic,
         };
         let query = GetAPIQuery({ ...queryParams, limit: 1000, offset: 0 });
         let candidates = [...query.data.matches];
@@ -1532,8 +1541,41 @@ function buildSearchIndex() : SearchIndex
     return {
         entries,
         scopeCandidates,
-        typeEntriesByQualifiedName
+        typeEntriesByQualifiedName,
+        constructorSymbolIdPrefixesByOwner: buildConstructorSymbolIdPrefixes(entries)
     };
+}
+
+function buildConstructorSymbolIdPrefixes(entries: readonly SearchIndexEntry[]) : Map<string, Map<string, string>>
+{
+    let symbolIdsByOwner = new Map<string, Set<string>>();
+    for (let entry of entries)
+    {
+        if (entry.kind != 'constructor' || !entry.ownerQualifiedName || !entry.symbolId)
+            continue;
+        let symbolIds = symbolIdsByOwner.get(entry.ownerQualifiedName);
+        if (!symbolIds)
+        {
+            symbolIds = new Set<string>();
+            symbolIdsByOwner.set(entry.ownerQualifiedName, symbolIds);
+        }
+        symbolIds.add(entry.symbolId.toLowerCase());
+    }
+
+    let prefixesByOwner = new Map<string, Map<string, string>>();
+    for (let [ownerQualifiedName, symbolIdSet] of symbolIdsByOwner)
+    {
+        let symbolIds = [...symbolIdSet];
+        let prefixes = new Map<string, string>();
+        for (let symbolId of symbolIds)
+        {
+            let prefix = getShortestUniqueConstructorSymbolIdPrefix(symbolId, symbolIds);
+            if (prefix)
+                prefixes.set(symbolId, prefix);
+        }
+        prefixesByOwner.set(ownerQualifiedName, prefixes);
+    }
+    return prefixesByOwner;
 }
 
 function createNamespaceEntry(namespace: typedb.DBNamespace, qualifiedNamespace: string) : SearchIndexEntry

@@ -3,6 +3,7 @@ import * as typedb from './database';
 import * as documentation from './documentation';
 import {
     GetAPIExactSymbols,
+    GetConstructorSymbolIdPrefix,
     ProjectConstructor,
     type ApiQueryMatch,
     type ApiConstructorArgument,
@@ -976,6 +977,7 @@ export type ApiSymbolMember = {
     isMixin?: boolean;
     isCallable?: boolean;
     symbolId?: string;
+    symbolIdPrefix?: string;
     args?: ApiConstructorArgument[];
     requiredArgumentCount?: number;
 };
@@ -1123,6 +1125,9 @@ function projectCollectedMember(member: CollectedTypeMember, ownerSource: 'nativ
     let ownerQualifiedName = member.ownerQualifiedName ?? member.declaredIn;
     let kind: ApiSymbolMember['kind'] = member.kind;
     let qualifiedName = member.qualifiedName ?? `${ownerQualifiedName}.${member.name}`;
+    let symbolIdPrefix = member.kind == 'constructor' && member.symbolId
+        ? GetConstructorSymbolIdPrefix(ownerQualifiedName, member.symbolId)
+        : undefined;
     return {
         name: member.name,
         qualifiedName,
@@ -1136,6 +1141,7 @@ function projectCollectedMember(member: CollectedTypeMember, ownerSource: 'nativ
         ...(member.isMixin ? { isMixin: true } : {}),
         ...(member.isCallable !== undefined ? { isCallable: member.isCallable } : {}),
         ...(member.symbolId ? { symbolId: member.symbolId } : {}),
+        ...(symbolIdPrefix ? { symbolIdPrefix } : {}),
         ...(member.args ? { args: member.args } : {}),
         ...(member.requiredArgumentCount !== undefined ? { requiredArgumentCount: member.requiredArgumentCount } : {})
     };
@@ -1238,6 +1244,7 @@ function collectNamespaceMembers(
                 let constructor = ProjectConstructor(symbol);
                 if (!constructor)
                     return;
+                let symbolIdPrefix = GetConstructorSymbolIdPrefix(constructor.ownerQualifiedName, constructor.symbolId);
                 members.push({
                     name: constructor.name,
                     qualifiedName: constructor.qualifiedName,
@@ -1249,6 +1256,7 @@ function collectNamespaceMembers(
                     ...(includeDocs && constructor.documentation ? { documentation: constructor.documentation } : {}),
                     isCallable: true,
                     symbolId: constructor.symbolId,
+                    ...(symbolIdPrefix ? { symbolIdPrefix } : {}),
                     args: constructor.args,
                     requiredArgumentCount: constructor.requiredArgumentCount
                 });

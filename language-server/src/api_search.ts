@@ -2346,6 +2346,7 @@ export {
     BuildConstructorSymbolId,
     CanonicalizeConstructorArgumentType,
     CompareConstructorProjections,
+    GetConstructorSymbolIdPrefix,
     GetAPIExactSymbols,
     GetAPIQuery,
     IsEligibleStructConstructor,

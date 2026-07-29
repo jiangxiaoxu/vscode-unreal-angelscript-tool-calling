@@ -146,6 +146,7 @@ function setup(): void
     const ctor1 = constructor('FThing', [{ type: 'int', name: 'Value', defaultValue: '0' }]);
     const protectedCtor = constructor('FThing', [{ type: 'double', name: 'Value' }], 'protected');
     const privateCtor = constructor('FThing', [{ type: 'bool', name: 'Value' }], 'private');
+    privateCtor.declaredModule = 'Game.Core';
     const copy = constructor('FThing', [{ type: 'FThing', name: 'Other' }]);
     type(core, 'FThing', {
         struct: true,
@@ -450,8 +451,34 @@ test('GetAPIExactSymbols handles qualified and short collisions plus stable non-
         includeNonPublic: true,
         limit: 10,
     });
+    const scriptConstructorQuery = GetAPIQuery({
+        query: 'Core::FThing.FThing',
+        kinds: ['constructor'],
+        source: 'script',
+        includeNonPublic: true,
+        limit: 10,
+    });
     assert.equal(publicConstructorQuery.data.total, 2);
     assert.equal(allConstructorQuery.data.total, 4);
+    assert.equal(scriptConstructorQuery.data.total, 1);
+    const prefixesById = new Map(allConstructorQuery.data.matches.map((symbol) => [symbol.symbolId, symbol.symbolIdPrefix]));
+    assert.ok(allConstructorQuery.data.matches.every((symbol) => /^[0-9a-f]{8,64}$/u.test(symbol.symbolIdPrefix ?? '')));
+    assert.ok(publicConstructorQuery.data.matches.every((symbol) => symbol.symbolIdPrefix === prefixesById.get(symbol.symbolId)));
+    assert.ok(scriptConstructorQuery.data.matches.every((symbol) => symbol.symbolIdPrefix === prefixesById.get(symbol.symbolId)));
+    assert.ok(constructors.data.symbols.every((symbol) => symbol.symbolIdPrefix === prefixesById.get(symbol.symbolId)));
+    const scopedConstructorQuery = GetAPIQuery({
+        query: 'FThing',
+        scope: 'Core::FThing',
+        declaredOnly: true,
+        kinds: ['constructor'],
+        limit: 1,
+    });
+    assert.equal(scopedConstructorQuery.data.matches.length, 1);
+    assert.equal(scopedConstructorQuery.data.matches[0].symbolIdPrefix,
+        prefixesById.get(scopedConstructorQuery.data.matches[0].symbolId));
+    assert.equal(scopedConstructorQuery.data.scopeGroups
+        ?.find((group) => group.matches.length > 0)
+        ?.matches[0].symbolIdPrefix, scopedConstructorQuery.data.matches[0].symbolIdPrefix);
     const selected = GetAPIExactSymbols({
         name: 'Core::FThing.FThing',
         kind: 'constructor',
@@ -493,12 +520,25 @@ test('GetAPIExactSymbols handles qualified and short collisions plus stable non-
         assert.equal(conflictingKind.error.code, 'InvalidParams');
     assert.equal(GetAPIExactSymbols({ name: 'Core::UDerived.UDerived', kind: 'constructor', includeNonPublic: true }).ok, false);
 
-    const collisionFamily = GetAPIExactSymbols({ name: 'Core::FCollision.FCollision', kind: 'constructor' });
+    const collisionFamily = GetAPIExactSymbols({
+        name: 'Core::FCollision.FCollision',
+        kind: 'constructor',
+        includeNonPublic: true,
+    });
     assert.equal(collisionFamily.ok, true);
     if (collisionFamily.ok)
     {
         assert.deepEqual(collisionFamily.data.symbols.map((symbol) => symbol.symbolId?.substring(0, 8)), ['6e31bfec', '6e31bfec']);
         assert.deepEqual(collisionFamily.data.symbols.map((symbol) => symbol.symbolIdPrefix?.length), [9, 9]);
+        assert.deepEqual(collisionFamily.data.symbols.map((symbol) => symbol.source), ['native', 'native']);
+        const filteredCollision = GetAPIQuery({
+            query: 'Core::FCollision.FCollision',
+            kinds: ['constructor'],
+            source: 'native',
+            limit: 1,
+        });
+        assert.equal(filteredCollision.data.matches.length, 1);
+        assert.equal(filteredCollision.data.matches[0].symbolIdPrefix?.length, 9);
         const ambiguousPrefix = GetAPIExactSymbols({
             name: 'Core::FCollision.FCollision',
             kind: 'constructor',
@@ -520,27 +560,32 @@ test('GetAPIExactSymbols handles qualified and short collisions plus stable non-
     }
 
     const hiddenConstructor = nonPublicConstructors.ok
-        ? nonPublicConstructors.data.symbols.find((symbol) => symbol.visibility != 'public')
+        ? nonPublicConstructors.data.symbols.find((symbol) => symbol.source == 'script')
         : undefined;
     assert.ok(hiddenConstructor?.symbolIdPrefix);
+    const selectedHidden = GetAPIExactSymbols({
+        name: 'Core::FThing.FThing',
+        symbolId: hiddenConstructor?.symbolIdPrefix,
+    });
+    assert.equal(selectedHidden.ok, true);
+    if (selectedHidden.ok)
+    {
+        assert.equal(selectedHidden.data.symbols[0].visibility, hiddenConstructor?.visibility);
+        assert.equal(selectedHidden.data.symbols[0].source, hiddenConstructor?.source);
+    }
     assert.equal(GetAPIExactSymbols({
         name: 'Core::FThing.FThing',
         symbolId: hiddenConstructor?.symbolIdPrefix,
-    }).ok, false);
-    assert.equal(GetAPIExactSymbols({
-        name: 'Core::FThing.FThing',
-        symbolId: hiddenConstructor?.symbolIdPrefix,
-        includeNonPublic: true,
         source: 'native',
     }).ok, true);
     assert.equal(GetAPIExactSymbols({
         name: 'Core::FThing.FThing',
         symbolId: constructors.data.symbols[0].symbolIdPrefix,
         source: 'script',
-    }).ok, false);
+    }).ok, true);
 
-    const legacyConstructorQuery = GetAPIQuery({ query: 'Core::FThing.FThing', kinds: ['constructor'], limit: 10 });
-    assert.ok(legacyConstructorQuery.data.matches.every((symbol) => symbol.symbolIdPrefix === undefined));
+    const constructorQuery = GetAPIQuery({ query: 'Core::FThing.FThing', kinds: ['constructor'], limit: 10 });
+    assert.ok(constructorQuery.data.matches.every((symbol) => symbol.symbolIdPrefix === prefixesById.get(symbol.symbolId)));
     const legacyDetailsData = constructors.data.symbols[0].detailsData as any[];
     assert.deepEqual(legacyDetailsData?.slice(0, 3), ['constructor', 'FThing', 'Core']);
     assert.equal(legacyDetailsData[3], constructors.data.symbols[0].symbolId);
@@ -663,14 +708,31 @@ test('GetAPISymbolMembers returns ambiguity candidates and same-name namespace/t
         includeNonPublic: true,
         limit: 200,
     });
+    const pagedConstructors = GetAPISymbolMembers({
+        name: 'Core::FThing',
+        ownerKind: 'type',
+        members: ['constructor'],
+        includeNonPublic: true,
+        limit: 1,
+        offset: 1,
+    });
     assert.equal(publicConstructors.ok, true);
     assert.equal(allConstructors.ok, true);
-    if (publicConstructors.ok && allConstructors.ok)
+    assert.equal(pagedConstructors.ok, true);
+    if (publicConstructors.ok && allConstructors.ok && pagedConstructors.ok)
     {
         assert.equal(publicConstructors.data.groups[0].members.total, 2);
         assert.equal(allConstructors.data.groups[0].members.total, 4);
         assert.ok(allConstructors.data.groups[0].members.items.some((member) => member.visibility === 'private'));
         assert.ok(allConstructors.data.groups[0].members.items.some((member) => member.visibility === 'protected'));
+        const prefixesById = new Map(allConstructors.data.groups[0].members.items
+            .map((member) => [member.symbolId, member.symbolIdPrefix]));
+        assert.ok(allConstructors.data.groups[0].members.items
+            .every((member) => /^[0-9a-f]{8,64}$/u.test(member.symbolIdPrefix ?? '')));
+        assert.ok(publicConstructors.data.groups[0].members.items
+            .every((member) => member.symbolIdPrefix === prefixesById.get(member.symbolId)));
+        assert.equal(pagedConstructors.data.groups[0].members.items[0].symbolIdPrefix,
+            prefixesById.get(pagedConstructors.data.groups[0].members.items[0].symbolId));
     }
 });
 
