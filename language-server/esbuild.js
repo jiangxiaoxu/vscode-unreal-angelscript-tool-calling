@@ -25,9 +25,10 @@ const esbuildProblemMatcherPlugin = {
 
 async function main() {
 	const ctx = await esbuild.context({
-		entryPoints: [
-			'src/server.ts',
-		],
+		entryPoints: {
+			server: 'src/server.ts',
+			'api-query-index': 'src/apiQueryIndexRuntime.ts',
+		},
 		bundle: true,
 		format: 'cjs',
 		minify: production,

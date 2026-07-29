@@ -2,24 +2,77 @@ import * as scriptfiles from './as_parser';
 import * as typedb from './database';
 import * as scriptlenses from './code_lenses';
 import * as api_search from './api_search';
-import * as cache from './cache';
+import {
+    DebugDatabaseCacheContext,
+    DebugDatabaseCacheProducer,
+    DebugDatabaseCacheV2,
+    createDebugDatabaseRevision,
+    loadDebugDatabaseCacheV2,
+    saveDebugDatabaseCacheV2,
+} from './debugDatabaseCacheV2';
+import { hydrateTypeDatabaseGeneration, resolveAllScriptModulesForGeneration } from './typeDatabaseGeneration';
+
+type CachedScriptSettings = {
+    floatIsFloat64 : boolean;
+    useAngelscriptHaze : boolean;
+    deprecateStaticClass : boolean;
+    disallowStaticClass : boolean;
+    exposeGlobalFunctions : boolean;
+    deprecateActorGenerics : boolean;
+    disallowActorGenerics : boolean;
+};
+
+export type UnrealCacheLoadOutcome = {
+    loaded: boolean;
+    code: string;
+    message: string;
+    revision?: string;
+};
 
 export type UnrealCacheController = {
-    resetState: () => void;
-    recordDebugDatabaseChunk: (chunk: any) => void;
+    configure: (context: DebugDatabaseCacheContext, producer: DebugDatabaseCacheProducer) => void;
+    beginRefresh: () => number;
+    recordDebugDatabaseChunk: (chunk: unknown) => void;
+    hydrateRecordedGeneration: () => void;
     markDebugDatabaseComplete: () => void;
     invalidateSearchCache: () => void;
-    loadCacheFromDisk: (cacheRootPath: string, unrealConnected: boolean) => void;
-    scheduleWrite: (cacheRootPath: string, unrealConnected: boolean) => void;
+    loadCacheFromDisk: () => UnrealCacheLoadOutcome;
+    scheduleWrite: (
+        unrealConnected: boolean,
+        onPublished?: (cache: DebugDatabaseCacheV2) => void,
+        onError?: (error: unknown) => void
+    ) => void;
+    getRevision: () => string | undefined;
+    getGeneration: () => number;
+    cancelPendingWrite: () => void;
 };
 
 export function createUnrealCacheController() : UnrealCacheController
 {
-    let debugDatabaseChunks : Array<any> = [];
+    let pendingDebugDatabaseChunks : Array<unknown> = [];
     let debugDatabaseComplete = false;
-    let unrealCacheWriteTimeout : any = null;
+    let unrealCacheWriteTimeout : NodeJS.Timeout | null = null;
+    let cacheContext : DebugDatabaseCacheContext | null = null;
+    let cacheProducer : DebugDatabaseCacheProducer = {
+        extensionVersion: 'development',
+        languageServerCommit: 'unknown',
+    };
+    let activeRevision : string | undefined;
+    let acceptedGeneration: {
+        chunks: unknown[];
+        scriptSettings: CachedScriptSettings;
+        engineSupportsCreateBlueprint: boolean;
+        revision: string;
+    } | null = null;
+    let generation = 0;
 
-    function GetCurrentScriptSettings() : cache.CachedScriptSettings
+    function configure(context: DebugDatabaseCacheContext, producer: DebugDatabaseCacheProducer) : void
+    {
+        cacheContext = context;
+        cacheProducer = producer;
+    }
+
+    function getCurrentScriptSettings() : CachedScriptSettings
     {
         let scriptSettings = scriptfiles.GetScriptSettings();
         return {
@@ -33,115 +86,182 @@ export function createUnrealCacheController() : UnrealCacheController
         };
     }
 
-    function ApplyCachedScriptSettings(settings : cache.CachedScriptSettings, engineSupportsCreateBlueprint : boolean)
+    function applyCachedScriptSettings(settings: Record<string, boolean>, engineSupportsCreateBlueprint: boolean) : void
     {
         if (!settings)
             return;
-
         let scriptSettings = scriptfiles.GetScriptSettings();
-        if (typeof settings.floatIsFloat64 === "boolean")
-            scriptSettings.floatIsFloat64 = settings.floatIsFloat64;
-        if (typeof settings.useAngelscriptHaze === "boolean")
-            scriptSettings.useAngelscriptHaze = settings.useAngelscriptHaze;
-        if (typeof settings.deprecateStaticClass === "boolean")
-            scriptSettings.deprecateStaticClass = settings.deprecateStaticClass;
-        if (typeof settings.disallowStaticClass === "boolean")
-            scriptSettings.disallowStaticClass = settings.disallowStaticClass;
-        if (typeof settings.exposeGlobalFunctions === "boolean")
-            scriptSettings.exposeGlobalFunctions = settings.exposeGlobalFunctions;
-        if (typeof settings.deprecateActorGenerics === "boolean")
-            scriptSettings.deprecateActorGenerics = settings.deprecateActorGenerics;
-        if (typeof settings.disallowActorGenerics === "boolean")
-            scriptSettings.disallowActorGenerics = settings.disallowActorGenerics;
-
-        if (typeof engineSupportsCreateBlueprint === "boolean")
+        for (let key of Object.keys(settings) as Array<keyof CachedScriptSettings>)
+        {
+            if (typeof settings[key] == 'boolean' && key in scriptSettings)
+                (scriptSettings as unknown as Record<string, boolean>)[key] = settings[key];
+        }
+        if (typeof engineSupportsCreateBlueprint == 'boolean')
             scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint = engineSupportsCreateBlueprint;
     }
 
-    function resetState()
+    function beginRefresh() : number
     {
-        debugDatabaseChunks = [];
+        generation += 1;
+        cancelPendingWrite();
+        pendingDebugDatabaseChunks = [];
         debugDatabaseComplete = false;
         api_search.InvalidateAPISearchCache();
+        return generation;
     }
 
-    function recordDebugDatabaseChunk(chunk : any)
+    function recordDebugDatabaseChunk(chunk: unknown) : void
     {
-        debugDatabaseChunks.push(chunk);
+        pendingDebugDatabaseChunks.push(chunk);
     }
 
-    function markDebugDatabaseComplete()
+    function markDebugDatabaseComplete() : void
     {
         debugDatabaseComplete = true;
+        activeRevision = createDebugDatabaseRevision(pendingDebugDatabaseChunks);
     }
 
-    function invalidateSearchCache()
+    function invalidateSearchCache() : void
     {
         api_search.InvalidateAPISearchCache();
     }
 
-    function loadCacheFromDisk(cacheRootPath : string, unrealConnected : boolean)
+    function loadCacheFromDisk() : UnrealCacheLoadOutcome
     {
-        if (!cacheRootPath)
-            return;
-
-        cache.SetCacheRoot(cacheRootPath);
+        if (!cacheContext)
+            return { loaded: false, code: 'not-configured', message: 'Cache is not configured.' };
         if (typedb.HasTypesFromUnreal())
-            return;
+            return { loaded: true, code: 'already-ready', message: 'Type database is already populated.', revision: activeRevision };
 
-        let unrealCache = cache.LoadUnrealCache();
-        if (unrealCache && unrealCache.debugDatabaseChunks && unrealCache.debugDatabaseChunks.length != 0)
+        let result = loadDebugDatabaseCacheV2(cacheContext);
+        if (result.ok === false)
+            return { loaded: false, code: result.code, message: result.message };
+
+        let previousSettings = getCurrentScriptSettings();
+        let previousBlueprintSupport = scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint;
+        try
         {
-            ApplyCachedScriptSettings(unrealCache.scriptSettings, unrealCache.engineSupportsCreateBlueprint);
-
-            for (let chunk of unrealCache.debugDatabaseChunks)
-                typedb.AddTypesFromUnreal(chunk);
-            typedb.FinishTypesFromUnreal();
-
-            let scriptSettings = scriptfiles.GetScriptSettings();
-            typedb.AddPrimitiveTypes(scriptSettings.floatIsFloat64);
-            api_search.InvalidateAPISearchCache();
+            applyCachedScriptSettings(result.cache.scriptSettings, result.cache.engineSupportsCreateBlueprint);
+            hydrateTypeDatabaseGeneration(result.cache.debugDatabaseChunks, scriptfiles.GetScriptSettings().floatIsFloat64);
         }
-
-        if (unrealConnected)
-            scheduleWrite(cacheRootPath, unrealConnected);
+        catch (error)
+        {
+            applyCachedScriptSettings(previousSettings, previousBlueprintSupport);
+            return { loaded: false, code: 'hydrate-failed', message: `Cache TypeDB hydration failed: ${String(error)}` };
+        }
+        api_search.InvalidateAPISearchCache();
+        activeRevision = result.cache.revision;
+        acceptedGeneration = {
+            chunks: result.cache.debugDatabaseChunks.slice(),
+            scriptSettings: getCurrentScriptSettings(),
+            engineSupportsCreateBlueprint: scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint,
+            revision: result.cache.revision,
+        };
+        return { loaded: true, code: 'loaded', message: 'Loaded debug database cache v2.', revision: activeRevision };
     }
 
-    function scheduleWrite(cacheRootPath : string, unrealConnected : boolean)
+    function hydrateRecordedGeneration() : void
     {
-        if (!cacheRootPath || !unrealConnected)
-            return;
-        if (!debugDatabaseComplete)
-            return;
+        if (pendingDebugDatabaseChunks.length == 0)
+            throw new Error('DebugDatabase generation contains no chunks.');
+        let nextChunks = pendingDebugDatabaseChunks.slice();
+        let nextSettings = getCurrentScriptSettings();
+        let nextBlueprintSupport = scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint;
+        let prior = acceptedGeneration;
+        try
+        {
+            hydrateTypeDatabaseGeneration(nextChunks, nextSettings.floatIsFloat64);
+        }
+        catch (error)
+        {
+            if (prior)
+            {
+                applyCachedScriptSettings(prior.scriptSettings, prior.engineSupportsCreateBlueprint);
+                try
+                {
+                    hydrateTypeDatabaseGeneration(prior.chunks, prior.scriptSettings.floatIsFloat64);
+                    resolveAllScriptModulesForGeneration();
+                    activeRevision = prior.revision;
+                }
+                catch (rollbackError)
+                {
+                    activeRevision = undefined;
+                    acceptedGeneration = null;
+                    throw new Error(`DebugDatabase hydration failed (${String(error)}); prior generation restore failed (${String(rollbackError)}).`);
+                }
+            }
+            throw error;
+        }
+        markDebugDatabaseComplete();
+        acceptedGeneration = {
+            chunks: nextChunks,
+            scriptSettings: nextSettings,
+            engineSupportsCreateBlueprint: nextBlueprintSupport,
+            revision: activeRevision!,
+        };
+        api_search.InvalidateAPISearchCache();
+    }
+
+    function cancelPendingWrite() : void
+    {
         if (unrealCacheWriteTimeout)
+        {
             clearTimeout(unrealCacheWriteTimeout);
+            unrealCacheWriteTimeout = null;
+        }
+    }
+
+    function scheduleWrite(
+        unrealConnected: boolean,
+        onPublished?: (cache: DebugDatabaseCacheV2) => void,
+        onError?: (error: unknown) => void
+    ) : void
+    {
+        if (!cacheContext || cacheContext.access != 'read-write' || !unrealConnected || !debugDatabaseComplete)
+            return;
+        cancelPendingWrite();
+        let scheduledGeneration = generation;
+        let scheduledChunks = acceptedGeneration?.chunks.slice() ?? [];
         unrealCacheWriteTimeout = setTimeout(function()
         {
             unrealCacheWriteTimeout = null;
-            if (!cacheRootPath || !unrealConnected)
+            if (!cacheContext || cacheContext.access != 'read-write' || !debugDatabaseComplete
+                || scheduledGeneration != generation || scheduledChunks.length == 0)
                 return;
-            if (!debugDatabaseComplete)
+            let published: DebugDatabaseCacheV2;
+            try
+            {
+                published = saveDebugDatabaseCacheV2(cacheContext, {
+                    projectIdentity: cacheContext.projectIdentity,
+                    producer: cacheProducer,
+                    scriptSettings: getCurrentScriptSettings(),
+                    engineSupportsCreateBlueprint: scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint,
+                    debugDatabaseChunks: scheduledChunks,
+                });
+            }
+            catch (error)
+            {
+                onError?.(error);
                 return;
-            if (debugDatabaseChunks.length == 0)
+            }
+            if (scheduledGeneration != generation)
                 return;
-
-            cache.SaveUnrealCache({
-                version: 0,
-                createdAt: "",
-                workspaceRoot: "",
-                debugDatabaseChunks: debugDatabaseChunks,
-                scriptSettings: GetCurrentScriptSettings(),
-                engineSupportsCreateBlueprint: scriptlenses.GetCodeLensSettings().engineSupportsCreateBlueprint,
-            });
+            activeRevision = published.revision;
+            onPublished?.(published);
         }, 500);
     }
 
     return {
-        resetState,
+        configure,
+        beginRefresh,
         recordDebugDatabaseChunk,
+        hydrateRecordedGeneration,
         markDebugDatabaseComplete,
         invalidateSearchCache,
         loadCacheFromDisk,
-        scheduleWrite
+        scheduleWrite,
+        getRevision: () => activeRevision,
+        getGeneration: () => generation,
+        cancelPendingWrite,
     };
 }

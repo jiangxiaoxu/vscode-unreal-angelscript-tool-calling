@@ -85,16 +85,18 @@ Themes do not always distinguish every AngelScript semantic scope. Add `editor.t
 ### Offline Cache
 The extension restores cache data at startup to provide baseline capabilities without an active engine connection.
 
-- Cache path: `Script/.vscode/angelscript/unreal-cache.json`
-- Refresh trigger: `DebugDatabaseFinished` or `DebugDatabaseSettings`
-- Includes: DebugDatabase chunks, scriptSettings, engineSupportsCreateBlueprint
-- Excludes: assets, script-index
-- Corrupt or version-mismatched cache is ignored safely
-- Write strategy: temp file + fsync + rename
+- Cache path: `<Project>/Saved/ASEditorAutomation/LanguageServer/debug-database.v2.json.gz`
+- The `ue-resident` client is the only writer; VS Code and `cli-direct` clients are read-only.
+- The compact gzip envelope preserves ordered DebugDatabase chunks and records project identity, revision, content hash, producer metadata, script settings, and completion state.
+- Corrupt, oversized, incomplete, identity-mismatched, or unsupported cache files are ignored safely.
+- Publication uses a unique same-directory temporary file, fsync, and atomic rename. The legacy `.vscode/angelscript/unreal-cache.json` is neither read nor deleted.
+- The language server also exports `api-query-index.v1.json.gz`, bound to both the native DebugDatabase revision and loaded script-content revision; its standalone runtime can answer API queries without loading the global TypeDB.
+- Standard `textDocument/diagnostic` and `workspace/diagnostic` pull requests return deterministic result IDs and support unchanged reports through previous-result IDs.
 
 ### Build
 - `npm install` installs the root dependencies and the nested `extension` and `language-server` packages via `postinstall`.
 - `npm run compile` builds both the extension bundle and the language server bundle.
+- The language-server build also emits the standalone `language-server/dist/api-query-index.js` runtime.
 - `npm run watch` watches both bundles during development.
 - `npm test` runs the full test suite.
 - `npm run test:fork-boundary` runs the fork-boundary regression suite for the language-server API query core and workspace layout behavior.
@@ -153,16 +155,18 @@ Color theme 不一定能区分所有 AngelScript semantic scope. 如需更明显
 ### 离线缓存
 扩展启动时会恢复缓存,在未连接引擎时提供基础能力.
 
-- 缓存路径: `Script/.vscode/angelscript/unreal-cache.json`
-- 刷新时机: `DebugDatabaseFinished` 或 `DebugDatabaseSettings`
-- 包含: DebugDatabase chunks、scriptSettings、engineSupportsCreateBlueprint
-- 不包含: assets、script-index
-- 缓存损坏或版本不匹配会被安全忽略
-- 写入策略: 临时文件 + fsync + rename
+- 缓存路径: `<Project>/Saved/ASEditorAutomation/LanguageServer/debug-database.v2.json.gz`.
+- 只有 `ue-resident` client 可以写入;VS Code 和 `cli-direct` client 只读.
+- compact gzip envelope 保留 DebugDatabase chunks 的原始顺序,并记录 project identity、revision、content hash、producer metadata、script settings 和完成状态.
+- 损坏、超预算、不完整、identity 不匹配或 schema 不受支持的缓存会被安全忽略.
+- 发布使用同目录唯一临时文件、fsync 和 atomic rename. 旧 `.vscode/angelscript/unreal-cache.json` 不再读取,也不会自动删除.
+- Language Server 还会导出同时绑定 native DebugDatabase revision 与已加载 script-content revision 的 `api-query-index.v1.json.gz`;standalone runtime 无需加载 global TypeDB 即可执行 API query.
+- 标准 `textDocument/diagnostic` 与 `workspace/diagnostic` pull request 会返回确定性的 result ID,并通过 previous-result ID 支持 unchanged report.
 
 ### 构建
 - `npm install` 会安装根目录依赖,并通过 `postinstall` 安装嵌套的 `extension` 和 `language-server` 包依赖.
 - `npm run compile` 会同时构建 extension bundle 和 language server bundle.
+- Language Server build 还会生成 standalone `language-server/dist/api-query-index.js` runtime.
 - `npm run watch` 会在开发时同时监听这两个 bundle.
 - `npm test` 会运行完整测试集.
 - `npm run test:fork-boundary` 会运行 fork boundary 回归测试,重点覆盖 language-server API query core 和 workspace layout 行为.

@@ -56,6 +56,7 @@ export function activate(context: ExtensionContext)
     let scriptIgnorePatterns = workspace.getConfiguration('UnrealAngelscript').get<Array<string>>('scriptIgnorePatterns');
     if (!Array.isArray(scriptIgnorePatterns))
         scriptIgnorePatterns = [];
+    let unrealConnectionPort = workspace.getConfiguration('UnrealAngelscript').get<number>('unrealConnectionPort', 27099);
     let scriptFileEventWatchers = createScriptFileEventWatchers(workspace.workspaceFolders);
     context.subscriptions.push(...scriptFileEventWatchers);
 
@@ -64,7 +65,10 @@ export function activate(context: ExtensionContext)
         // Register the server for plain text documents
         documentSelector: [{ scheme: 'file', language: 'angelscript' }],
         initializationOptions: {
-            scriptIgnorePatterns: scriptIgnorePatterns
+            scriptIgnorePatterns: scriptIgnorePatterns,
+            role: 'vscode',
+            unreal: { online: true, debuggerPort: unrealConnectionPort },
+            cache: { access: 'read-only' },
         },
         synchronize: {
             fileEvents: scriptFileEventWatchers,

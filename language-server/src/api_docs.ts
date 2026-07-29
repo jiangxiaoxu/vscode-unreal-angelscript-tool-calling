@@ -1001,6 +1001,15 @@ export type ApiMembersPage = {
     truncated: boolean;
 };
 
+export type ApiMaterializedMemberOwner = {
+    owner: 'namespace' | 'type';
+    ownerQualifiedName: string;
+    ownerKind: 'namespace' | 'class' | 'struct' | 'enum';
+    ownerSource: ApiSearchSource;
+    directMembers: ApiSymbolMember[];
+    inheritedMembers: ApiSymbolMember[];
+};
+
 export type GetAPISymbolMembersResult = {
     ok: true;
     data: {
@@ -1317,6 +1326,47 @@ function collectNamespaceMembers(
             members.push(projectNestedType(symbol, ownerQualifiedName, includeDocs));
     });
     return members.sort(compareMembers);
+}
+
+export function ExportAPIMaterializedMemberOwners() : ApiMaterializedMemberOwner[]
+{
+    let result: ApiMaterializedMemberOwner[] = [];
+    let categories: ApiMemberCategory[] = ['callable', 'data', 'constructor', 'type'];
+    for (let [, namespace] of typedb.GetAllNamespaces())
+    {
+        if (namespace.isRootNamespace() || isInternalApiSymbolName(namespace.name) || isNamespaceApiEmpty(namespace))
+            continue;
+        let hasNative = namespace.declarations.some((declaration) => !declaration.declaredModule);
+        let hasScript = namespace.declarations.some((declaration) => !!declaration.declaredModule);
+        let ownerSource: ApiSearchSource = hasNative && hasScript ? 'both' : hasScript ? 'script' : 'native';
+        let ownerQualifiedName = namespace.getQualifiedNamespace();
+        result.push({
+            owner: 'namespace',
+            ownerQualifiedName,
+            ownerKind: 'namespace',
+            ownerSource,
+            directMembers: collectNamespaceMembers(namespace, ownerQualifiedName, 'both', categories, true, true),
+            inheritedMembers: collectNamespaceMembers(namespace, ownerQualifiedName, 'both', categories, true, true),
+        });
+    }
+    for (let [, dbType] of typedb.GetAllTypesById())
+    {
+        if (dbType.isPrimitive || dbType.isDelegate || dbType.isEvent || dbType.isTemplateInstantiation)
+            continue;
+        let ownerQualifiedName = dbType.getQualifiedTypenameInNamespace(null);
+        let ownerKind: 'class' | 'struct' | 'enum' = dbType.isEnum ? 'enum' : dbType.isStruct ? 'struct' : 'class';
+        result.push({
+            owner: 'type',
+            ownerQualifiedName,
+            ownerKind,
+            ownerSource: sourceOfType(dbType),
+            directMembers: collectTypeMembers(dbType, 'both', categories, false, true, true),
+            inheritedMembers: collectTypeMembers(dbType, 'both', categories, true, true, true),
+        });
+    }
+    return result.sort((left, right) =>
+        `${left.ownerQualifiedName}\u0000${left.ownerSource}\u0000${left.owner}`
+            .localeCompare(`${right.ownerQualifiedName}\u0000${right.ownerSource}\u0000${right.owner}`));
 }
 
 export function GetAPISymbolMembers(payload: unknown) : GetAPISymbolMembersResult

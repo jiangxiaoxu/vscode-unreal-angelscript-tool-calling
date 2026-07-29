@@ -218,6 +218,46 @@ type SearchIndexEntry = {
     requiredArgumentCount?: number;
 };
 
+export type ApiQueryMaterializedEntry = {
+    qualifiedName: string;
+    shortName: string;
+    namespaceQualifiedName: string;
+    kind: ApiSearchKind;
+    isCallable: boolean;
+    signature: string;
+    summary?: string;
+    documentation?: string;
+    docSource?: ApiSearchDocSource;
+    containerQualifiedName?: string;
+    source: ApiSearchMatchSource;
+    filterSource: ApiSearchSource;
+    visibility: ApiSearchVisibility;
+    detailsData?: unknown;
+    declaringTypeQualifiedName?: string;
+    isMixin: boolean;
+    mixinTargetQualifiedName?: string;
+    qualifiedAliases: string[];
+    overrideKey?: string;
+    ownerQualifiedName?: string;
+    symbolId?: string;
+    args?: ApiConstructorArgument[];
+    requiredArgumentCount?: number;
+};
+
+export type ApiQueryMaterializedScope = {
+    kind: ApiSearchScopeKind;
+    qualifiedName: string;
+    shortName: string;
+    isClassType: boolean;
+    source: ApiSearchSource;
+    directSuperQualifiedName?: string;
+};
+
+export type ApiQueryMaterializedIndex = {
+    entries: ApiQueryMaterializedEntry[];
+    scopes: ApiQueryMaterializedScope[];
+};
+
 type SearchIndex = {
     entries: SearchIndexEntry[];
     scopeCandidates: ScopeCandidate[];
@@ -1428,6 +1468,50 @@ function getSearchIndex() : SearchIndex
     cachedSearchIndex = buildSearchIndex();
     cachedDirtyTypeCacheId = dirtyTypeCacheId;
     return cachedSearchIndex;
+}
+
+export function ExportAPIQueryMaterializedIndex() : ApiQueryMaterializedIndex
+{
+    let index = getSearchIndex();
+    let entries = index.entries.map((entry) : ApiQueryMaterializedEntry => ({
+        qualifiedName: entry.qualifiedName,
+        shortName: entry.shortName,
+        namespaceQualifiedName: entry.namespaceQualifiedName,
+        kind: entry.kind,
+        isCallable: entry.isCallable,
+        signature: entry.signature,
+        ...(entry.summary ? { summary: entry.summary } : {}),
+        ...(entry.documentation ? { documentation: entry.documentation } : {}),
+        ...(entry.docSource ? { docSource: entry.docSource } : {}),
+        ...(entry.containerQualifiedName ? { containerQualifiedName: entry.containerQualifiedName } : {}),
+        source: entry.source,
+        filterSource: entry.filterSource,
+        visibility: entry.visibility,
+        ...(entry.detailsData !== undefined ? { detailsData: entry.detailsData } : {}),
+        ...(entry.declaringTypeQualifiedName ? { declaringTypeQualifiedName: entry.declaringTypeQualifiedName } : {}),
+        isMixin: entry.isMixin,
+        ...(entry.mixinTargetQualifiedName ? { mixinTargetQualifiedName: entry.mixinTargetQualifiedName } : {}),
+        qualifiedAliases: entry.qualifiedAliasTexts.map((alias) => alias.text),
+        ...(entry.overrideKey ? { overrideKey: entry.overrideKey } : {}),
+        ...(entry.ownerQualifiedName ? { ownerQualifiedName: entry.ownerQualifiedName } : {}),
+        ...(entry.symbolId ? { symbolId: entry.symbolId } : {}),
+        ...(entry.args ? { args: entry.args } : {}),
+        ...(entry.requiredArgumentCount !== undefined ? { requiredArgumentCount: entry.requiredArgumentCount } : {}),
+    }));
+    let entryByQualifiedName = new Map(entries.map((entry) => [entry.qualifiedName, entry]));
+    let scopes = index.scopeCandidates.map((scope) : ApiQueryMaterializedScope => {
+        let entry = entryByQualifiedName.get(scope.qualifiedName);
+        let directSuper = scope.dbType ? resolveDirectSuperType(scope.dbType) : null;
+        return {
+            kind: scope.kind,
+            qualifiedName: scope.qualifiedName,
+            shortName: scope.shortName,
+            isClassType: scope.isClassType,
+            source: entry?.filterSource ?? 'both',
+            ...(directSuper ? { directSuperQualifiedName: directSuper.getQualifiedTypenameInNamespace(null) } : {}),
+        };
+    });
+    return { entries, scopes };
 }
 
 function buildSearchIndex() : SearchIndex

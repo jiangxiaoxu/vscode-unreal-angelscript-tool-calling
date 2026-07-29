@@ -6,6 +6,8 @@ import * as api_search from './api_search';
 export type ApiRequestHandlerDeps = {
     connection: Connection;
     isUnrealConnected: () => boolean;
+    getFullReadyStatus?: () => { fullReady: boolean; stage: string; coverage: string };
+    exportApiQueryIndex?: () => unknown | Promise<unknown>;
     typesReadyWait?: {
         maxTries?: number;
         delayMs?: number;
@@ -16,18 +18,32 @@ const API_TYPES_NOT_READY_ERROR_CODE = -32002;
 
 function runWhenTypesReady<T>(
     run : () => T,
-    options: { maxTries?: number; delayMs?: number } = {}
-) : T | Promise<T | ResponseError<void>>
+    options: {
+        maxTries?: number;
+        delayMs?: number;
+        isReady?: () => boolean;
+        isTerminalNotReady?: () => boolean;
+        describeNotReady?: () => string;
+    } = {}
+) : T | ResponseError<void> | Promise<T | ResponseError<void>>
 {
-    if (typedb.HasTypesFromUnreal())
+    let isReady = options.isReady ?? (() => typedb.HasTypesFromUnreal());
+    if (isReady())
         return run();
+    if (options.isTerminalNotReady?.())
+    {
+        return new ResponseError<void>(
+            API_TYPES_NOT_READY_ERROR_CODE,
+            options.describeNotReady?.() ?? 'NotReady: AngelScript API types are not ready.'
+        );
+    }
 
     let maxTries = options.maxTries ?? 50;
     let delayMs = options.delayMs ?? 100;
 
     function timerFunc(resolve : (value: T | ResponseError<void>) => void, reject : (reason?: unknown) => void, triesLeft : number)
     {
-        if (typedb.HasTypesFromUnreal())
+        if (isReady())
         {
             try
             {
@@ -39,11 +55,19 @@ function runWhenTypesReady<T>(
                 return;
             }
         }
+        if (options.isTerminalNotReady?.())
+        {
+            resolve(new ResponseError<void>(
+                API_TYPES_NOT_READY_ERROR_CODE,
+                options.describeNotReady?.() ?? 'NotReady: AngelScript API types are not ready.'
+            ));
+            return;
+        }
         if (triesLeft <= 0)
         {
             resolve(new ResponseError<void>(
                 API_TYPES_NOT_READY_ERROR_CODE,
-                'NotReady: AngelScript API types are not ready.'
+                options.describeNotReady?.() ?? 'NotReady: AngelScript API types are not ready.'
             ));
             return;
         }
@@ -74,7 +98,24 @@ function runApiCoreRequest<T>(run: () => T) : T | ResponseError<void>
 export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
 {
     const { connection, isUnrealConnected } = deps;
-    const runReady = <T>(run: () => T) => runWhenTypesReady(run, deps.typesReadyWait);
+    const runReady = <T>(run: () => T) => runWhenTypesReady(run, {
+        ...deps.typesReadyWait,
+        isReady: deps.getFullReadyStatus
+            ? () => deps.getFullReadyStatus().fullReady
+            : undefined,
+        isTerminalNotReady: deps.getFullReadyStatus
+            ? () => {
+                let stage = deps.getFullReadyStatus().stage;
+                return stage == 'partial' || stage == 'stopping';
+            }
+            : undefined,
+        describeNotReady: deps.getFullReadyStatus
+            ? () => {
+                let status = deps.getFullReadyStatus();
+                return `NotReady: AngelScript Language Server stage=${status.stage}, coverage=${status.coverage}.`;
+            }
+            : undefined,
+    });
 
     connection.onRequest("angelscript/getUnrealConnectionStatus", () : boolean => {
         return isUnrealConnected();
@@ -125,5 +166,11 @@ export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
 
     connection.onRequest("angelscript/getAPIClassHierarchy", (params : api_docs.GetAPIClassHierarchyParams) : any => {
         return runReady(() => runApiCoreRequest(() => api_docs.GetAPIClassHierarchy(params)));
+    });
+
+    connection.onRequest("angelscript/exportApiQueryIndex", () : any => {
+        if (!deps.exportApiQueryIndex)
+            return new ResponseError<void>(-32601, 'API query index export is not configured.');
+        return runReady(() => deps.exportApiQueryIndex());
     });
 }

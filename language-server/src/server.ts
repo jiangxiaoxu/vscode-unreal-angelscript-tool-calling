@@ -45,9 +45,12 @@ import * as inlinevalues from './inline_values';
 import * as colorpicker from './color_picker';
 import * as typehierarchy from './type_hierarchy';
 import { registerApiRequestHandlers } from './apiRequestHandlers';
-import { createUnrealCacheController } from './unrealCacheController';
 import * as workspaceLayout from './workspaceLayout';
+import { resolveLanguageServerInitializationOptions, ResolvedAngelScriptLanguageServerOptions } from './languageServerContract';
+import { createLanguageServerAutomationRuntime } from './languageServerAutomationRuntime';
 import glob from 'glob';
+
+const ExtensionVersion = String(require('../../package.json').version);
 
 import {
     Message, MessageType, readMessages, buildGoTo,
@@ -89,10 +92,16 @@ let SemanticTokensRefreshTimeout : any = null;
 
 let settings : any = null;
 let reconnectTimeoutId : any = undefined;
-const unrealCacheController = createUnrealCacheController();
+let LanguageServerStopping = false;
+let LanguageServerOptions : ResolvedAngelScriptLanguageServerOptions | null = null;
+const automationRuntime = createLanguageServerAutomationRuntime(connection, ExtensionVersion);
+const unrealCacheController = automationRuntime.cache;
+const readinessController = automationRuntime.readiness;
 
 function connect_unreal()
 {
+    if (LanguageServerStopping || !LanguageServerOptions?.unrealOnline)
+        return;
     // connection.console.log('Connecting to unreal editor on port '+port);
 
     if (reconnectTimeoutId)
@@ -169,7 +178,6 @@ function connect_unreal()
             {
                 let dbStr = msg.readString();
                 let dbObj = JSON.parse(dbStr);
-                typedb.AddTypesFromUnreal(dbObj);
                 unrealCacheController.recordDebugDatabaseChunk(dbObj);
 
                 UnrealTypesTimedOut = false;
@@ -181,18 +189,25 @@ function connect_unreal()
             {
                 if (ReceivingTypesTimeout)
                     clearTimeout(ReceivingTypesTimeout);
-                typedb.FinishTypesFromUnreal();
-                unrealCacheController.markDebugDatabaseComplete();
+                try
+                {
+                    unrealCacheController.hydrateRecordedGeneration();
+                }
+                catch (error)
+                {
+                    automationRuntime.markHydrationFailed(error);
+                    connection.console.error(`DebugDatabase hydration failed: ${String(error)}`);
+                    return;
+                }
+                automationRuntime.markResolving();
 
-                let scriptSettings = scriptfiles.GetScriptSettings()
-                typedb.AddPrimitiveTypes(scriptSettings.floatIsFloat64);
                 unrealCacheController.invalidateSearchCache();
 
-                // Make sure no modules are resolved anymore
-                if (PendingReResolveAfterInitialParse)
-                    PendingReResolveAfterInitialParse = false;
-                ReResolveAllModules();
-                unrealCacheController.scheduleWrite(CacheRootPath, UnrealConnected);
+                if (IsServicingQueues)
+                    PendingReResolveAfterInitialParse = true;
+                else
+                    ReResolveAllModules();
+                automationRuntime.scheduleCacheWrite(UnrealConnected);
             }
             else if(msg.type == MessageType.AssetDatabase)
             {
@@ -247,7 +262,7 @@ function connect_unreal()
                     scriptSettings.disallowActorGenerics = msg.readBool();
                 }
                 unrealCacheController.invalidateSearchCache();
-                unrealCacheController.scheduleWrite(CacheRootPath, UnrealConnected);
+                automationRuntime.scheduleCacheWrite(UnrealConnected);
             }
             else if(msg.type == MessageType.ReplaceAssetDefinition)
             {
@@ -269,7 +284,8 @@ function connect_unreal()
             unreal.destroy();
             unreal = null;
             UnrealConnected = false;
-            if (!reconnectTimeoutId)
+            readinessController.update({ unrealConnected: false });
+            if (!LanguageServerStopping && LanguageServerOptions?.unrealOnline && !reconnectTimeoutId)
                 reconnectTimeoutId = setTimeout(connect_unreal, 5000);
         }
     });
@@ -281,7 +297,8 @@ function connect_unreal()
             unreal.destroy();
             unreal = null;
             UnrealConnected = false;
-            if (!reconnectTimeoutId)
+            readinessController.update({ unrealConnected: false });
+            if (!LanguageServerStopping && LanguageServerOptions?.unrealOnline && !reconnectTimeoutId)
                 reconnectTimeoutId = setTimeout(connect_unreal, 5000);
         }
     });
@@ -290,7 +307,7 @@ function connect_unreal()
     {
         // connection.console.log('Connection to unreal editor established.');
         UnrealConnected = true;
-        unrealCacheController.resetState();
+        automationRuntime.beginLiveRefresh();
         setTimeout(function()
         {
             if (!unreal)
@@ -303,8 +320,6 @@ function connect_unreal()
         }, 1000);
     });
 }
-
-connect_unreal();
 
 function ResolveScriptRoot(workspaceRoot : string) : string
 {
@@ -331,16 +346,6 @@ function ResolveInitialScriptIgnorePatterns(initializationOptions : any) : Array
     return workspaceLayout.ResolveInitialScriptIgnorePatterns(initializationOptions);
 }
 
-function LoadCacheFromDisk()
-{
-    unrealCacheController.loadCacheFromDisk(CacheRootPath, UnrealConnected);
-}
-
-function ScheduleUnrealCacheWrite()
-{
-    unrealCacheController.scheduleWrite(CacheRootPath, UnrealConnected);
-}
-
 // Create a simple text document manager. The text document manager
 // supports full document sync only
 // Make the text document manager listen on the connection
@@ -354,11 +359,6 @@ function IsScriptUri(uri : string) : boolean
 {
     return workspaceLayout.IsScriptUri(uri, ScriptRootPaths, getPathName);
 }
-
-// These should all be optional extras, i.e. the server should still function normally if it's undefined.
-type InitializationOptions = {
-    additionalScriptRootFolders?: WorkspaceFolder[]
-} | undefined;
 
 // After the server has started the client sends an initialize request. The server receives
 // in the passed params the rootPath of the workspace plus the client capabilities.
@@ -379,9 +379,11 @@ connection.onInitialize((_params): InitializeResult => {
     }
 
     let scriptRoots = ResolveScriptRoots(workspaceRoots);
-    const initializationOptions = _params.initializationOptions as InitializationOptions;
+    let inferredProjectRoot = ResolveCacheRoot(scriptRoots) || workspaceRoots[0] || process.cwd();
+    LanguageServerOptions = resolveLanguageServerInitializationOptions(_params.initializationOptions, inferredProjectRoot);
+    port = LanguageServerOptions.debuggerPort;
 
-    const additionalFolders = initializationOptions?.additionalScriptRootFolders;
+    const additionalFolders = LanguageServerOptions.additionalScriptRootFolders;
     if (additionalFolders) {
         for (let scriptRootPath of additionalFolders) {
             let additionalScriptRoot = URI.parse(scriptRootPath.uri).fsPath;
@@ -399,8 +401,8 @@ connection.onInitialize((_params): InitializeResult => {
     let scriptIgnorePatterns = ResolveInitialScriptIgnorePatterns(_params.initializationOptions);
     connection.console.log("Initial script ignore patterns: " + scriptIgnorePatterns);
 
-    CacheRootPath = ResolveCacheRoot(scriptRoots);
-    LoadCacheFromDisk();
+    CacheRootPath = LanguageServerOptions.canonicalProjectRoot;
+    let cacheOutcome = automationRuntime.configure(LanguageServerOptions);
 
     //connection.console.log("RootPath: "+RootPath);
     //connection.console.log("RootUri: "+RootUri+" from "+_params.rootUri);
@@ -444,7 +446,15 @@ connection.onInitialize((_params): InitializeResult => {
         });
     }
 
-    setTimeout(DetectUnrealConnectionTimeout, 20000)
+    if (LanguageServerOptions.unrealOnline)
+    {
+        setImmediate(connect_unreal);
+        setTimeout(DetectUnrealConnectionTimeout, 20000);
+    }
+    else if (!cacheOutcome.loaded)
+    {
+        readinessController.markPartialReady(cacheOutcome.message);
+    }
 
     return {
         capabilities: {
@@ -497,6 +507,10 @@ connection.onInitialize((_params): InitializeResult => {
                 documentSelector: null,
             },
             typeHierarchyProvider: true,
+            diagnosticProvider: {
+                interFileDependencies: true,
+                workspaceDiagnostics: true,
+            },
         }
     }
 });
@@ -504,14 +518,21 @@ connection.onInitialize((_params): InitializeResult => {
 function DetectUnrealConnectionTimeout()
 {
     UnrealTypesTimedOut = true;
+    if (!typedb.HasTypesFromUnreal())
+        readinessController.markPartialReady('Unreal connection timed out; diagnostics are parse-only.');
 }
 
 function DetectUnrealTypeListTimeout()
 {
-    typedb.FinishTypesFromUnreal();
-
-    let scriptSettings = scriptfiles.GetScriptSettings()
-    typedb.AddPrimitiveTypes(scriptSettings.floatIsFloat64);
+    try
+    {
+        unrealCacheController.hydrateRecordedGeneration();
+    }
+    catch (error)
+    {
+        readinessController.markPartialReady(`DebugDatabase hydration failed: ${String(error)}`);
+        return;
+    }
 
     // Make sure no modules are resolved anymore
     if (PendingReResolveAfterInitialParse)
@@ -566,6 +587,17 @@ function TickQueues()
                 ResolveQueue.push(PostProcessTypesQueue[PostProcessTypesQueueIndex]);
             }
         }
+        else if (LanguageServerOptions && (!LanguageServerOptions.unrealOnline || UnrealTypesTimedOut))
+        {
+            // Offline without a valid cache can still publish parse-only diagnostics.
+            for (let module of PostProcessTypesQueue)
+            {
+                try { scriptdiagnostics.UpdateScriptModuleDiagnostics(module, true); } catch {}
+            }
+            PostProcessTypesQueue = [];
+            PostProcessTypesQueueIndex = 0;
+            readinessController.markPartialReady('Native TypeDB is unavailable; diagnostics are parse-only.');
+        }
     }
     else if (PostProcessTypesQueue.length != 0)
     {
@@ -616,6 +648,14 @@ function TickQueues()
     {
         IsServicingQueues = false;
         MaybeReResolveAfterInitialParse();
+        if (CanResolveModules() && scriptfiles.GetAllLoadedModules().every((module) => module.resolved))
+        {
+            automationRuntime.markCurrentGenerationFullReady();
+        }
+        else if (LanguageServerOptions && (!LanguageServerOptions.unrealOnline || UnrealTypesTimedOut))
+        {
+            readinessController.markPartialReady('Native TypeDB is unavailable; diagnostics are parse-only.');
+        }
         // console.log("Finished servicing queues");
     }
 }
@@ -658,6 +698,7 @@ function ReResolveAllModules()
     // Update diagnostics on all modules
     let moduleIndex = 0;
     let moduleList = scriptfiles.GetAllLoadedModules();
+    let resolveGeneration = unrealCacheController.getGeneration();
     let timerHandle = setInterval(ReResolveModules, 1);
 
     function ReResolveModules()
@@ -668,6 +709,8 @@ function ReResolveAllModules()
             {
                 clearInterval(timerHandle);
                 ScheduleSemanticTokensRefresh();
+                if (resolveGeneration == unrealCacheController.getGeneration())
+                    automationRuntime.markCurrentGenerationFullReady();
                 return;
             }
 
@@ -724,6 +767,7 @@ function IsInitialParseDone()
 }
 
 scriptdiagnostics.OnDiagnosticsChanged( function (uri : string, diagnostics : Array<Diagnostic>){
+    automationRuntime.updateDiagnostics(uri, diagnostics);
     connection.sendDiagnostics({ "uri": uri, "diagnostics": diagnostics });
 });
 
@@ -744,6 +788,7 @@ connection.onDidChangeWatchedFiles((_change) => {
             {
                 scriptfiles.PostProcessModuleTypes(module);
                 scriptfiles.ResolveModule(module);
+                automationRuntime.scriptGenerationChanged();
 
                 let alwaysSendDiagnostics = false;
                 if (change.type == FileChangeType.Deleted)
@@ -1153,7 +1198,9 @@ function getModuleName(uri : string) : string
 
 registerApiRequestHandlers({
     connection,
-    isUnrealConnected: () => UnrealConnected
+    isUnrealConnected: () => UnrealConnected,
+    getFullReadyStatus: () => readinessController.snapshot(),
+    exportApiQueryIndex: () => automationRuntime.exportApiQueryIndex(),
 });
 
 connection.languages.inlineValue.on(function (params : InlineValueParams) : Array<InlineValue> {
@@ -1176,6 +1223,7 @@ function TriggerThrottledModuleParse(asmodule : scriptfiles.ASModule)
         {
             scriptfiles.PostProcessModuleTypes(asmodule);
             scriptfiles.ResolveModule(asmodule);
+            automationRuntime.scriptGenerationChanged();
             scriptdiagnostics.UpdateScriptModuleDiagnostics(asmodule);
         }
 
@@ -1245,6 +1293,7 @@ connection.onDidOpenTextDocument(function (params : DidOpenTextDocumentParams)
     {
         scriptfiles.PostProcessModuleTypes(asmodule);
         scriptfiles.ResolveModule(asmodule);
+        automationRuntime.scriptGenerationChanged();
         scriptdiagnostics.UpdateScriptModuleDiagnostics(asmodule);
     }
 });
@@ -1286,7 +1335,8 @@ connection.onDidChangeConfiguration(function (change : DidChangeConfigurationPar
         port = settings.unrealConnectionPort;
 
         // If the port has changed, reconnect
-        connect_unreal();
+        if (LanguageServerOptions?.unrealOnline)
+            connect_unreal();
     }
 
     let completionSettings = parsedcompletion.GetCompletionSettings();
@@ -1404,6 +1454,46 @@ connection.languages.typeHierarchy.onSupertypes(function (params : TypeHierarchy
 connection.languages.typeHierarchy.onSubtypes(function (params : TypeHierarchySubtypesParams) : TypeHierarchyItem[]
 {
     return typehierarchy.GetTypeHierarchySubtypes(params.item);
+});
+
+function stopLanguageServerResources() : void
+{
+    if (LanguageServerStopping)
+        return;
+    LanguageServerStopping = true;
+    automationRuntime.shutdown();
+    if (reconnectTimeoutId)
+    {
+        clearTimeout(reconnectTimeoutId);
+        reconnectTimeoutId = undefined;
+    }
+    if (ReceivingTypesTimeout)
+    {
+        clearTimeout(ReceivingTypesTimeout);
+        ReceivingTypesTimeout = null;
+    }
+    if (SemanticTokensRefreshTimeout)
+    {
+        clearTimeout(SemanticTokensRefreshTimeout);
+        SemanticTokensRefreshTimeout = null;
+    }
+    if (unreal)
+    {
+        let socket = unreal;
+        unreal = null;
+        socket.removeAllListeners();
+        try { socket.write(Uint8Array.from(buildDisconnect())); } catch {}
+        socket.destroy();
+    }
+    UnrealConnected = false;
+}
+
+connection.onShutdown(() => {
+    stopLanguageServerResources();
+});
+
+connection.onExit(() => {
+    stopLanguageServerResources();
 });
 
 // Listen on the connection
