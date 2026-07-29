@@ -16,6 +16,7 @@ import {
 import {
     GetAPIExactSymbols,
     GetAPIQuery,
+    GetAPISearch,
 } from '../api_search';
 import {
     GetAPIClassHierarchy,
@@ -118,6 +119,8 @@ function setup(): void
     core.addScriptDeclaration(coreScriptDeclaration);
     const shadow = namespace('Core::FThing', 'Game.Core');
     shadow.addSymbol(method('Build', 'Game.Core'));
+    shadow.addSymbol(method('B', 'Game.Core', [], { callable: false, property: true, returnType: 'int' }));
+    shadow.addSymbol(method('AMixinNamespace', 'Game.Core'));
 
     const base = type(core, 'UBase', {
         methods: [method('Tick', null)],
@@ -136,6 +139,8 @@ function setup(): void
     });
     type(core, 'UDerivedA', { module: 'Game.Core', supertype: 'UBase' });
     type(core, 'UDerivedB', { module: 'Game.Core', supertype: 'UBase' });
+    const state = type(core, 'EState');
+    state.isEnum = true;
 
     const ctor0 = constructor('FThing', []);
     const ctor1 = constructor('FThing', [{ type: 'int', name: 'Value', defaultValue: '0' }]);
@@ -144,7 +149,19 @@ function setup(): void
     const copy = constructor('FThing', [{ type: 'FThing', name: 'Other' }]);
     type(core, 'FThing', {
         struct: true,
-        methods: [ctor0, ctor1, protectedCtor, privateCtor, copy, method('DoThing', null), method('StaticClass', null), method('opAdd', null)],
+        methods: [
+            ctor0,
+            ctor1,
+            protectedCtor,
+            privateCtor,
+            copy,
+            method('A', null),
+            method('Zzz', null, [], { callable: false, property: true, returnType: 'int' }),
+            method('AMixinFallback', null),
+            method('DoThing', null),
+            method('StaticClass', null),
+            method('opAdd', null),
+        ],
         properties: [property('Count', null)],
     });
     const other = namespace('Other', null);
@@ -157,6 +174,8 @@ function setup(): void
     core.addSymbol(duplicate);
     core.addSymbol(property('GlobalValue', null));
     core.addSymbol(method('ApplyBase', 'Game.Core', [{ type: 'UBase', name: 'Target' }], { mixin: true }));
+    const mixins = namespace('Mixins', null);
+    mixins.addSymbol(method('AMixin', 'Game.Core', [{ type: 'Core::FThing', name: 'Target' }], { mixin: true }));
 
     const delegate = type(core, 'FHiddenDelegate', { methods: [method('LeakedDelegateMethod', null)] });
     delegate.isDelegate = true;
@@ -209,18 +228,174 @@ test('GetAPIQuery supports core kinds, visibility, accessor projection, and dedu
         assert.equal(GetAPIQuery({ query: excluded, limit: 10 }).data.total, 0, excluded);
 });
 
-test('GetAPIQuery retains smart, regex, scope, inherited, and mixin behavior', () =>
+test('GetAPIQuery applies scoped inheritance modes before totals and paging', () =>
 {
     const regex = GetAPIQuery({ query: '/Run$/', mode: 'regex', kinds: ['method'], limit: 10 });
     assert.deepEqual(regex.data.matches.map((match) => match.qualifiedName), ['Core::UDerived.Run']);
 
-    const inherited = GetAPIQuery({ query: 'Tick', scope: 'Core::UDerived', kinds: ['method'], limit: 10 });
-    assert.equal(inherited.data.matches[0]?.scopeRelationship, 'inherited');
-    const declaredOnly = GetAPIQuery({ query: 'Tick', scope: 'Core::UDerived', declaredOnly: true, kinds: ['method'], limit: 10 });
-    assert.equal(declaredOnly.data.total, 0);
+    const query = '/(Run|Tick|ApplyBase)$/';
+    const defaults = GetAPIQuery({ query, mode: 'regex', scope: 'Core::UDerived', limit: 10 });
+    assert.deepEqual(
+        defaults.data.matches.map((match) => [match.shortName, match.scopeRelationship]),
+        [['Run', 'declared'], ['Tick', 'inherited'], ['ApplyBase', 'mixin']]
+    );
 
-    const mixin = GetAPIQuery({ query: 'ApplyBase', scope: 'Core::UDerived', kinds: ['function'], limit: 10 });
-    assert.equal(mixin.data.matches[0]?.isMixin, true);
+    const excludeInherited = GetAPIQuery({
+        query,
+        mode: 'regex',
+        scope: 'Core::UDerived',
+        excludeInherited: true,
+        limit: 1,
+        offset: 1,
+    });
+    assert.equal(excludeInherited.data.total, 2);
+    assert.equal(excludeInherited.data.returned, 1);
+    assert.equal(excludeInherited.data.omitted, 1);
+    assert.equal(excludeInherited.data.matches[0]?.scopeRelationship, 'mixin');
+
+    const declaredOnly = GetAPIQuery({
+        query,
+        mode: 'regex',
+        scope: 'Core::UDerived',
+        declaredOnly: true,
+        limit: 10,
+    });
+    assert.deepEqual(
+        declaredOnly.data.matches.map((match) => [match.shortName, match.scopeRelationship]),
+        [['Run', 'declared']]
+    );
+});
+
+test('GetAPIQuery validates scoped inheritance flags without changing legacy search', () =>
+{
+    assert.throws(
+        () => GetAPIQuery({ query: 'Run', declaredOnly: true }),
+        /'declaredOnly' and 'excludeInherited' require 'scope'/u
+    );
+    assert.throws(
+        () => GetAPIQuery({ query: 'Run', excludeInherited: true }),
+        /'declaredOnly' and 'excludeInherited' require 'scope'/u
+    );
+    assert.throws(
+        () => GetAPIQuery({ query: 'Run', scope: 'Core::UDerived', declaredOnly: true, excludeInherited: true }),
+        /cannot be combined/u
+    );
+    assert.throws(
+        () => GetAPIQuery({ query: 'Run', scope: 'Core::UDerived', declaredOnly: 'true' as unknown as boolean }),
+        /'declaredOnly' must be a boolean/u
+    );
+    assert.throws(
+        () => GetAPIQuery({ query: 'Run', scope: 'Core::UDerived', excludeInherited: 1 as unknown as boolean }),
+        /'excludeInherited' must be a boolean/u
+    );
+
+    const legacy = GetAPISearch({ query: 'ApplyBase', scope: 'Core::UDerived', declaredOnly: true, kinds: ['function'], limit: 10 });
+    assert.equal(legacy.matches[0]?.scopeRelationship, 'mixin');
+});
+
+test('GetAPIQuery accepts scoped flags for namespace and non-class type scopes', () =>
+{
+    const namespaceResult = GetAPIQuery({
+        query: 'Overload',
+        scope: 'Core',
+        declaredOnly: true,
+        kinds: ['function'],
+        limit: 10,
+    });
+    assert.ok(namespaceResult.data.matches.length > 0);
+    assert.ok(namespaceResult.data.matches.every((match) => match.scopeRelationship == 'declared'));
+
+    const structResult = GetAPIQuery({
+        query: 'DoThing',
+        scope: 'Core::FThing',
+        excludeInherited: true,
+        kinds: ['method'],
+        limit: 10,
+    });
+    assert.deepEqual(structResult.data.matches.map((match) => match.qualifiedName), ['Core::FThing.DoThing']);
+    assert.equal(structResult.data.matches[0]?.scopeRelationship, 'declared');
+
+    const enumResult = GetAPIQuery({
+        query: 'EState',
+        scope: 'Core::EState',
+        declaredOnly: true,
+        kinds: ['enum'],
+        limit: 10,
+    });
+    assert.deepEqual(enumResult.data.matches.map((match) => match.qualifiedName), ['Core::EState']);
+    assert.equal(enumResult.data.matches[0]?.scopeRelationship, 'declared');
+});
+
+test('GetAPIQuery computes merged scope groups before global paging', () =>
+{
+    const result = GetAPIQuery({
+        query: '/(DoThing|Build|Count)$/',
+        mode: 'regex',
+        scope: 'Core::FThing',
+        declaredOnly: true,
+        limit: 1,
+        offset: 1,
+    });
+    assert.equal(result.data.total, 3);
+    assert.equal(result.data.returned, 1);
+    assert.equal(result.data.scopeGroups?.length, 2);
+    assert.equal(result.data.scopeGroups?.reduce((sum, group) => sum + group.totalMatches, 0), 3);
+    assert.equal(result.data.scopeGroups?.reduce((sum, group) => sum + group.matches.length, 0), 1);
+    assert.equal(result.data.scopeGroups?.reduce((sum, group) => sum + group.omittedMatches, 0), 2);
+    assert.deepEqual(result.data.matches.map((match) => match.qualifiedName), ['Core::FThing::Build']);
+    const selectedGroup = result.data.scopeGroups?.find((group) => group.matches.length > 0);
+    assert.equal(selectedGroup?.scope.resolvedKind, 'namespace');
+    assert.deepEqual(selectedGroup?.matches.map((match) => match.qualifiedName), ['Core::FThing::Build']);
+});
+
+test('GetAPIQuery filters presentation kinds before merged owner seeding', () =>
+{
+    const first = GetAPIQuery({
+        query: '/^(A|Zzz|B)$/',
+        mode: 'regex',
+        scope: 'Core::FThing',
+        declaredOnly: true,
+        kinds: ['property'],
+        limit: 1,
+        offset: 0,
+    });
+    const second = GetAPIQuery({
+        query: '/^(A|Zzz|B)$/',
+        mode: 'regex',
+        scope: 'Core::FThing',
+        declaredOnly: true,
+        kinds: ['property'],
+        limit: 1,
+        offset: 1,
+    });
+    assert.deepEqual(first.data.matches.map((match) => match.qualifiedName), ['Core::FThing.Zzz']);
+    assert.equal(first.data.scopeGroups?.find((group) => group.matches.length > 0)?.scope.resolvedKind, 'struct');
+    assert.deepEqual(second.data.matches.map((match) => match.qualifiedName), ['Core::FThing::B']);
+    assert.equal(second.data.scopeGroups?.find((group) => group.matches.length > 0)?.scope.resolvedKind, 'namespace');
+});
+
+test('GetAPIQuery filters mixins before merged owner seeding', () =>
+{
+    const first = GetAPIQuery({
+        query: 'AMixin',
+        scope: 'Core::FThing',
+        declaredOnly: true,
+        limit: 1,
+        offset: 0,
+    });
+    const second = GetAPIQuery({
+        query: 'AMixin',
+        scope: 'Core::FThing',
+        declaredOnly: true,
+        limit: 1,
+        offset: 1,
+    });
+    assert.deepEqual(first.data.matches.map((match) => match.qualifiedName), ['Core::FThing.AMixinFallback']);
+    assert.equal(first.data.scopeGroups?.find((group) => group.matches.length > 0)?.scope.resolvedKind, 'struct');
+    assert.deepEqual(second.data.matches.map((match) => match.qualifiedName), ['Core::FThing::AMixinNamespace']);
+    assert.equal(second.data.scopeGroups?.find((group) => group.matches.length > 0)?.scope.resolvedKind, 'namespace');
+    assert.ok(!first.data.matches.some((match) => match.scopeRelationship == 'mixin'));
+    assert.ok(!second.data.matches.some((match) => match.scopeRelationship == 'mixin'));
 });
 
 test('GetAPIExactSymbols handles qualified and short collisions plus stable non-copy constructors', () =>

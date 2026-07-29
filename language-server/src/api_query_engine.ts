@@ -640,6 +640,7 @@ export type GetAPIQueryParams = {
     kinds?: ApiQueryKind[];
     scope?: string;
     declaredOnly?: boolean;
+    excludeInherited?: boolean;
     includeDocs?: boolean;
     includeNonPublic?: boolean;
     symbolLevel?: ApiSearchSymbolLevel;
@@ -647,9 +648,26 @@ export type GetAPIQueryParams = {
     offset?: number;
 };
 
+type ApiQueryScopeMode = 'default' | 'exclude-inherited' | 'declared-only';
+
 export type ApiQueryMatch = Omit<GetAPISearchMatch, 'kind' | 'source'> & {
     kind: ApiQueryKind;
     source: ApiQuerySource;
+};
+
+type CoreRankedMatch = {
+    candidate: SearchCandidate;
+    match: ApiQueryMatch;
+};
+
+type CoreScopeGroup = {
+    scope: GetAPISearchResolvedScope;
+    matches: CoreRankedMatch[];
+};
+
+type OwnerSeededItem<T> = {
+    groupIndex: number;
+    item: T;
 };
 
 export type GetAPIQueryResult = {
@@ -707,6 +725,24 @@ function normalizeCoreBoolean(value: unknown, name: string, defaultValue = false
     if (typeof value !== 'boolean')
         throw new ApiSearchValidationError(`Invalid params. '${name}' must be a boolean.`);
     return value;
+}
+
+function normalizeCoreScopeMode(record: Record<string, unknown>, scope: string) : ApiQueryScopeMode
+{
+    let hasDeclaredOnly = Object.prototype.hasOwnProperty.call(record, 'declaredOnly');
+    let hasExcludeInherited = Object.prototype.hasOwnProperty.call(record, 'excludeInherited');
+    let declaredOnly = normalizeCoreBoolean(record.declaredOnly, 'declaredOnly');
+    let excludeInherited = normalizeCoreBoolean(record.excludeInherited, 'excludeInherited');
+
+    if (hasDeclaredOnly && hasExcludeInherited)
+        throw new ApiSearchValidationError("Invalid params. 'declaredOnly' and 'excludeInherited' cannot be combined.");
+    if ((hasDeclaredOnly || hasExcludeInherited) && !scope)
+        throw new ApiSearchValidationError("Invalid params. 'declaredOnly' and 'excludeInherited' require 'scope'.");
+    if (declaredOnly)
+        return 'declared-only';
+    if (excludeInherited)
+        return 'exclude-inherited';
+    return 'default';
 }
 
 function normalizeCoreKinds(value: unknown) : ApiQueryKind[] | undefined
@@ -799,6 +835,85 @@ function dedupeCoreMatches(matches: ApiQueryMatch[]) : ApiQueryMatch[]
     return result;
 }
 
+function filterCoreScopeMode(matches: ApiQueryMatch[], mode: ApiQueryScopeMode) : ApiQueryMatch[]
+{
+    return matches.filter((match) => matchesCoreScopeMode(match, mode));
+}
+
+function matchesCoreScopeMode(match: ApiQueryMatch, mode: ApiQueryScopeMode) : boolean
+{
+    if (mode == 'declared-only')
+        return match.scopeRelationship == 'declared';
+    if (mode == 'exclude-inherited')
+        return match.scopeRelationship != 'inherited';
+    return true;
+}
+
+function buildMergedCoreScopeGroups(
+    payload: GetAPISearchParams,
+    kinds: ApiQueryKind[] | undefined,
+    scopeMode: ApiQueryScopeMode
+) : CoreScopeGroup[] | undefined
+{
+    let params = normalizeSearchParams(payload);
+    if (!params.scope)
+        return undefined;
+
+    let index = getSearchIndex();
+    let scopeResolution = resolveScope(index, params.scope, params.includeInheritedFromScopeMode);
+    if (!scopeResolution.hasMergedSameNameScope)
+        return undefined;
+    if (params.mode == 'smart' && params.smartQueries && params.smartQueries.every((query) => isTinySmartQuery(query)))
+    {
+        return scopeResolution.scopes.map((scope) => ({
+            scope: buildResolvedScopeInfo(scope),
+            matches: new Array<CoreRankedMatch>()
+        }));
+    }
+
+    let baseCandidates = index.entries.map((entry) : SearchCandidate => ({ entry }));
+    let rankedScopeGroups = buildRankedScopeGroups(
+        baseCandidates,
+        scopeResolution.scopes,
+        scopeResolution.notices,
+        params,
+        index
+    );
+    return rankedScopeGroups.map((group) =>
+    {
+        let seen = new Set<string>();
+        let matches = new Array<CoreRankedMatch>();
+        for (let candidate of group.candidates)
+        {
+            let match = projectCoreMatch(buildMatch(candidate, params.includeDocs));
+            if ((kinds && !kinds.includes(match.kind)) || !matchesCoreScopeMode(match, scopeMode))
+                continue;
+            let identity = stableRecordIdentity(match);
+            if (seen.has(identity))
+                continue;
+            seen.add(identity);
+            matches.push({ candidate, match });
+        }
+        return {
+            scope: buildResolvedScopeInfo(group.scope),
+            matches
+        };
+    });
+}
+
+function dedupeOwnerSeededCoreMatches(matches: OwnerSeededItem<CoreRankedMatch>[]) : OwnerSeededItem<CoreRankedMatch>[]
+{
+    let seen = new Set<string>();
+    return matches.filter((selected) =>
+    {
+        let identity = stableRecordIdentity(selected.item.match);
+        if (seen.has(identity))
+            return false;
+        seen.add(identity);
+        return true;
+    });
+}
+
 export function GetAPIQuery(payload: unknown) : GetAPIQueryResult
 {
     if (!payload || typeof payload != 'object' || Array.isArray(payload))
@@ -813,61 +928,55 @@ export function GetAPIQuery(payload: unknown) : GetAPIQueryResult
     let symbolLevel = normalizeSymbolLevel(record.symbolLevel);
     if (symbolLevel == 'type' && kinds && kinds.some((kind) => !typeOnlyKinds.has(kind as ApiSearchTypeKind)))
         throw new ApiSearchValidationError("Invalid params. 'kinds' only supports class, struct, or enum when 'symbolLevel' is 'type'.");
-    let declaredOnly = normalizeCoreBoolean(record.declaredOnly, 'declaredOnly');
+    let scope = typeof record.scope == 'string' ? record.scope.trim() : '';
+    if (record.scope !== undefined && typeof record.scope != 'string')
+        throw new ApiSearchValidationError("Invalid params. 'scope' must be a string.");
+    let scopeMode = normalizeCoreScopeMode(record, scope);
     let includeDocs = normalizeCoreBoolean(record.includeDocs, 'includeDocs');
     let includeNonPublic = normalizeCoreBoolean(record.includeNonPublic, 'includeNonPublic');
     let limit = record.limit === undefined ? 20 : normalizeLimit(record.limit);
     if (limit > 1000)
         throw new ApiSearchValidationError("Invalid params. 'limit' must be between 1 and 1000.");
     let offset = normalizeOffset(record.offset);
-    let scope = typeof record.scope == 'string' ? record.scope.trim() : '';
-    if (record.scope !== undefined && typeof record.scope != 'string')
-        throw new ApiSearchValidationError("Invalid params. 'scope' must be a string.");
-
-    let raw = GetAPISearch({
+    let rawPayload: GetAPISearchParams = {
         query,
         mode,
         source,
         kinds: rawKindsForCoreKinds(kinds),
         ...(scope ? { scope } : {}),
-        declaredOnly,
+        declaredOnly: scopeMode != 'default',
         includeDocs,
         includePrivateOrProtectedMembers: includeNonPublic,
         symbolLevel,
         limit: MAX_LIMIT,
         offset: 0
-    });
-    let allMatches = dedupeCoreMatches(raw.matches
-        .map(projectCoreMatch)
-        .filter((match) => !kinds || kinds.includes(match.kind)));
-    let pageMatches = allMatches.slice(offset, offset + limit);
-    let pageIdentities = new Set(pageMatches.map(stableRecordIdentity));
-    let projectedScopeGroups = raw.scopeGroups?.map((group) =>
-    {
-        let matches = dedupeCoreMatches(group.matches
+    };
+    let raw = GetAPISearch(rawPayload);
+    let mergedScopeGroups = raw.scopeGroups
+        ? buildMergedCoreScopeGroups(rawPayload, kinds, scopeMode)
+        : undefined;
+    let orderedMergedMatches = mergedScopeGroups
+        ? orderOwnerSeededGroups(
+            mergedScopeGroups.map((group) => group.matches),
+            (left, right) => compareCandidates(left.candidate, right.candidate)
+        )
+        : undefined;
+    let orderedMergedUniqueMatches = orderedMergedMatches
+        ? dedupeOwnerSeededCoreMatches(orderedMergedMatches)
+        : undefined;
+    let allMatches = orderedMergedUniqueMatches
+        ? orderedMergedUniqueMatches.map((selected) => selected.item.match)
+        : filterCoreScopeMode(dedupeCoreMatches(raw.matches
             .map(projectCoreMatch)
-            .filter((match) => !kinds || kinds.includes(match.kind)));
-        return {
-            scope: group.scope,
-            identities: new Set(matches.map(stableRecordIdentity))
-        };
-    });
-    let assignedByGroup = projectedScopeGroups?.map(() => new Array<ApiQueryMatch>());
-    if (projectedScopeGroups && assignedByGroup)
+            .filter((match) => !kinds || kinds.includes(match.kind))), scopeMode);
+    let pageMatches = allMatches.slice(offset, offset + limit);
+    let pageSelections = orderedMergedUniqueMatches?.slice(offset, offset + limit);
+    let scopeGroups = mergedScopeGroups?.map((group, groupIndex) =>
     {
-        for (let match of allMatches)
-        {
-            let identity = stableRecordIdentity(match);
-            let groupIndex = projectedScopeGroups.findIndex((group) => group.identities.has(identity));
-            if (groupIndex < 0)
-                throw new Error(`Scoped API query record has no owning scope group: ${match.qualifiedName}`);
-            assignedByGroup[groupIndex].push(match);
-        }
-    }
-    let scopeGroups = projectedScopeGroups?.map((group, index) =>
-    {
-        let groupMatches = assignedByGroup?.[index] ?? [];
-        let groupPage = groupMatches.filter((match) => pageIdentities.has(stableRecordIdentity(match)));
+        let groupMatches = orderedMergedUniqueMatches?.filter((selected) => selected.groupIndex == groupIndex) ?? [];
+        let groupPage = pageSelections
+            ?.filter((selected) => selected.groupIndex == groupIndex)
+            .map((selected) => selected.item.match) ?? [];
         return {
             scope: group.scope,
             matches: groupPage,
@@ -1945,43 +2054,7 @@ function buildRankedScopeGroups(
 
 function limitMergedScopeGroups(groups: RankedScopeGroup[], offset: number, limit: number) : LimitedScopeGroup[]
 {
-    let orderedCandidates: Array<{ groupIndex: number; candidate: SearchCandidate }> = [];
-    let nextIndexByGroup = groups.map(() => 0);
-
-    for (let index = 0; index < groups.length; index += 1)
-    {
-        if (groups[index].candidates.length == 0)
-            continue;
-
-        orderedCandidates.push({ groupIndex: index, candidate: groups[index].candidates[0] });
-        nextIndexByGroup[index] = 1;
-    }
-
-    while (true)
-    {
-        let bestGroupIndex = -1;
-        let bestCandidate: SearchCandidate | null = null;
-
-        for (let index = 0; index < groups.length; index += 1)
-        {
-            let nextCandidate = groups[index].candidates[nextIndexByGroup[index]];
-            if (!nextCandidate)
-                continue;
-
-            if (!bestCandidate || compareCandidates(nextCandidate, bestCandidate) < 0)
-            {
-                bestCandidate = nextCandidate;
-                bestGroupIndex = index;
-            }
-        }
-
-        if (bestGroupIndex == -1 || !bestCandidate)
-            break;
-
-        orderedCandidates.push({ groupIndex: bestGroupIndex, candidate: bestCandidate });
-        nextIndexByGroup[bestGroupIndex] += 1;
-    }
-
+    let orderedCandidates = orderMergedScopeCandidates(groups);
     let selectedByGroup = groups.map(() => new Array<SearchCandidate>());
     for (let selected of orderedCandidates.slice(offset, offset + limit))
         selectedByGroup[selected.groupIndex].push(selected.candidate);
@@ -1992,6 +2065,59 @@ function limitMergedScopeGroups(groups: RankedScopeGroup[], offset: number, limi
         totalMatches: group.candidates.length,
         omittedMatches: Math.max(0, group.candidates.length - selectedByGroup[index].length)
     }));
+}
+
+function orderMergedScopeCandidates(groups: RankedScopeGroup[]) : Array<{ groupIndex: number; candidate: SearchCandidate }>
+{
+    return orderOwnerSeededGroups(
+        groups.map((group) => group.candidates),
+        compareCandidates
+    ).map((selected) => ({
+        groupIndex: selected.groupIndex,
+        candidate: selected.item
+    }));
+}
+
+function orderOwnerSeededGroups<T>(groups: T[][], compareItems: (left: T, right: T) => number) : OwnerSeededItem<T>[]
+{
+    let orderedItems = new Array<OwnerSeededItem<T>>();
+    let nextIndexByGroup = groups.map(() => 0);
+
+    for (let index = 0; index < groups.length; index += 1)
+    {
+        if (groups[index].length == 0)
+            continue;
+
+        orderedItems.push({ groupIndex: index, item: groups[index][0] });
+        nextIndexByGroup[index] = 1;
+    }
+
+    while (true)
+    {
+        let bestGroupIndex = -1;
+        let bestItem: T | undefined = undefined;
+
+        for (let index = 0; index < groups.length; index += 1)
+        {
+            let nextItem = groups[index][nextIndexByGroup[index]];
+            if (!nextItem)
+                continue;
+
+            if (bestItem === undefined || compareItems(nextItem, bestItem) < 0)
+            {
+                bestItem = nextItem;
+                bestGroupIndex = index;
+            }
+        }
+
+        if (bestGroupIndex == -1 || bestItem === undefined)
+            break;
+
+        orderedItems.push({ groupIndex: bestGroupIndex, item: bestItem });
+        nextIndexByGroup[bestGroupIndex] += 1;
+    }
+
+    return orderedItems;
 }
 
 function buildScopeGroupsFromLimitedGroups(
