@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
+import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
 
 export type EditorListenerIdentityOptions = {
     port: number;
@@ -25,6 +26,11 @@ export type WindowsTcpOwner = {
     ProcessId?: number;
     ExecutablePath?: string | null;
     CommandLine?: string | null;
+};
+
+export type EditorListenerIdentityDependencies = {
+    queryWindowsTcpOwners?: (script: string, timeoutMs: number) => Promise<unknown | EditorListenerIdentityResult>;
+    ownerQueryTimeoutMs?: number;
 };
 
 function normalizedCommandPath(value: string) : string
@@ -145,12 +151,12 @@ function unsupportedPlatform(platform: NodeJS.Platform) : EditorListenerIdentity
     };
 }
 
-function queryWindowsTcpOwners(script: string) : Promise<unknown | EditorListenerIdentityResult>
+function queryWindowsTcpOwners(script: string, timeoutMs: number) : Promise<unknown | EditorListenerIdentityResult>
 {
     return new Promise((resolve) => {
         execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
             windowsHide: true,
-            timeout: 3000,
+            timeout: timeoutMs,
             maxBuffer: 256 * 1024,
         }, (error, stdout) => {
             if (error)
@@ -177,11 +183,22 @@ function powershellString(value: string) : string
     return `'${value.replace(/'/g, "''")}'`;
 }
 
+function windowsNetstatQueryPrelude() : string[]
+{
+    return [
+        "function Convert-Endpoint { param([string]$Value) $separator=$Value.LastIndexOf(':'); if($separator -lt 0){return $null}; $address=$Value.Substring(0,$separator).Trim('[',']'); $endpointPort=0; if(-not [int]::TryParse($Value.Substring($separator+1),[ref]$endpointPort)){return $null}; [pscustomobject]@{Address=$address;Port=$endpointPort} }",
+        "function Add-OwnerMetadata { param($Row) $owner=Get-CimInstance Win32_Process -Filter ('ProcessId=' + $Row.ProcessId) -ErrorAction SilentlyContinue; [pscustomobject]@{LocalAddress=$Row.LocalAddress;LocalPort=$Row.LocalPort;RemoteAddress=$Row.RemoteAddress;RemotePort=$Row.RemotePort;ProcessId=$Row.ProcessId;ExecutablePath=$owner.ExecutablePath;CommandLine=$owner.CommandLine} }",
+        "$netstatPath=[System.IO.Path]::Combine($env:SystemRoot,'System32','netstat.exe')",
+    ];
+}
+
 function windowsListenerQuery(port: number) : string
 {
     return [
+        ...windowsNetstatQueryPrelude(),
         `$portNumber=[int]${port}`,
-        '$items=@(Get-NetTCPConnection -State Listen -LocalPort $portNumber -ErrorAction SilentlyContinue | ForEach-Object { $tcp=$_; $process=Get-CimInstance Win32_Process -Filter ("ProcessId=" + $tcp.OwningProcess); [pscustomobject]@{LocalAddress=$tcp.LocalAddress;LocalPort=$tcp.LocalPort;ProcessId=$tcp.OwningProcess;ExecutablePath=$process.ExecutablePath;CommandLine=$process.CommandLine} })',
+        "$rows=@(& $netstatPath -ano -p tcp | ForEach-Object { $columns=@($_.Trim() -split '\\s+'); if($columns.Count -ge 5 -and $columns[0] -eq 'TCP' -and $columns[3] -eq 'LISTENING'){ $local=Convert-Endpoint $columns[1]; if($null -ne $local -and $local.Port -eq $portNumber){ [pscustomobject]@{LocalAddress=$local.Address;LocalPort=$local.Port;RemoteAddress='';RemotePort=0;ProcessId=[int]$columns[4]} } } })",
+        '$items=@($rows | ForEach-Object { Add-OwnerMetadata $_ })',
         '$items | ConvertTo-Json -Compress',
     ].join(';');
 }
@@ -189,11 +206,13 @@ function windowsListenerQuery(port: number) : string
 function windowsEstablishedQuery(tuple: EditorConnectionTuple) : string
 {
     return [
+        ...windowsNetstatQueryPrelude(),
         `$serverAddress=${powershellString(normalizedAddress(tuple.remoteAddress))}`,
         `$serverPort=[int]${tuple.remotePort}`,
         `$clientAddress=${powershellString(normalizedAddress(tuple.localAddress))}`,
         `$clientPort=[int]${tuple.localPort}`,
-        '$items=@(Get-NetTCPConnection -State Established -LocalAddress $serverAddress -LocalPort $serverPort -RemoteAddress $clientAddress -RemotePort $clientPort -ErrorAction SilentlyContinue | ForEach-Object { $tcp=$_; $process=Get-CimInstance Win32_Process -Filter ("ProcessId=" + $tcp.OwningProcess); [pscustomobject]@{LocalAddress=$tcp.LocalAddress;LocalPort=$tcp.LocalPort;RemoteAddress=$tcp.RemoteAddress;RemotePort=$tcp.RemotePort;ProcessId=$tcp.OwningProcess;ExecutablePath=$process.ExecutablePath;CommandLine=$process.CommandLine} })',
+        "$rows=@(& $netstatPath -ano -p tcp | ForEach-Object { $columns=@($_.Trim() -split '\\s+'); if($columns.Count -ge 5 -and $columns[0] -eq 'TCP' -and $columns[3] -eq 'ESTABLISHED'){ $local=Convert-Endpoint $columns[1]; $remote=Convert-Endpoint $columns[2]; if($null -ne $local -and $null -ne $remote -and $local.Address -eq $serverAddress -and $local.Port -eq $serverPort -and $remote.Address -eq $clientAddress -and $remote.Port -eq $clientPort){ [pscustomobject]@{LocalAddress=$local.Address;LocalPort=$local.Port;RemoteAddress=$remote.Address;RemotePort=$remote.Port;ProcessId=[int]$columns[4]} } } })",
+        '$items=@($rows | ForEach-Object { Add-OwnerMetadata $_ })',
         '$items | ConvertTo-Json -Compress',
     ].join(';');
 }
@@ -201,11 +220,16 @@ function windowsEstablishedQuery(tuple: EditorConnectionTuple) : string
 export async function verifyEditorListenerIdentity(
     options: EditorListenerIdentityOptions,
     platform: NodeJS.Platform = process.platform,
+    dependencies: EditorListenerIdentityDependencies = {},
 ) : Promise<EditorListenerIdentityResult>
 {
     if (platform != 'win32')
         return unsupportedPlatform(platform);
-    let queried = await queryWindowsTcpOwners(windowsListenerQuery(options.port));
+    let query = dependencies.queryWindowsTcpOwners ?? queryWindowsTcpOwners;
+    let queried = await query(
+        windowsListenerQuery(options.port),
+        dependencies.ownerQueryTimeoutMs ?? LANGUAGE_SERVER_TIMEOUTS_MS.windowsEditorOwnerQuery,
+    );
     return isIdentityResult(queried) ? queried : validateWindowsListenerProcesses(queried, options);
 }
 
@@ -214,11 +238,16 @@ export async function verifyEstablishedEditorConnectionIdentity(
     tuple: EditorConnectionTuple,
     expectedProcessId: number,
     platform: NodeJS.Platform = process.platform,
+    dependencies: EditorListenerIdentityDependencies = {},
 ) : Promise<EditorListenerIdentityResult>
 {
     if (platform != 'win32')
         return unsupportedPlatform(platform);
-    let queried = await queryWindowsTcpOwners(windowsEstablishedQuery(tuple));
+    let query = dependencies.queryWindowsTcpOwners ?? queryWindowsTcpOwners;
+    let queried = await query(
+        windowsEstablishedQuery(tuple),
+        dependencies.ownerQueryTimeoutMs ?? LANGUAGE_SERVER_TIMEOUTS_MS.windowsEditorOwnerQuery,
+    );
     return isIdentityResult(queried)
         ? queried
         : validateWindowsEstablishedConnection(queried, options, tuple, expectedProcessId);

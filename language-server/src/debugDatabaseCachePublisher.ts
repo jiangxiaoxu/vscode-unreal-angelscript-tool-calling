@@ -1,4 +1,5 @@
 import type { DebugDatabaseCacheV2 } from './debugDatabaseCacheV2';
+import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
 
 export type DebugDatabaseCachePublication = {
     generation: number;
@@ -36,7 +37,7 @@ export function createDebugDatabaseCachePublisher(
     options: DebugDatabaseCachePublisherOptions = {},
 ) : DebugDatabaseCachePublisher
 {
-    let retryDelaysMs = options.retryDelaysMs ?? [1000, 3000, 5000];
+    let retryDelaysMs = options.retryDelaysMs ?? LANGUAGE_SERVER_TIMEOUTS_MS.cachePersistenceRetry;
     let status: DebugDatabasePersistenceStatus = { state: 'disabled', cacheDirty: false, persistenceAttempt: 0 };
     let pending: DebugDatabaseCachePublication | null = null;
     let failedLatest: DebugDatabaseCachePublication | null = null;
@@ -219,7 +220,7 @@ export function createDebugDatabaseCachePublisher(
         return !pending && (status.state == 'clean' || status.state == 'disabled' || status.state == 'missing');
     }
 
-    async function flush(timeoutMs = 2000) : Promise<boolean>
+    async function flush(timeoutMs: number = LANGUAGE_SERVER_TIMEOUTS_MS.shutdownPersistenceFlush) : Promise<boolean>
     {
         if (!Number.isFinite(timeoutMs) || timeoutMs < 0)
             throw new Error('DebugDatabase cache flush timeout must be a non-negative finite number.');
@@ -232,7 +233,7 @@ export function createDebugDatabaseCachePublisher(
         return waitForWorker(timeoutMs);
     }
 
-    async function shutdown(timeoutMs = 2000) : Promise<boolean>
+    async function shutdown(timeoutMs: number = LANGUAGE_SERVER_TIMEOUTS_MS.shutdownPersistenceFlush) : Promise<boolean>
     {
         let flushPromise = flush(timeoutMs);
         accepting = false;

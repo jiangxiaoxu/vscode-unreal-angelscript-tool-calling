@@ -1,81 +1,101 @@
-import { Connection, ResponseError } from 'vscode-languageserver/node';
+import { CancellationToken, Connection, LSPErrorCodes, ResponseError } from 'vscode-languageserver/node';
 import * as typedb from './database';
 import * as api_docs from './api_docs';
 import * as api_search from './api_search';
+import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
+import { performance } from 'node:perf_hooks';
+
+type TypesReadyWaitOptions = {
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+    now?: () => number;
+    wait?: (delayMs: number, cancellationToken?: CancellationToken) => Promise<boolean>;
+};
 
 export type ApiRequestHandlerDeps = {
     connection: Connection;
     isUnrealConnected: () => boolean;
     getFullReadyStatus?: () => { fullReady: boolean; stage: string; coverage: string };
-    typesReadyWait?: {
-        maxTries?: number;
-        delayMs?: number;
-    };
+    typesReadyWait?: TypesReadyWaitOptions;
 };
 
 const API_TYPES_NOT_READY_ERROR_CODE = -32002;
 
 function runWhenTypesReady<T>(
     run : () => T,
-    options: {
-        maxTries?: number;
-        delayMs?: number;
+    options: TypesReadyWaitOptions & {
         isReady?: () => boolean;
         isTerminalNotReady?: () => boolean;
         describeNotReady?: () => string;
+        cancellationToken?: CancellationToken;
     } = {}
 ) : T | ResponseError<void> | Promise<T | ResponseError<void>>
 {
     let isReady = options.isReady ?? (() => typedb.HasTypesFromUnreal());
+    let notReady = () => new ResponseError<void>(
+        API_TYPES_NOT_READY_ERROR_CODE,
+        options.describeNotReady?.() ?? 'NotReady: AngelScript API types are not ready.'
+    );
+    let cancelled = () => new ResponseError<void>(
+        LSPErrorCodes.RequestCancelled,
+        'AngelScript API request was cancelled while waiting for full readiness.'
+    );
+    if (options.cancellationToken?.isCancellationRequested)
+        return cancelled();
     if (isReady())
         return run();
     if (options.isTerminalNotReady?.())
-    {
-        return new ResponseError<void>(
-            API_TYPES_NOT_READY_ERROR_CODE,
-            options.describeNotReady?.() ?? 'NotReady: AngelScript API types are not ready.'
-        );
-    }
+        return notReady();
 
-    let maxTries = options.maxTries ?? 50;
-    let delayMs = options.delayMs ?? 100;
+    let timeoutMs = options.timeoutMs ?? LANGUAGE_SERVER_TIMEOUTS_MS.apiFullReadyWait;
+    let pollIntervalMs = options.pollIntervalMs ?? LANGUAGE_SERVER_TIMEOUTS_MS.apiFullReadyPoll;
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 0)
+        throw new Error('API full-ready wait timeout must be a non-negative finite number.');
+    if (!Number.isFinite(pollIntervalMs) || pollIntervalMs <= 0)
+        throw new Error('API full-ready poll interval must be a positive finite number.');
+    let now = options.now ?? (() => performance.now());
+    let wait = options.wait ?? waitForDelayOrCancellation;
+    let deadline = now() + timeoutMs;
 
-    function timerFunc(resolve : (value: T | ResponseError<void>) => void, reject : (reason?: unknown) => void, triesLeft : number)
-    {
-        if (isReady())
+    return (async () => {
+        while (true)
         {
-            try
-            {
-                return resolve(run());
-            }
-            catch (error)
-            {
-                reject(error);
+            if (options.cancellationToken?.isCancellationRequested)
+                return cancelled();
+            let remainingMs = deadline - now();
+            if (remainingMs <= 0)
+                return notReady();
+            if (isReady())
+                return run();
+            if (options.isTerminalNotReady?.())
+                return notReady();
+            if (!await wait(Math.min(pollIntervalMs, remainingMs), options.cancellationToken))
+                return cancelled();
+        }
+    })();
+}
+
+function waitForDelayOrCancellation(delayMs: number, cancellationToken?: CancellationToken) : Promise<boolean>
+{
+    if (cancellationToken?.isCancellationRequested)
+        return Promise.resolve(false);
+    return new Promise((resolve) => {
+        let settled = false;
+        let timer: NodeJS.Timeout | null = setTimeout(() => finish(true), delayMs);
+        let cancellation = cancellationToken?.onCancellationRequested(() => finish(false));
+        function finish(elapsed: boolean) : void
+        {
+            if (settled)
                 return;
-            }
+            settled = true;
+            if (timer)
+                clearTimeout(timer);
+            timer = null;
+            cancellation?.dispose();
+            resolve(elapsed);
         }
-        if (options.isTerminalNotReady?.())
-        {
-            resolve(new ResponseError<void>(
-                API_TYPES_NOT_READY_ERROR_CODE,
-                options.describeNotReady?.() ?? 'NotReady: AngelScript API types are not ready.'
-            ));
-            return;
-        }
-        if (triesLeft <= 0)
-        {
-            resolve(new ResponseError<void>(
-                API_TYPES_NOT_READY_ERROR_CODE,
-                options.describeNotReady?.() ?? 'NotReady: AngelScript API types are not ready.'
-            ));
-            return;
-        }
-        setTimeout(function() { timerFunc(resolve, reject, triesLeft - 1); }, delayMs);
-    }
-
-    return new Promise<T | ResponseError<void>>(function(resolve, reject)
-    {
-        timerFunc(resolve, reject, maxTries);
+        if (cancellationToken?.isCancellationRequested)
+            finish(false);
     });
 }
 
@@ -97,8 +117,9 @@ function runApiCoreRequest<T>(run: () => T) : T | ResponseError<void>
 export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
 {
     const { connection, isUnrealConnected } = deps;
-    const runReady = <T>(run: () => T) => runWhenTypesReady(run, {
+    const runReady = <T>(run: () => T, cancellationToken?: CancellationToken) => runWhenTypesReady(run, {
         ...deps.typesReadyWait,
+        cancellationToken,
         isReady: deps.getFullReadyStatus
             ? () => deps.getFullReadyStatus().fullReady
             : undefined,
@@ -120,11 +141,11 @@ export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
         return isUnrealConnected();
     });
 
-    connection.onRequest("angelscript/getAPI", (root : string) : any => {
-        return runReady(() => api_docs.GetAPIList(root));
+    connection.onRequest("angelscript/getAPI", (root : string, cancellationToken) : any => {
+        return runReady(() => api_docs.GetAPIList(root), cancellationToken);
     });
 
-    connection.onRequest("angelscript/getAPISearch", (payload : any) : any => {
+    connection.onRequest("angelscript/getAPISearch", (payload : any, cancellationToken) : any => {
         let runSearch = function()
         {
             try
@@ -139,32 +160,32 @@ export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
             }
         };
 
-        return runReady(runSearch);
+        return runReady(runSearch, cancellationToken);
     });
 
-    connection.onRequest("angelscript/getAPIDetails", (root : any) : any => {
-        return runReady(() => api_docs.GetAPIDetails(root));
+    connection.onRequest("angelscript/getAPIDetails", (root : any, cancellationToken) : any => {
+        return runReady(() => api_docs.GetAPIDetails(root), cancellationToken);
     });
 
-    connection.onRequest("angelscript/getAPIDetailsBatch", (roots : any) : any => {
+    connection.onRequest("angelscript/getAPIDetailsBatch", (roots : any, cancellationToken) : any => {
         let dataList = Array.isArray(roots) ? roots : [];
-        return runReady(() => api_docs.GetAPIDetailsBatch(dataList));
+        return runReady(() => api_docs.GetAPIDetailsBatch(dataList), cancellationToken);
     });
 
-    connection.onRequest("angelscript/queryAPI", (params : api_search.GetAPIQueryParams) : any => {
-        return runReady(() => runApiCoreRequest(() => api_search.GetAPIQuery(params)));
+    connection.onRequest("angelscript/queryAPI", (params : api_search.GetAPIQueryParams, cancellationToken) : any => {
+        return runReady(() => runApiCoreRequest(() => api_search.GetAPIQuery(params)), cancellationToken);
     });
 
-    connection.onRequest("angelscript/readAPISymbol", (params : api_search.GetAPIExactSymbolsParams) : any => {
-        return runReady(() => runApiCoreRequest(() => api_search.GetAPIExactSymbols(params)));
+    connection.onRequest("angelscript/readAPISymbol", (params : api_search.GetAPIExactSymbolsParams, cancellationToken) : any => {
+        return runReady(() => runApiCoreRequest(() => api_search.GetAPIExactSymbols(params)), cancellationToken);
     });
 
-    connection.onRequest("angelscript/getAPISymbolMembers", (params : api_docs.GetAPISymbolMembersParams) : any => {
-        return runReady(() => runApiCoreRequest(() => api_docs.GetAPISymbolMembers(params)));
+    connection.onRequest("angelscript/getAPISymbolMembers", (params : api_docs.GetAPISymbolMembersParams, cancellationToken) : any => {
+        return runReady(() => runApiCoreRequest(() => api_docs.GetAPISymbolMembers(params)), cancellationToken);
     });
 
-    connection.onRequest("angelscript/getAPIClassHierarchy", (params : api_docs.GetAPIClassHierarchyParams) : any => {
-        return runReady(() => runApiCoreRequest(() => api_docs.GetAPIClassHierarchy(params)));
+    connection.onRequest("angelscript/getAPIClassHierarchy", (params : api_docs.GetAPIClassHierarchyParams, cancellationToken) : any => {
+        return runReady(() => runApiCoreRequest(() => api_docs.GetAPIClassHierarchy(params)), cancellationToken);
     });
 
 }

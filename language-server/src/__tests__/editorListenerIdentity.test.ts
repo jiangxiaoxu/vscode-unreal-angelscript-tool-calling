@@ -88,3 +88,20 @@ test('unsupported platforms fail closed instead of authorizing a blind TCP conne
         });
     }
 });
+
+test('Windows owner verification uses the bounded injectable query timeout', async () => {
+    let observedTimeout = 0;
+    let result = await verifyEditorListenerIdentity(options, 'win32', {
+        ownerQueryTimeoutMs: 17,
+        queryWindowsTcpOwners: async (_script, timeoutMs) => {
+            observedTimeout = timeoutMs;
+            return {
+                ...editor,
+                LocalAddress: '127.0.0.1',
+                LocalPort: 27099,
+            };
+        },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(observedTimeout, 17);
+});

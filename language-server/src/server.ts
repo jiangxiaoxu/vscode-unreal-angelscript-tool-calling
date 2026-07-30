@@ -52,6 +52,8 @@ import { createActiveWorkTracker } from './activeWorkTracker';
 import { verifyEditorListenerIdentity, verifyEstablishedEditorConnectionIdentity } from './editorListenerIdentity';
 import { createConnectionAttemptFence } from './connectionAttemptFence';
 import { createPerSocketRequestScheduler } from './perSocketRequestScheduler';
+import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
+import { createUnrealReconnectScheduler } from './unrealReconnectScheduler';
 import glob from 'glob';
 
 const ExtensionVersion = String(require('../../package.json').version);
@@ -99,16 +101,20 @@ let SemanticTokensRefreshTimeout : any = null;
 let PendingSemanticModules = new Set<scriptfiles.ASModule>();
 
 let settings : any = null;
-let reconnectTimeoutId : any = undefined;
 const connectAttemptFence = createConnectionAttemptFence();
 let LanguageServerStopping = false;
 let LanguageServerShutdownPromise: Promise<boolean> | null = null;
 let ParentProcessWatch: NodeJS.Timeout | null = null;
+let InitialUnrealConnectionClassificationTimeout: NodeJS.Timeout | null = null;
 let LanguageServerOptions : ResolvedAngelScriptLanguageServerOptions | null = null;
 const automationRuntime = createLanguageServerAutomationRuntime(connection, ExtensionVersion);
 const unrealCacheController = automationRuntime.cache;
 const readinessController = automationRuntime.readiness;
 const reResolveWork = createActiveWorkTracker(TrySettleSemanticGeneration);
+const unrealReconnectScheduler = createUnrealReconnectScheduler(
+    () => void connect_unreal(),
+    () => !LanguageServerStopping && !!LanguageServerOptions?.unrealOnline,
+);
 
 function resumeRestoredNativeDiagnosticsIfNeeded() : void
 {
@@ -134,14 +140,13 @@ function watchProjectDaemonParent(processId: number | null) : void
         {
             void stopLanguageServerResources().finally(() => process.exit(0));
         }
-    }, 1000);
+    }, LANGUAGE_SERVER_TIMEOUTS_MS.parentProcessWatchdog);
     ParentProcessWatch.unref();
 }
 
 function schedule_unreal_reconnect() : void
 {
-    if (!LanguageServerStopping && LanguageServerOptions?.unrealOnline && !reconnectTimeoutId)
-        reconnectTimeoutId = setTimeout(() => void connect_unreal(), 5000);
+    unrealReconnectScheduler.schedule();
 }
 
 async function connect_unreal() : Promise<void>
@@ -156,11 +161,7 @@ async function connect_unreal() : Promise<void>
         && connectAttemptFence.isCurrent(attempt);
     // connection.console.log('Connecting to unreal editor on port '+port);
 
-    if (reconnectTimeoutId)
-    {
-        clearTimeout(reconnectTimeoutId);
-        reconnectTimeoutId = undefined;
-    }
+    unrealReconnectScheduler.cancel();
 
     if (!LanguageServerOptions.uprojectPath)
     {
@@ -269,7 +270,10 @@ async function connect_unreal() : Promise<void>
                 UnrealTypesTimedOut = false;
                 if (ReceivingTypesTimeout)
                     clearTimeout(ReceivingTypesTimeout);
-                ReceivingTypesTimeout = setTimeout(DetectUnrealTypeListTimeout, 1000);
+                ReceivingTypesTimeout = setTimeout(
+                    DetectUnrealTypeListTimeout,
+                    LANGUAGE_SERVER_TIMEOUTS_MS.debugDatabaseChunkIntermessage,
+                );
             }
             else if(msg.type == MessageType.DebugDatabaseFinished)
             {
@@ -281,6 +285,7 @@ async function connect_unreal() : Promise<void>
                 try
                 {
                     let accepted = automationRuntime.commitLiveRefresh();
+                    cancelInitialUnrealConnectionClassification();
                     ScheduleNativeDiagnosticsRefresh(accepted.generation);
                 }
                 catch (error)
@@ -464,7 +469,9 @@ async function connect_unreal() : Promise<void>
             connectingSocket.destroy();
             return;
         }
-        requestDebugDatabaseScheduler.schedule(connectingSocket, 1000,
+        requestDebugDatabaseScheduler.schedule(
+            connectingSocket,
+            LANGUAGE_SERVER_TIMEOUTS_MS.verifiedDebugDatabaseRequestDelay,
             () => unreal === connectingSocket && UnrealConnected && !LanguageServerStopping,
             () => {
             let reqDb = Buffer.alloc(5);
@@ -472,7 +479,8 @@ async function connect_unreal() : Promise<void>
             reqDb.writeUInt8(MessageType.RequestDebugDatabase, 4);
 
             connectingSocket.write(Uint8Array.from(reqDb));
-            });
+            },
+        );
     });
 }
 
@@ -607,7 +615,14 @@ connection.onInitialize((_params): InitializeResult => {
     if (LanguageServerOptions.unrealOnline)
     {
         setImmediate(() => void connect_unreal());
-        setTimeout(DetectUnrealConnectionTimeout, 20000);
+        if (!typedb.HasTypesFromUnreal())
+        {
+            InitialUnrealConnectionClassificationTimeout = setTimeout(
+                DetectUnrealConnectionTimeout,
+                LANGUAGE_SERVER_TIMEOUTS_MS.initialOnlineNoTypeDbClassification,
+            );
+            InitialUnrealConnectionClassificationTimeout.unref();
+        }
     }
     else if (!cacheOutcome.loaded)
     {
@@ -677,12 +692,21 @@ connection.onInitialize((_params): InitializeResult => {
 
 function DetectUnrealConnectionTimeout()
 {
-    UnrealTypesTimedOut = true;
+    InitialUnrealConnectionClassificationTimeout = null;
     if (!typedb.HasTypesFromUnreal())
     {
+        UnrealTypesTimedOut = true;
         readinessController.markPartialReady('Unreal connection timed out; diagnostics are parse-only.', false);
         TrySettleSemanticGeneration();
     }
+}
+
+function cancelInitialUnrealConnectionClassification() : void
+{
+    if (!InitialUnrealConnectionClassificationTimeout)
+        return;
+    clearTimeout(InitialUnrealConnectionClassificationTimeout);
+    InitialUnrealConnectionClassificationTimeout = null;
 }
 
 function DetectUnrealTypeListTimeout()
@@ -1691,11 +1715,8 @@ function stopLanguageServerResources() : Promise<boolean>
     ActiveNativeDiagnosticsCancel?.();
     ActiveNativeDiagnosticsCancel = null;
     automationRuntime.abortLiveRefresh('Language Server is stopping.');
-    if (reconnectTimeoutId)
-    {
-        clearTimeout(reconnectTimeoutId);
-        reconnectTimeoutId = undefined;
-    }
+    unrealReconnectScheduler.cancel();
+    cancelInitialUnrealConnectionClassification();
     if (ParentProcessWatch)
     {
         clearInterval(ParentProcessWatch);
@@ -1723,7 +1744,9 @@ function stopLanguageServerResources() : Promise<boolean>
     requestDebugDatabaseScheduler.cancelAll();
     UnrealConnected = false;
     readinessController.update({ unrealConnected: false, editorProcessId: undefined, editorIdentityVerification: 'pending' });
-    LanguageServerShutdownPromise = automationRuntime.shutdown(2000);
+    LanguageServerShutdownPromise = automationRuntime.shutdown(
+        LANGUAGE_SERVER_TIMEOUTS_MS.shutdownPersistenceFlush,
+    );
     return LanguageServerShutdownPromise;
 }
 

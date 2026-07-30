@@ -55,6 +55,93 @@ async function removeDirectoryEventually(directory: string) : Promise<void>
     throw lastError;
 }
 
+function assertSuccessfulChildExit(
+    child: ChildProcess,
+    exitCode: number | null,
+    signal: NodeJS.Signals | null,
+    stderr: string,
+) : void
+{
+    if (exitCode === 0 && signal == null)
+        return;
+    throw new Error(
+        `Child process ${child.pid ?? 'unknown'} exited unsuccessfully: code=${exitCode ?? 'null'}, signal=${signal ?? 'null'}, stderr=${stderr.trim() || '<empty>'}.`,
+    );
+}
+
+async function waitForSuccessfulChildExit(child: ChildProcess, timeoutMs = 3000) : Promise<void>
+{
+    let stderr = '';
+    let buffered: Buffer | string | null | undefined;
+    while ((buffered = child.stderr?.read()) != null)
+        stderr += buffered.toString();
+    if (child.exitCode != null || child.signalCode != null)
+    {
+        assertSuccessfulChildExit(child, child.exitCode, child.signalCode, stderr);
+        return;
+    }
+    await new Promise<void>((resolve, reject) => {
+        let onStderr = (data: Buffer | string) => { stderr += data.toString(); };
+        let onExit = (exitCode: number | null, signal: NodeJS.Signals | null) => {
+            cleanup();
+            try
+            {
+                assertSuccessfulChildExit(child, exitCode, signal, stderr);
+                resolve();
+            }
+            catch (error)
+            {
+                reject(error);
+            }
+        };
+        let onError = (error: Error) => {
+            cleanup();
+            reject(new Error(`Child process ${child.pid ?? 'unknown'} failed: ${error.message}; stderr=${stderr.trim() || '<empty>'}.`));
+        };
+        let timer = setTimeout(() => {
+            cleanup();
+            reject(new Error(`Child process ${child.pid ?? 'unknown'} did not exit within ${timeoutMs}ms; stderr=${stderr.trim() || '<empty>'}.`));
+        }, timeoutMs);
+        function cleanup() : void
+        {
+            clearTimeout(timer);
+            child.stderr?.off('data', onStderr);
+            child.off('exit', onExit);
+            child.off('error', onError);
+        }
+        child.stderr?.on('data', onStderr);
+        child.once('exit', onExit);
+        child.once('error', onError);
+    });
+}
+
+test('successful child exit helper rejects nonzero and signaled exits with stderr evidence', async () => {
+    let nonzero = spawn(process.execPath, ['-e', "process.stderr.write('nonzero evidence');process.exit(7)"], {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        windowsHide: true,
+    });
+    await assert.rejects(
+        waitForSuccessfulChildExit(nonzero),
+        /code=7, signal=null, stderr=nonzero evidence/u,
+    );
+
+    let signaled = spawn(process.execPath, ['-e', "process.stderr.write('signal evidence');setInterval(() => {}, 1000)"], {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        windowsHide: true,
+    });
+    let stderrReady = new Promise<void>((resolve, reject) => {
+        signaled.stderr!.once('data', () => resolve());
+        signaled.once('error', reject);
+    });
+    let signalExit = waitForSuccessfulChildExit(signaled);
+    await stderrReady;
+    signaled.kill('SIGTERM');
+    await assert.rejects(
+        signalExit,
+        /code=null, signal=SIGTERM, stderr=signal evidence/u,
+    );
+});
+
 function projectIdentity(root: string) : string
 {
     let uprojectPath = path.join(root, 'Transport.uproject');
@@ -492,12 +579,12 @@ test('VS Code and project daemon reconnect to a new Editor PID and publish isola
             client.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
         }));
         let firstRevisions = await waitForType('UFirstEditorGeneration');
-        await new Promise<void>((resolve) => firstFake.once('exit', () => resolve()));
+        await waitForSuccessfulChildExit(firstFake);
 
         let secondFake = await startFake('USecondEditorGeneration');
         let secondRevisions = await waitForType('USecondEditorGeneration', firstRevisions);
         assert.notDeepEqual(secondRevisions, firstRevisions);
-        await new Promise<void>((resolve) => secondFake.once('exit', () => resolve()));
+        await waitForSuccessfulChildExit(secondFake);
     }
     finally
     {

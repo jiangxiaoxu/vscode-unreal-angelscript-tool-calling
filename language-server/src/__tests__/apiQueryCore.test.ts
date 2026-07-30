@@ -23,6 +23,7 @@ import {
     GetAPISymbolMembers,
 } from '../api_docs';
 import { registerApiRequestHandlers } from '../apiRequestHandlers';
+import { CancellationToken, CancellationTokenSource } from 'vscode-languageserver/node';
 
 function namespace(qualifiedName: string, declaredModule?: string | null): DBNamespace
 {
@@ -918,9 +919,9 @@ test('core LSP handlers are registered and execute through the ready path', asyn
 
 test('API handlers return a bounded NotReady ResponseError when Unreal types never become ready', async () =>
 {
-    const handlers = new Map<string, (params: any) => any>();
+    const handlers = new Map<string, (params: any, cancellationToken?: CancellationToken) => any>();
     const connection = {
-        onRequest(name: string, handler: (params: any) => any): void
+        onRequest(name: string, handler: (params: any, cancellationToken?: CancellationToken) => any): void
         {
             handlers.set(name, handler);
         },
@@ -928,7 +929,7 @@ test('API handlers return a bounded NotReady ResponseError when Unreal types nev
     registerApiRequestHandlers({
         connection: connection as any,
         isUnrealConnected: () => false,
-        typesReadyWait: { maxTries: 0, delayMs: 0 },
+        typesReadyWait: { timeoutMs: 0 },
     });
     const requests: Array<[string, unknown]> = [
         ['angelscript/getAPI', ''],
@@ -946,4 +947,151 @@ test('API handlers return a bounded NotReady ResponseError when Unreal types nev
         assert.equal(result?.code, -32002, name);
         assert.match(result?.message ?? '', /NotReady/u, name);
     }
+});
+
+test('API full-ready timeout uses an injectable wall-clock deadline', async () =>
+{
+    const handlers = new Map<string, (params: any, cancellationToken?: CancellationToken) => any>();
+    const connection = {
+        onRequest(name: string, handler: (params: any, cancellationToken?: CancellationToken) => any): void
+        {
+            handlers.set(name, handler);
+        },
+    };
+    let now = 0;
+    let waits = 0;
+    registerApiRequestHandlers({
+        connection: connection as any,
+        isUnrealConnected: () => false,
+        getFullReadyStatus: () => ({ fullReady: false, stage: 'parsing', coverage: 'none' }),
+        typesReadyWait: {
+            timeoutMs: 25,
+            pollIntervalMs: 10,
+            now: () => now,
+            wait: async (delayMs) => {
+                waits += 1;
+                now += delayMs;
+                return true;
+            },
+        },
+    });
+    const result = await handlers.get('angelscript/queryAPI')?.({ query: 'Run' });
+    assert.equal(result?.code, -32002);
+    assert.equal(waits, 3);
+});
+
+test('API full-ready wait terminates immediately when the LSP request is cancelled', async () =>
+{
+    const handlers = new Map<string, (params: any, cancellationToken?: CancellationToken) => any>();
+    const connection = {
+        onRequest(name: string, handler: (params: any, cancellationToken?: CancellationToken) => any): void
+        {
+            handlers.set(name, handler);
+        },
+    };
+    let source = new CancellationTokenSource();
+    let waits = 0;
+    registerApiRequestHandlers({
+        connection: connection as any,
+        isUnrealConnected: () => false,
+        getFullReadyStatus: () => ({ fullReady: false, stage: 'parsing', coverage: 'none' }),
+        typesReadyWait: {
+            timeoutMs: 100,
+            pollIntervalMs: 10,
+            wait: async () => {
+                waits += 1;
+                source.cancel();
+                return false;
+            },
+        },
+    });
+    const result = await handlers.get('angelscript/queryAPI')?.({ query: 'Run' }, source.token);
+    assert.equal(result?.code, -32800);
+    assert.equal(waits, 1);
+    source.dispose();
+});
+
+test('API cancellation wins when readiness becomes true on the same resume', async () =>
+{
+    const handlers = new Map<string, (params: any, cancellationToken?: CancellationToken) => any>();
+    const connection = {
+        onRequest(name: string, handler: (params: any, cancellationToken?: CancellationToken) => any): void
+        {
+            handlers.set(name, handler);
+        },
+    };
+    let source = new CancellationTokenSource();
+    let ready = false;
+    let runs = 0;
+    registerApiRequestHandlers({
+        connection: connection as any,
+        isUnrealConnected: () => false,
+        getFullReadyStatus: () => ({ fullReady: ready, stage: ready ? 'ready' : 'parsing', coverage: ready ? 'full' : 'none' }),
+        typesReadyWait: {
+            timeoutMs: 100,
+            pollIntervalMs: 10,
+            wait: async () => {
+                ready = true;
+                source.cancel();
+                return false;
+            },
+        },
+    });
+    const result = await handlers.get('angelscript/queryAPI')?.({ query: 'Run' }, source.token);
+    if (result?.ok)
+        runs += 1;
+    assert.equal(result?.code, -32800);
+    assert.equal(runs, 0);
+    source.dispose();
+});
+
+test('API initial cancellation wins even when types are already ready', async () =>
+{
+    const handlers = new Map<string, (params: any, cancellationToken?: CancellationToken) => any>();
+    const connection = {
+        onRequest(name: string, handler: (params: any, cancellationToken?: CancellationToken) => any): void
+        {
+            handlers.set(name, handler);
+        },
+    };
+    let source = new CancellationTokenSource();
+    source.cancel();
+    registerApiRequestHandlers({
+        connection: connection as any,
+        isUnrealConnected: () => true,
+        getFullReadyStatus: () => ({ fullReady: true, stage: 'ready', coverage: 'full' }),
+    });
+    const result = await handlers.get('angelscript/queryAPI')?.({ query: 'Run' }, source.token);
+    assert.equal(result?.code, -32800);
+    source.dispose();
+});
+
+test('API hard deadline wins when readiness arrives after an event-loop overshoot', async () =>
+{
+    const handlers = new Map<string, (params: any, cancellationToken?: CancellationToken) => any>();
+    const connection = {
+        onRequest(name: string, handler: (params: any, cancellationToken?: CancellationToken) => any): void
+        {
+            handlers.set(name, handler);
+        },
+    };
+    let now = 0;
+    let ready = false;
+    registerApiRequestHandlers({
+        connection: connection as any,
+        isUnrealConnected: () => false,
+        getFullReadyStatus: () => ({ fullReady: ready, stage: ready ? 'ready' : 'parsing', coverage: ready ? 'full' : 'none' }),
+        typesReadyWait: {
+            timeoutMs: 20,
+            pollIntervalMs: 10,
+            now: () => now,
+            wait: async () => {
+                now = 25;
+                ready = true;
+                return true;
+            },
+        },
+    });
+    const result = await handlers.get('angelscript/queryAPI')?.({ query: 'Run' });
+    assert.equal(result?.code, -32002);
 });

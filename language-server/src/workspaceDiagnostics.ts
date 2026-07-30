@@ -1,11 +1,25 @@
 import {
+    CancellationToken,
     Connection,
     Diagnostic,
     DocumentDiagnosticReport,
+    LSPErrorCodes,
+    ResponseError,
     WorkspaceDiagnosticReport,
 } from 'vscode-languageserver/node';
 import type { LanguageServerDiagnosticsStatus } from './languageServerReadiness';
 import { createHash } from 'node:crypto';
+import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
+import { performance } from 'node:perf_hooks';
+
+const DIAGNOSTICS_NOT_READY_ERROR_CODE = -32002;
+
+export type WorkspaceDiagnosticsWaitOptions = {
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+    now?: () => number;
+    wait?: (delayMs: number, cancellationToken?: CancellationToken) => Promise<boolean>;
+};
 
 export type WorkspaceDiagnosticsRegistry = {
     update: (uri: string, diagnostics: readonly Diagnostic[]) => void;
@@ -51,28 +65,15 @@ export function createWorkspaceDiagnosticsRegistry() : WorkspaceDiagnosticsRegis
 export function registerWorkspaceDiagnostics(
     connection: Connection,
     registry: WorkspaceDiagnosticsRegistry,
-    getStatus: () => LanguageServerDiagnosticsStatus
+    getStatus: () => LanguageServerDiagnosticsStatus,
+    waitOptions: WorkspaceDiagnosticsWaitOptions = {},
 ) : void
 {
-    async function waitForSettledStatus() : Promise<LanguageServerDiagnosticsStatus>
-    {
-        while (true)
-        {
-            let status = getStatus();
-            if (status.semanticGeneration == status.settledSemanticGeneration
-                && status.stage != 'loading-cache'
-                && status.stage != 'parsing'
-                && status.stage != 'resolving')
-                return status;
-            await new Promise((resolve) => setTimeout(resolve, 10));
-        }
-    }
-
     let resultId = (contentHash: string, status: LanguageServerDiagnosticsStatus) =>
         `${status.generation}:${status.semanticGeneration}:${status.activeRevision ?? 'partial'}:${contentHash}`;
 
-    connection.languages.diagnostics.on(async (params) : Promise<DocumentDiagnosticReport> => {
-        let status = await waitForSettledStatus();
+    connection.languages.diagnostics.on(async (params, cancellationToken) : Promise<DocumentDiagnosticReport> => {
+        let status = await waitForSettledDiagnosticsStatus(getStatus, cancellationToken, waitOptions);
         let entry = registry.get(params.textDocument.uri);
         let currentResultId = resultId(entry?.contentHash ?? 'empty', status);
         if (params.previousResultId == currentResultId)
@@ -84,8 +85,8 @@ export function registerWorkspaceDiagnostics(
         };
     });
 
-    connection.languages.diagnostics.onWorkspace(async (params) : Promise<WorkspaceDiagnosticReport> => {
-        let status = await waitForSettledStatus();
+    connection.languages.diagnostics.onWorkspace(async (params, cancellationToken) : Promise<WorkspaceDiagnosticReport> => {
+        let status = await waitForSettledDiagnosticsStatus(getStatus, cancellationToken, waitOptions);
         let previousByUri = new Map((params.previousResultIds ?? []).map((previous) => [previous.uri, previous.value]));
         let items = registry.snapshot().map(({ uri, diagnostics, contentHash }) => {
             let currentResultId = resultId(contentHash, status);
@@ -107,5 +108,90 @@ export function registerWorkspaceDiagnostics(
             };
         });
         return { items };
+    });
+}
+
+export async function waitForSettledDiagnosticsStatus(
+    getStatus: () => LanguageServerDiagnosticsStatus,
+    cancellationToken?: CancellationToken,
+    options: WorkspaceDiagnosticsWaitOptions = {},
+) : Promise<LanguageServerDiagnosticsStatus>
+{
+    let timeoutMs = options.timeoutMs ?? LANGUAGE_SERVER_TIMEOUTS_MS.workspaceDiagnosticsSettle;
+    let pollIntervalMs = options.pollIntervalMs ?? LANGUAGE_SERVER_TIMEOUTS_MS.workspaceDiagnosticsPoll;
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 0)
+        throw new Error('Workspace diagnostics settle timeout must be a non-negative finite number.');
+    if (!Number.isFinite(pollIntervalMs) || pollIntervalMs <= 0)
+        throw new Error('Workspace diagnostics poll interval must be a positive finite number.');
+    let now = options.now ?? (() => performance.now());
+    let wait = options.wait ?? waitForDelayOrCancellation;
+    if (cancellationToken?.isCancellationRequested)
+    {
+        throw new ResponseError<void>(
+            LSPErrorCodes.RequestCancelled,
+            'Workspace diagnostics request was cancelled while waiting for a settled semantic generation.',
+        );
+    }
+    let status = getStatus();
+    if (status.semanticGeneration == status.settledSemanticGeneration
+        && status.stage != 'loading-cache'
+        && status.stage != 'parsing'
+        && status.stage != 'resolving')
+        return status;
+    let deadline = now() + timeoutMs;
+    while (true)
+    {
+        if (cancellationToken?.isCancellationRequested)
+        {
+            throw new ResponseError<void>(
+                LSPErrorCodes.RequestCancelled,
+                'Workspace diagnostics request was cancelled while waiting for a settled semantic generation.',
+            );
+        }
+        let remainingMs = deadline - now();
+        if (remainingMs <= 0)
+        {
+            throw new ResponseError<void>(
+                DIAGNOSTICS_NOT_READY_ERROR_CODE,
+                `NotReady: workspace diagnostics did not settle within ${timeoutMs}ms; stage=${status.stage}, generation=${status.semanticGeneration}, settledGeneration=${status.settledSemanticGeneration}.`,
+            );
+        }
+        status = getStatus();
+        if (status.semanticGeneration == status.settledSemanticGeneration
+            && status.stage != 'loading-cache'
+            && status.stage != 'parsing'
+            && status.stage != 'resolving')
+            return status;
+        if (!await wait(Math.min(pollIntervalMs, remainingMs), cancellationToken))
+        {
+            throw new ResponseError<void>(
+                LSPErrorCodes.RequestCancelled,
+                'Workspace diagnostics request was cancelled while waiting for a settled semantic generation.',
+            );
+        }
+    }
+}
+
+function waitForDelayOrCancellation(delayMs: number, cancellationToken?: CancellationToken) : Promise<boolean>
+{
+    if (cancellationToken?.isCancellationRequested)
+        return Promise.resolve(false);
+    return new Promise((resolve) => {
+        let settled = false;
+        let timer: NodeJS.Timeout | null = setTimeout(() => finish(true), delayMs);
+        let cancellation = cancellationToken?.onCancellationRequested(() => finish(false));
+        function finish(elapsed: boolean) : void
+        {
+            if (settled)
+                return;
+            settled = true;
+            if (timer)
+                clearTimeout(timer);
+            timer = null;
+            cancellation?.dispose();
+            resolve(elapsed);
+        }
+        if (cancellationToken?.isCancellationRequested)
+            finish(false);
     });
 }

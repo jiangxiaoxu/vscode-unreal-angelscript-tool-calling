@@ -5,6 +5,7 @@ import { createLanguageServerReadinessController, LanguageServerDiagnosticsStatu
 import { createUnrealCacheController, UnrealCacheLoadOutcome, UnrealCacheControllerOptions } from './unrealCacheController';
 import { createWorkspaceDiagnosticsRegistry, registerWorkspaceDiagnostics } from './workspaceDiagnostics';
 import { removeLegacyCacheAfterVerifiedPublish } from './legacyCacheCleanup';
+import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
 
 export type LanguageServerAutomationRuntimeOptions = Pick<UnrealCacheControllerOptions,
     'publishCache' | 'publisherRetryDelaysMs'>;
@@ -274,7 +275,7 @@ export function createLanguageServerAutomationRuntime(
         nativeDiagnosticsGeneration = generation;
     }
 
-    async function shutdown(timeoutMs = 2000) : Promise<boolean>
+    async function shutdown(timeoutMs: number = LANGUAGE_SERVER_TIMEOUTS_MS.shutdownPersistenceFlush) : Promise<boolean>
     {
         readiness.update({ stage: 'stopping', fullReady: false });
         return cache.shutdownPersistence(timeoutMs);
