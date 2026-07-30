@@ -11,6 +11,7 @@ Maintenance rule:
 ### English
 
 #### Changed
+- Bounded Language Server responsiveness with 2s Unreal reconnect and API-ready waits, 2s Windows owner queries, a 250ms verified DebugDatabase request delay, a 5s initial no-TypeDB classification, a 4s diagnostics settle deadline, and a 1s shutdown flush. API and diagnostics waits now honor cancellation, while Windows verification uses a fast socket-first query without weakening owner/project validation.
 - Replaced the prior roles with `vscode` and `project-daemon` while preserving stdio and IPC transports. Both roles maintain the Unreal connection and publish independent v2 caches at fixed VS Code and Saved paths.
 - VS Code now resolves one exact physical `.uproject` before enabling cache I/O. Windows TCP connections validate the same listener owner and project command line before and after connect.
 - Platforms without strict listener-owner verification now fail closed for live TCP refresh instead of accepting a blind port connection.
@@ -44,6 +45,7 @@ Maintenance rule:
 ### 中文
 
 #### 变更
+- Language Server responsiveness 现在受明确上限约束:Unreal reconnect 与 API-ready wait 为 2s,Windows owner query 为 2s,verified DebugDatabase request delay 为 250ms,initial no-TypeDB classification 为 5s,diagnostics settle deadline 为 4s,shutdown flush 为 1s. API 与 diagnostics wait 现在响应 cancellation;Windows verification 改用快速 socket-first query,不放宽 owner/project validation.
 - 旧 roles 已替换为 `vscode` 和 `project-daemon`,同时保留 stdio 与 IPC transports. 两种 role 都维持 Unreal connection,并在固定的 VS Code 与 Saved 路径发布独立 v2 cache.
 - VS Code 只有解析到唯一 exact physical `.uproject` 后才启用 cache I/O. Windows TCP connection 会在 connect 前后验证同一个 listener owner 与项目 command line.
 - 无 strict listener-owner verification 的平台现在会拒绝 live TCP refresh,不再接受未经验证的 port connection.
