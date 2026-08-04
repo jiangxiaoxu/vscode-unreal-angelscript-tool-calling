@@ -292,6 +292,7 @@ export function createLanguageServerAutomationRuntime(
         markResolving,
         markCurrentGenerationFullReady,
         updateDiagnostics,
+        snapshotDiagnostics: () => diagnostics.snapshot(),
         beginScriptSemanticRefresh,
         completeNativeRefresh,
         cancelNativeDiagnostics,

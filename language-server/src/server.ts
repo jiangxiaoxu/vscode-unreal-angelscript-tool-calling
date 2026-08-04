@@ -27,6 +27,7 @@ import { TextDocument, TextDocumentContentChangeEvent } from 'vscode-languageser
 
 import { Socket } from 'net';
 import { URI } from 'vscode-uri'
+import { randomUUID } from 'node:crypto';
 
 import * as scriptfiles from './as_parser';
 import * as parsedcompletion from './parsed_completion';
@@ -54,6 +55,13 @@ import { createConnectionAttemptFence } from './connectionAttemptFence';
 import { createPerSocketRequestScheduler } from './perSocketRequestScheduler';
 import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
 import { createUnrealReconnectScheduler } from './unrealReconnectScheduler';
+import {
+    createProjectDaemonScriptSnapshotProtocol,
+    ScriptSnapshotChange,
+    ValidatedScriptSnapshotContent,
+} from './scriptSnapshotProtocol';
+import { ScriptSnapshotIdentity } from './scriptSnapshotSequence';
+import { createScriptSnapshotFileManifestValidator } from './scriptSnapshotFileManifest';
 import glob from 'glob';
 
 const ExtensionVersion = String(require('../../package.json').version);
@@ -110,6 +118,18 @@ let LanguageServerOptions : ResolvedAngelScriptLanguageServerOptions | null = nu
 const automationRuntime = createLanguageServerAutomationRuntime(connection, ExtensionVersion);
 const unrealCacheController = automationRuntime.cache;
 const readinessController = automationRuntime.readiness;
+const ProjectDaemonServerInstanceId = randomUUID();
+const scriptSnapshotFileManifestValidator = createScriptSnapshotFileManifestValidator();
+const projectDaemonScriptSnapshotProtocol = createProjectDaemonScriptSnapshotProtocol({
+    connection,
+    serverInstanceId: ProjectDaemonServerInstanceId,
+    isEnabled: () => LanguageServerOptions?.role == 'project-daemon',
+    getReadiness: () => readinessController.snapshot(),
+    validateSnapshotUri: (uri) => IsScriptUri(uri),
+    validateSnapshotContent: (...args) => scriptSnapshotFileManifestValidator.validate(...args),
+    applyAcceptedSnapshot: ApplyAcceptedScriptSnapshot,
+    getDiagnostics: () => automationRuntime.snapshotDiagnostics(),
+});
 const reResolveWork = createActiveWorkTracker(TrySettleSemanticGeneration);
 const unrealReconnectScheduler = createUnrealReconnectScheduler(
     () => void connect_unreal(),
@@ -329,6 +349,7 @@ async function connect_unreal() : Promise<void>
             else if(msg.type == MessageType.DebugDatabaseSettings)
             {
                 automationRuntime.beginLiveRefresh();
+                projectDaemonScriptSnapshotProtocol.markSemanticUnsettled();
                 PendingNativeDiagnosticsGeneration = null;
                 ActiveNativeDiagnosticsCancel?.();
                 let version = msg.readInt();
@@ -564,11 +585,17 @@ connection.onInitialize((_params): InitializeResult => {
     connection.console.log("Resolved script roots: " + scriptRoots);
 
     let scriptIgnorePatterns = ResolveInitialScriptIgnorePatterns(_params.initializationOptions);
+    scriptSnapshotFileManifestValidator.configure({
+        scriptRoots: ScriptRootPaths,
+        ignorePatterns: scriptIgnorePatterns,
+        isManagedScriptUri: IsScriptUri,
+    });
     connection.console.log("Initial script ignore patterns: " + scriptIgnorePatterns);
 
     CacheRootPath = LanguageServerOptions.canonicalProjectRoot;
     let cacheOutcome = automationRuntime.configure(LanguageServerOptions);
     automationRuntime.beginScriptSemanticRefresh();
+    projectDaemonScriptSnapshotProtocol.markSemanticUnsettled();
 
     //connection.console.log("RootPath: "+RootPath);
     //connection.console.log("RootUri: "+RootUri+" from "+_params.rootUri);
@@ -946,6 +973,7 @@ function BeginModuleSemanticRefresh(module : scriptfiles.ASModule) : void
 {
     PendingSemanticModules.add(module);
     automationRuntime.beginScriptSemanticRefresh();
+    projectDaemonScriptSnapshotProtocol.markSemanticUnsettled();
 }
 
 function FinishModuleSemanticRefresh(module : scriptfiles.ASModule) : void
@@ -965,6 +993,8 @@ function TrySettleSemanticGeneration() : void
     if (CanResolveModules() && scriptfiles.GetAllLoadedModules().every((module) => module.resolved))
     {
         automationRuntime.markCurrentGenerationFullReady();
+        if (readinessController.snapshot().fullReady)
+            projectDaemonScriptSnapshotProtocol.markSemanticSettled();
     }
     else if (readinessController.snapshot().stage == 'partial')
     {
@@ -1444,6 +1474,47 @@ function getModuleName(uri : string) : string
     return modulename;
 }
 
+function ApplyAcceptedScriptSnapshot(
+    changes: readonly ScriptSnapshotChange[],
+    _identity: ScriptSnapshotIdentity,
+    content: ValidatedScriptSnapshotContent | undefined,
+) : void
+{
+    if (!LanguageServerOptions || LanguageServerOptions.role != 'project-daemon')
+        throw new Error('Project-daemon script snapshot was accepted before project-daemon initialization.');
+
+    projectDaemonScriptSnapshotProtocol.markSemanticUnsettled();
+    automationRuntime.beginScriptSemanticRefresh();
+    for (let change of changes)
+    {
+        let filePath = URI.parse(change.uri).fsPath;
+        let module = scriptfiles.GetOrCreateModule(getModuleName(change.uri), filePath, change.uri);
+        if (change.kind == 'deleted')
+        {
+            scriptfiles.UpdateModuleFromContent(module, '');
+            module.exists = false;
+        }
+        else
+        {
+            let bytes = content?.get(change.uri);
+            if (!bytes)
+                throw new Error(`Accepted script snapshot content is unavailable for ${change.uri}.`);
+            let source = Buffer.from(bytes).toString('utf8');
+            if (source.charCodeAt(0) == 0xfeff)
+                source = source.substring(1);
+            scriptfiles.UpdateModuleFromContent(module, source);
+        }
+        scriptfiles.ParseModule(module);
+        if (CanResolveModules() && ParseQueue.length == 0 && LoadQueue.length == 0)
+        {
+            scriptfiles.PostProcessModuleTypes(module);
+            scriptfiles.ResolveModule(module);
+            scriptdiagnostics.UpdateScriptModuleDiagnostics(module, false, change.kind != 'changed');
+        }
+    }
+    TrySettleSemanticGeneration();
+}
+
 registerApiRequestHandlers({
     connection,
     isUnrealConnected: () => UnrealConnected,
@@ -1710,6 +1781,7 @@ function stopLanguageServerResources() : Promise<boolean>
     if (LanguageServerShutdownPromise)
         return LanguageServerShutdownPromise;
     LanguageServerStopping = true;
+    projectDaemonScriptSnapshotProtocol.shutdown();
     connectAttemptFence.cancel();
     PendingNativeDiagnosticsGeneration = null;
     ActiveNativeDiagnosticsCancel?.();

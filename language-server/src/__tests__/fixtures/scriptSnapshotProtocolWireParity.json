@@ -1,0 +1,22 @@
+{
+  "description": "Canonical payload excludes protocolVersion and payloadHash. Both fields are transport metadata, not fingerprint input.",
+  "params": {
+    "protocolVersion": 1,
+    "mode": "full",
+    "scriptSequence": 41,
+    "scriptRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "payloadHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "manifest": [
+      {
+        "uri": "file:///G:/SnapshotFixture/Script/Z.as",
+        "hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      {
+        "uri": "file:///G:/SnapshotFixture/Script/A.as",
+        "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ]
+  },
+  "canonical": "{\"mode\":\"full\",\"scriptSequence\":41,\"scriptRevision\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"manifest\":[{\"uri\":\"file:///g%3A/SnapshotFixture/Script/A.as\",\"hash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},{\"uri\":\"file:///g%3A/SnapshotFixture/Script/Z.as\",\"hash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}]}",
+  "payloadHash": "59e31e194fbda6151db8cbec83e0e6df06f20b9992d52505b11f93d20e450215"
+}

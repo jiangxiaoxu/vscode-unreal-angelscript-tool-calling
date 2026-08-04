@@ -1,7 +1,6 @@
 import { CancellationToken, Connection, LSPErrorCodes, ResponseError } from 'vscode-languageserver/node';
 import * as typedb from './database';
-import * as api_docs from './api_docs';
-import * as api_search from './api_search';
+import { executeApiReadOperation } from './apiReadExecutor';
 import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
 import { performance } from 'node:perf_hooks';
 
@@ -99,24 +98,18 @@ function waitForDelayOrCancellation(delayMs: number, cancellationToken?: Cancell
     });
 }
 
-function runApiCoreRequest<T>(run: () => T) : T | ResponseError<void>
-{
-    try
-    {
-        return run();
-    }
-    catch (error)
-    {
-        if (error instanceof api_search.ApiSearchValidationError
-            || (error instanceof Error && error.name == 'ApiSearchValidationError'))
-            return new ResponseError<void>(0, error.message);
-        throw error;
-    }
-}
-
 export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
 {
     const { connection, isUnrealConnected } = deps;
+    const runLegacyRead = (operation: Parameters<typeof executeApiReadOperation>[0], params: unknown) => {
+        try { return executeApiReadOperation(operation, params); }
+        catch (error)
+        {
+            if (error instanceof ResponseError)
+                return error;
+            throw error;
+        }
+    };
     const runReady = <T>(run: () => T, cancellationToken?: CancellationToken) => runWhenTypesReady(run, {
         ...deps.typesReadyWait,
         cancellationToken,
@@ -142,50 +135,35 @@ export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
     });
 
     connection.onRequest("angelscript/getAPI", (root : string, cancellationToken) : any => {
-        return runReady(() => api_docs.GetAPIList(root), cancellationToken);
+        return runReady(() => runLegacyRead('angelscript/getAPI', root), cancellationToken);
     });
 
     connection.onRequest("angelscript/getAPISearch", (payload : any, cancellationToken) : any => {
-        let runSearch = function()
-        {
-            try
-            {
-                return api_search.GetAPISearch(payload);
-            }
-            catch (error)
-            {
-                if (error instanceof api_search.ApiSearchValidationError)
-                    return new ResponseError<void>(0, error.message);
-                throw error;
-            }
-        };
-
-        return runReady(runSearch, cancellationToken);
+        return runReady(() => runLegacyRead('angelscript/getAPISearch', payload), cancellationToken);
     });
 
     connection.onRequest("angelscript/getAPIDetails", (root : any, cancellationToken) : any => {
-        return runReady(() => api_docs.GetAPIDetails(root), cancellationToken);
+        return runReady(() => runLegacyRead('angelscript/getAPIDetails', root), cancellationToken);
     });
 
     connection.onRequest("angelscript/getAPIDetailsBatch", (roots : any, cancellationToken) : any => {
-        let dataList = Array.isArray(roots) ? roots : [];
-        return runReady(() => api_docs.GetAPIDetailsBatch(dataList), cancellationToken);
+        return runReady(() => runLegacyRead('angelscript/getAPIDetailsBatch', roots), cancellationToken);
     });
 
-    connection.onRequest("angelscript/queryAPI", (params : api_search.GetAPIQueryParams, cancellationToken) : any => {
-        return runReady(() => runApiCoreRequest(() => api_search.GetAPIQuery(params)), cancellationToken);
+    connection.onRequest("angelscript/queryAPI", (params : unknown, cancellationToken) : any => {
+        return runReady(() => runLegacyRead('angelscript/queryAPI', params), cancellationToken);
     });
 
-    connection.onRequest("angelscript/readAPISymbol", (params : api_search.GetAPIExactSymbolsParams, cancellationToken) : any => {
-        return runReady(() => runApiCoreRequest(() => api_search.GetAPIExactSymbols(params)), cancellationToken);
+    connection.onRequest("angelscript/readAPISymbol", (params : unknown, cancellationToken) : any => {
+        return runReady(() => runLegacyRead('angelscript/readAPISymbol', params), cancellationToken);
     });
 
-    connection.onRequest("angelscript/getAPISymbolMembers", (params : api_docs.GetAPISymbolMembersParams, cancellationToken) : any => {
-        return runReady(() => runApiCoreRequest(() => api_docs.GetAPISymbolMembers(params)), cancellationToken);
+    connection.onRequest("angelscript/getAPISymbolMembers", (params : unknown, cancellationToken) : any => {
+        return runReady(() => runLegacyRead('angelscript/getAPISymbolMembers', params), cancellationToken);
     });
 
-    connection.onRequest("angelscript/getAPIClassHierarchy", (params : api_docs.GetAPIClassHierarchyParams, cancellationToken) : any => {
-        return runReady(() => runApiCoreRequest(() => api_docs.GetAPIClassHierarchy(params)), cancellationToken);
+    connection.onRequest("angelscript/getAPIClassHierarchy", (params : unknown, cancellationToken) : any => {
+        return runReady(() => runLegacyRead('angelscript/getAPIClassHierarchy', params), cancellationToken);
     });
 
 }

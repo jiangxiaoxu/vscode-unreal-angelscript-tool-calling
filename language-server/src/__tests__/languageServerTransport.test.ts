@@ -5,8 +5,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { ChildProcess, fork, spawn } from 'node:child_process';
 import * as net from 'node:net';
+import { createHash } from 'node:crypto';
 import { loadDebugDatabaseCacheV2, saveDebugDatabaseCacheV2 } from '../debugDatabaseCacheV2';
 import { DEFAULT_LANGUAGE_SERVER_BUDGETS } from '../languageServerContract';
+import { computeScriptSnapshotPayloadHash } from '../scriptSnapshotProtocol';
 
 type JsonRpcMessage = {
     jsonrpc: '2.0';
@@ -483,6 +485,69 @@ test('project daemon child exits when its initialize.processId parent dies', asy
             try { process.kill(childPid); } catch {}
         }
         fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('project-daemon transport accepts only canonical full snapshots and rejects full-manifest drift', async () => {
+    let root = createProject();
+    let client = createClient('stdio');
+    try
+    {
+        let initialized = await client.request('initialize', {
+            processId: process.pid,
+            rootUri: `file:///${root.replace(/\\/g, '/')}`,
+            capabilities: {},
+            initializationOptions: {
+                role: 'project-daemon',
+                canonicalProjectRoot: root,
+                uprojectPath: path.join(root, 'Transport.uproject'),
+                projectIdentity: projectIdentity(root),
+                unreal: { debuggerPort: 27099 },
+            },
+        });
+        assert.equal(initialized.error, undefined);
+        client.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
+
+        let scriptPath = path.join(root, 'Script', 'TransportFixture.as');
+        let scriptUri = `file:///${scriptPath.replace(/\\/g, '/')}`;
+        let manifest = [{
+            uri: scriptUri,
+            hash: createHash('sha256').update(fs.readFileSync(scriptPath)).digest('hex'),
+        }];
+        let firstPayload = {
+            protocolVersion: 1,
+            mode: 'full' as const,
+            scriptSequence: 1,
+            scriptRevision: 'a'.repeat(64),
+            payloadHash: '0'.repeat(64),
+            manifest,
+        };
+        firstPayload.payloadHash = computeScriptSnapshotPayloadHash(firstPayload);
+        let accepted = await client.request('angelscript/synchronizeScriptSnapshot', firstPayload);
+        assert.deepEqual(accepted.error, undefined);
+        assert.deepEqual(accepted.result, {
+            accepted: true,
+            serverInstanceId: (accepted.result as any).serverInstanceId,
+            scriptSequence: 1,
+            scriptRevision: 'a'.repeat(64),
+        });
+
+        let driftPayload = {
+            protocolVersion: 1,
+            mode: 'full' as const,
+            scriptSequence: 2,
+            scriptRevision: 'b'.repeat(64),
+            payloadHash: '0'.repeat(64),
+            manifest: [] as Array<{ uri: string; hash: string }>,
+        };
+        driftPayload.payloadHash = computeScriptSnapshotPayloadHash(driftPayload);
+        let drift = await client.request('angelscript/synchronizeScriptSnapshot', driftPayload);
+        assert.ok((drift.error as { message?: string } | undefined)?.message?.includes('omitted managed script'), JSON.stringify(drift));
+    }
+    finally
+    {
+        await client.close();
+        await removeDirectoryEventually(root);
     }
 });
 
