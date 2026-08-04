@@ -510,10 +510,19 @@ test('project-daemon transport accepts only canonical full snapshots and rejects
 
         let scriptPath = path.join(root, 'Script', 'TransportFixture.as');
         let scriptUri = `file:///${scriptPath.replace(/\\/g, '/')}`;
-        let manifest = [{
-            uri: scriptUri,
-            hash: createHash('sha256').update(fs.readFileSync(scriptPath)).digest('hex'),
-        }];
+        let uppercaseScriptPath = path.join(root, 'Script', 'UppercaseExtension.AS');
+        fs.writeFileSync(uppercaseScriptPath, 'class uppercase_extension_fixture {}\n');
+        let uppercaseScriptUri = `file:///${uppercaseScriptPath.replace(/\\/g, '/')}`;
+        let manifest = [
+            {
+                uri: scriptUri,
+                hash: createHash('sha256').update(fs.readFileSync(scriptPath)).digest('hex'),
+            },
+            {
+                uri: uppercaseScriptUri,
+                hash: createHash('sha256').update(fs.readFileSync(uppercaseScriptPath)).digest('hex'),
+            },
+        ];
         let firstPayload = {
             protocolVersion: 1,
             mode: 'full' as const,

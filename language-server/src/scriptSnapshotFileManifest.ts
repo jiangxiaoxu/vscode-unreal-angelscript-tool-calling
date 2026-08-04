@@ -91,7 +91,7 @@ export function createScriptSnapshotFileManifestValidator() : ScriptSnapshotFile
                 let actualUris = new Set<string>();
                 for (let scriptRoot of current.scriptRoots)
                 {
-                    for (let filePath of glob.sync(path.join(scriptRoot, '**', '*.as'), { ignore: current.ignorePatterns }))
+                    for (let filePath of glob.sync(path.join(scriptRoot, '**', '*.[aA][sS]'), { ignore: current.ignorePatterns }))
                         actualUris.add(URI.file(path.resolve(filePath)).toString());
                 }
                 for (let uri of actualUris)
@@ -109,4 +109,3 @@ export function createScriptSnapshotFileManifestValidator() : ScriptSnapshotFile
         },
     };
 }
-
