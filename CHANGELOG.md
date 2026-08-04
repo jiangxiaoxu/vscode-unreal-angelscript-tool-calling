@@ -11,6 +11,7 @@ Maintenance rule:
 ### English
 
 #### Changed
+- Full project-daemon snapshot validation now recognizes `.as` extensions case-insensitively on Windows, so manifests containing files such as `Uppercase.AS` are accepted when their raw-byte hashes match.
 - Added a project-daemon-only sequence-aware script snapshot protocol with verified raw-byte manifests, cancellable semantic waiters, and provenance-bearing API and diagnostics reads. Concurrent daemon clients now wait for the minimum admitted script sequence without polling readiness or invalidating coherent in-flight snapshots when later edits arrive.
 - Bounded Language Server responsiveness with 2s Unreal reconnect and API-ready waits, 2s Windows owner queries, a 250ms verified DebugDatabase request delay, a 5s initial no-TypeDB classification, a 4s diagnostics settle deadline, and a 1s shutdown flush. API and diagnostics waits now honor cancellation, while Windows verification uses a fast socket-first query without weakening owner/project validation.
 - Replaced the prior roles with `vscode` and `project-daemon` while preserving stdio and IPC transports. Both roles maintain the Unreal connection and publish independent v2 caches at fixed VS Code and Saved paths.
@@ -46,6 +47,7 @@ Maintenance rule:
 ### 中文
 
 #### 变更
+- Windows 上的 full project-daemon snapshot validation 现在以大小写无关方式识别 `.as` 扩展名. 当 raw-byte hash 匹配时,包含 `Uppercase.AS` 等文件的 manifest 会被接受.
 - 新增仅供 project-daemon 使用的 sequence-aware script snapshot protocol,包含 raw-byte manifest 校验、可取消的 semantic waiter,以及携带 provenance 的 API 与 diagnostics read. 并发 daemon client 现在会等待 admission 时要求的最小 script sequence,不再轮询 readiness;后续编辑也不会使已在执行的一致 snapshot 失效.
 - Language Server responsiveness 现在受明确上限约束:Unreal reconnect 与 API-ready wait 为 2s,Windows owner query 为 2s,verified DebugDatabase request delay 为 250ms,initial no-TypeDB classification 为 5s,diagnostics settle deadline 为 4s,shutdown flush 为 1s. API 与 diagnostics wait 现在响应 cancellation;Windows verification 改用快速 socket-first query,不放宽 owner/project validation.
 - 旧 roles 已替换为 `vscode` 和 `project-daemon`,同时保留 stdio 与 IPC transports. 两种 role 都维持 Unreal connection,并在固定的 VS Code 与 Saved 路径发布独立 v2 cache.
