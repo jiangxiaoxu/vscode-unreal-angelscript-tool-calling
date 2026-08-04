@@ -1,4 +1,10 @@
-import { CancellationToken, Connection, LSPErrorCodes, ResponseError } from 'vscode-languageserver/node';
+import {
+    CancellationToken,
+    Connection,
+    LSPErrorCodes,
+    ResponseError,
+    WorkspaceDiagnosticReport,
+} from 'vscode-languageserver/node';
 import { URI } from 'vscode-uri';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -72,7 +78,7 @@ export type QueryAtScriptSequenceResult = ScriptSnapshotProvenance & {
 };
 
 export type QueryDiagnosticsAtScriptSequenceResult = ScriptSnapshotProvenance & {
-    result: unknown;
+    result: WorkspaceDiagnosticReport;
 };
 
 export type ValidatedScriptSnapshotContent = ReadonlyMap<string, Uint8Array>;
@@ -94,7 +100,7 @@ export type ProjectDaemonScriptSnapshotProtocolDeps = {
         identity: ScriptSnapshotIdentity,
         content: ValidatedScriptSnapshotContent | undefined,
     ) => void;
-    getDiagnostics: () => unknown;
+    getDiagnostics: () => WorkspaceDiagnosticReport;
 };
 
 export type ProjectDaemonScriptSnapshotProtocol = {

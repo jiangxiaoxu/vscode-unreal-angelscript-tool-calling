@@ -128,7 +128,7 @@ const projectDaemonScriptSnapshotProtocol = createProjectDaemonScriptSnapshotPro
     validateSnapshotUri: (uri) => IsScriptUri(uri),
     validateSnapshotContent: (...args) => scriptSnapshotFileManifestValidator.validate(...args),
     applyAcceptedSnapshot: ApplyAcceptedScriptSnapshot,
-    getDiagnostics: () => automationRuntime.snapshotDiagnostics(),
+    getDiagnostics: () => automationRuntime.getWorkspaceDiagnosticsReport(),
 });
 const reResolveWork = createActiveWorkTracker(TrySettleSemanticGeneration);
 const unrealReconnectScheduler = createUnrealReconnectScheduler(

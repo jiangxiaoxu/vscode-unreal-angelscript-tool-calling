@@ -2,7 +2,7 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import test = require('node:test');
-import { CancellationTokenSource } from 'vscode-languageserver/node';
+import { CancellationTokenSource, WorkspaceDiagnosticReport } from 'vscode-languageserver/node';
 import {
     createProjectDaemonScriptSnapshotProtocol,
     canonicalizeScriptSnapshotPayload,
@@ -31,7 +31,7 @@ function createProtocol(options: {
     enabled?: boolean;
     semanticGeneration?: number;
     fullReady?: boolean;
-    getDiagnostics?: () => unknown;
+    getDiagnostics?: () => WorkspaceDiagnosticReport;
     validateSnapshotContent?: (
         mode: 'full' | 'diff',
         manifest: readonly { uri: string; hash: string }[],
@@ -74,7 +74,15 @@ function createProtocol(options: {
             sequence: identity.scriptSequence,
             content,
         }),
-        getDiagnostics: options.getDiagnostics ?? (() => [{ uri: SCRIPT_A_URI, diagnostics: [] }]),
+        getDiagnostics: options.getDiagnostics ?? (() => ({
+            items: [{
+                kind: 'full' as const,
+                uri: SCRIPT_A_URI,
+                version: null,
+                resultId: '3:7:native-revision:diagnostics',
+                items: [],
+            }],
+        })),
     });
     return {
         protocol,
@@ -281,7 +289,15 @@ test('query provenance is served at the settled causal snapshot and diagnostics 
         minimumScriptSequence: 1,
     });
     assert.equal(diagnostics.scriptSequence, 1);
-    assert.deepEqual(diagnostics.result, [{ uri: SCRIPT_A_URI, diagnostics: [] }]);
+    assert.deepEqual(diagnostics.result, {
+        items: [{
+            kind: 'full',
+            uri: SCRIPT_A_URI,
+            version: null,
+            resultId: '3:7:native-revision:diagnostics',
+            items: [],
+        }],
+    });
     assert.equal('value' in diagnostics, false);
     await assert.rejects(
         fixture.protocol.query({ ...query(1), expectedServerInstanceId: 'replaced-instance' }),
@@ -298,7 +314,7 @@ test('sequence-aware diagnostics retries once when the semantic generation chang
             calls += 1;
             if (calls == 1)
                 fixture.setSemanticGeneration(8);
-            return [];
+            return { items: [] };
         },
     });
     fixture.protocol.synchronize(full());

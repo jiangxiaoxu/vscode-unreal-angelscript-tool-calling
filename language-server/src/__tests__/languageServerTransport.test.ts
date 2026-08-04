@@ -653,6 +653,69 @@ test('VS Code and project daemon reconnect to a new Editor PID and publish isola
             client.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
         }));
         let firstRevisions = await waitForType('UFirstEditorGeneration');
+        let projectDaemonClient = clients[1];
+        let projectDaemonStatus: {
+            fullReady: boolean;
+            semanticGeneration: number;
+            settledSemanticGeneration: number;
+        } | undefined;
+        for (let attempt = 0; attempt < 100; ++attempt)
+        {
+            let status = await projectDaemonClient.request('angelscript/diagnosticsStatus');
+            projectDaemonStatus = status.result as typeof projectDaemonStatus;
+            if (projectDaemonStatus?.fullReady
+                && projectDaemonStatus.semanticGeneration == projectDaemonStatus.settledSemanticGeneration)
+                break;
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(projectDaemonStatus?.fullReady, true);
+        assert.equal(projectDaemonStatus?.semanticGeneration, projectDaemonStatus?.settledSemanticGeneration);
+
+        let scriptPath = path.join(root, 'Script', 'TransportFixture.as');
+        let scriptUri = `file:///${scriptPath.replace(/\\/g, '/')}`;
+        let snapshotPayload = {
+            protocolVersion: 1,
+            mode: 'full' as const,
+            scriptSequence: 1,
+            scriptRevision: 'd'.repeat(64),
+            payloadHash: '0'.repeat(64),
+            manifest: [{
+                uri: scriptUri,
+                hash: createHash('sha256').update(fs.readFileSync(scriptPath)).digest('hex'),
+            }],
+        };
+        snapshotPayload.payloadHash = computeScriptSnapshotPayloadHash(snapshotPayload);
+        let snapshot = await projectDaemonClient.request('angelscript/synchronizeScriptSnapshot', snapshotPayload);
+        let snapshotResult = snapshot.result as {
+            accepted: boolean;
+            serverInstanceId: string;
+            scriptSequence: number;
+        };
+        assert.equal(snapshot.error, undefined);
+        assert.equal(snapshotResult.accepted, true);
+        assert.equal(snapshotResult.scriptSequence, 1);
+
+        let sequencedDiagnostics = await projectDaemonClient.request('angelscript/queryDiagnosticsAtScriptSequence', {
+            protocolVersion: 1,
+            expectedServerInstanceId: snapshotResult.serverInstanceId,
+            minimumScriptSequence: 1,
+        });
+        assert.equal(sequencedDiagnostics.error, undefined);
+        let diagnosticsReport = (sequencedDiagnostics.result as { result: {
+            items: Array<{
+                kind: string;
+                uri: string;
+                version: number | null;
+                resultId: string;
+                items: unknown[];
+            }>;
+        } }).result;
+        let fullItem = diagnosticsReport.items.find((item) => item.uri.endsWith('/TransportFixture.as'));
+        assert.ok(fullItem);
+        assert.equal(fullItem?.kind, 'full');
+        assert.equal(fullItem?.version, null);
+        assert.equal(typeof fullItem?.resultId, 'string');
+        assert.ok(Array.isArray(fullItem?.items));
         await waitForSuccessfulChildExit(firstFake);
 
         let secondFake = await startFake('USecondEditorGeneration');

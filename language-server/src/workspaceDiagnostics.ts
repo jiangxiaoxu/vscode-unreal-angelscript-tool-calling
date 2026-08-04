@@ -28,6 +28,43 @@ export type WorkspaceDiagnosticsRegistry = {
     snapshot: () => Array<{ uri: string; diagnostics: Diagnostic[]; contentHash: string }>;
 };
 
+export function workspaceDiagnosticResultId(
+    contentHash: string,
+    status: LanguageServerDiagnosticsStatus,
+) : string
+{
+    return `${status.generation}:${status.semanticGeneration}:${status.activeRevision ?? 'partial'}:${contentHash}`;
+}
+
+export function buildWorkspaceDiagnosticReport(
+    registry: WorkspaceDiagnosticsRegistry,
+    status: LanguageServerDiagnosticsStatus,
+    previousResultIds: readonly { uri: string; value: string }[] = [],
+) : WorkspaceDiagnosticReport
+{
+    let previousByUri = new Map(previousResultIds.map((previous) => [previous.uri, previous.value]));
+    let items = registry.snapshot().map(({ uri, diagnostics, contentHash }) => {
+        let currentResultId = workspaceDiagnosticResultId(contentHash, status);
+        if (previousByUri.get(uri) == currentResultId)
+        {
+            return {
+                kind: 'unchanged' as const,
+                uri,
+                version: null as number | null,
+                resultId: currentResultId,
+            };
+        }
+        return {
+            kind: 'full' as const,
+            uri,
+            version: null as number | null,
+            items: diagnostics,
+            resultId: currentResultId,
+        };
+    });
+    return { items };
+}
+
 export function createWorkspaceDiagnosticsRegistry() : WorkspaceDiagnosticsRegistry
 {
     let diagnosticsByUri = new Map<string, { diagnostics: Diagnostic[]; contentHash: string }>();
@@ -69,13 +106,10 @@ export function registerWorkspaceDiagnostics(
     waitOptions: WorkspaceDiagnosticsWaitOptions = {},
 ) : void
 {
-    let resultId = (contentHash: string, status: LanguageServerDiagnosticsStatus) =>
-        `${status.generation}:${status.semanticGeneration}:${status.activeRevision ?? 'partial'}:${contentHash}`;
-
     connection.languages.diagnostics.on(async (params, cancellationToken) : Promise<DocumentDiagnosticReport> => {
         let status = await waitForSettledDiagnosticsStatus(getStatus, cancellationToken, waitOptions);
         let entry = registry.get(params.textDocument.uri);
-        let currentResultId = resultId(entry?.contentHash ?? 'empty', status);
+        let currentResultId = workspaceDiagnosticResultId(entry?.contentHash ?? 'empty', status);
         if (params.previousResultId == currentResultId)
             return { kind: 'unchanged', resultId: currentResultId };
         return {
@@ -87,27 +121,7 @@ export function registerWorkspaceDiagnostics(
 
     connection.languages.diagnostics.onWorkspace(async (params, cancellationToken) : Promise<WorkspaceDiagnosticReport> => {
         let status = await waitForSettledDiagnosticsStatus(getStatus, cancellationToken, waitOptions);
-        let previousByUri = new Map((params.previousResultIds ?? []).map((previous) => [previous.uri, previous.value]));
-        let items = registry.snapshot().map(({ uri, diagnostics, contentHash }) => {
-            let currentResultId = resultId(contentHash, status);
-            if (previousByUri.get(uri) == currentResultId)
-            {
-                return {
-                    kind: 'unchanged' as const,
-                    uri,
-                    version: null as number | null,
-                    resultId: currentResultId,
-                };
-            }
-            return {
-                kind: 'full' as const,
-                uri,
-                version: null as number | null,
-                items: diagnostics,
-                resultId: currentResultId,
-            };
-        });
-        return { items };
+        return buildWorkspaceDiagnosticReport(registry, status, params.previousResultIds ?? []);
     });
 }
 

@@ -3,7 +3,11 @@ import { Connection, Diagnostic } from 'vscode-languageserver/node';
 import { ResolvedAngelScriptLanguageServerOptions } from './languageServerContract';
 import { createLanguageServerReadinessController, LanguageServerDiagnosticsStatus } from './languageServerReadiness';
 import { createUnrealCacheController, UnrealCacheLoadOutcome, UnrealCacheControllerOptions } from './unrealCacheController';
-import { createWorkspaceDiagnosticsRegistry, registerWorkspaceDiagnostics } from './workspaceDiagnostics';
+import {
+    buildWorkspaceDiagnosticReport,
+    createWorkspaceDiagnosticsRegistry,
+    registerWorkspaceDiagnostics,
+} from './workspaceDiagnostics';
 import { removeLegacyCacheAfterVerifiedPublish } from './legacyCacheCleanup';
 import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
 
@@ -292,7 +296,7 @@ export function createLanguageServerAutomationRuntime(
         markResolving,
         markCurrentGenerationFullReady,
         updateDiagnostics,
-        snapshotDiagnostics: () => diagnostics.snapshot(),
+        getWorkspaceDiagnosticsReport: () => buildWorkspaceDiagnosticReport(diagnostics, readiness.snapshot()),
         beginScriptSemanticRefresh,
         completeNativeRefresh,
         cancelNativeDiagnostics,
