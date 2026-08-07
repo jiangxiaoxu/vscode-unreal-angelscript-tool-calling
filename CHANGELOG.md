@@ -10,6 +10,9 @@ Maintenance rule:
 
 ### English
 
+#### Fixed
+- API query and member responses now classify only `DBMethod.isProperty` accessors as `property`, preserve ordinary non-callable methods/functions with their original kind, and expose accessor projections with `isAccessor: true`.
+
 #### Changed
 - Sequence-aware project-daemon diagnostics now return the standard `WorkspaceDiagnosticReport` shape, including per-document `kind`, `uri`, `version`, `resultId`, and diagnostic `items`, instead of exposing the internal registry snapshot.
 - Full project-daemon snapshot validation now recognizes `.as` extensions case-insensitively on Windows, so manifests containing files such as `Uppercase.AS` are accepted when their raw-byte hashes match.
@@ -46,6 +49,9 @@ Maintenance rule:
 - `GetAPISearch` now auto-expands inherited methods/properties when `includeInheritedFromScope` is omitted for a resolved class scope.
 
 ### 中文
+
+#### 修复
+- API query 和 member response 现在只将 `DBMethod.isProperty` accessor 分类为 `property`,普通不可调用 method/function 保持原始 kind,并通过 `isAccessor: true` 公开 accessor projection.
 
 #### 变更
 - Sequence-aware project-daemon diagnostics 现在返回标准 `WorkspaceDiagnosticReport` 结构,包含每个文档的 `kind`、`uri`、`version`、`resultId` 和 diagnostics `items`,不再暴露内部 registry snapshot.

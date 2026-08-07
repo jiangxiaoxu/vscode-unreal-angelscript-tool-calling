@@ -823,7 +823,7 @@ function collectTypeMemberRecords(
                 let accessor = getPropertyAccessorInfo(symbol);
                 let accessorKind = accessor.accessorKind ?? null;
                 let propertyName = accessor.propertyName ?? null;
-                let isAccessor = accessor.isAccessor;
+                let isAccessor = symbol.isProperty === true;
 
                 let signature = buildMethodSignature(symbol, declaredInName, isAccessor, accessorKind, propertyName);
                 let description = "";
@@ -838,7 +838,7 @@ function collectTypeMemberRecords(
                 seenMembers.add(key);
 
                 members.push({
-                    kind: "method",
+                    kind: isAccessor ? "property" : "method",
                     name: symbol.name,
                     signature: signature,
                     description: description ?? "",
@@ -920,7 +920,7 @@ function collectTypeMemberRecords(
             let accessor = getPropertyAccessorInfo(symbol);
             let accessorKind = accessor.accessorKind ?? null;
             let propertyName = accessor.propertyName ?? null;
-            let isAccessor = accessor.isAccessor;
+            let isAccessor = symbol.isProperty === true;
 
             let signature = buildMethodSignature(symbol, "", isAccessor, accessorKind, propertyName);
             let description = "";
@@ -929,7 +929,7 @@ function collectTypeMemberRecords(
             signature = getVisibilityPrefix(visibility) + signature;
 
             members.push({
-                kind: "method",
+                kind: isAccessor ? "property" : "method",
                 name: symbol.name,
                 signature: signature,
                 description: description ?? "",
@@ -985,6 +985,7 @@ export type ApiSymbolMember = {
     inheritedFrom?: string;
     isMixin?: boolean;
     isCallable?: boolean;
+    isAccessor?: true;
     symbolId?: string;
     symbolIdPrefix?: string;
     args?: ApiConstructorArgument[];
@@ -1141,7 +1142,7 @@ function normalizeMemberDocumentation(value: string | null | undefined) : string
 function projectCollectedMember(member: CollectedTypeMember) : ApiSymbolMember
 {
     let ownerQualifiedName = member.ownerQualifiedName ?? member.declaredIn;
-    let kind: ApiSymbolMember['kind'] = member.kind;
+    let kind: ApiSymbolMember['kind'] = member.isAccessor ? 'property' : member.kind;
     let qualifiedName = member.qualifiedName ?? `${ownerQualifiedName}.${member.name}`;
     let symbolIdPrefix = member.kind == 'constructor' && member.symbolId
         ? GetConstructorSymbolIdPrefix(ownerQualifiedName, member.symbolId)
@@ -1158,6 +1159,7 @@ function projectCollectedMember(member: CollectedTypeMember) : ApiSymbolMember
         ...(member.isInherited ? { inheritedFrom: member.declaredIn } : {}),
         ...(member.isMixin ? { isMixin: true } : {}),
         ...(member.isCallable !== undefined ? { isCallable: member.isCallable } : {}),
+        ...(member.isAccessor ? { isAccessor: true } : {}),
         ...(member.symbolId ? { symbolId: member.symbolId } : {}),
         ...(symbolIdPrefix ? { symbolIdPrefix } : {}),
         ...(member.args ? { args: member.args } : {}),
@@ -1222,6 +1224,8 @@ function collectTypeMembers(
     {
         if (member.kind == 'constructor')
             return categories.includes('constructor');
+        if (member.isAccessor)
+            return categories.includes('data');
         if (member.kind == 'method' || member.kind == 'function')
             return member.isCallable === false ? categories.includes('data') : categories.includes('callable');
         return member.kind == 'property' || member.kind == 'globalVariable' ? categories.includes('data') : false;
@@ -1284,20 +1288,23 @@ function collectNamespaceMembers(
                 return;
             }
             let isCallable = symbol.isCallable !== false;
-            if (isCallable ? !categories.includes('callable') : !categories.includes('data'))
+            let isAccessor = symbol.isProperty === true;
+            if (isAccessor ? !categories.includes('data') : isCallable ? !categories.includes('callable') : !categories.includes('data'))
                 return;
             let namespaceName = namespace.isRootNamespace() ? '' : namespace.getQualifiedNamespace();
+            let accessor = getPropertyAccessorInfo(symbol);
             members.push({
                 name: symbol.name,
                 qualifiedName: namespaceName ? `${namespaceName}::${symbol.name}` : symbol.name,
-                kind: isCallable ? 'function' : 'property',
-                declaration: buildMethodSignature(symbol, '', false, null, null),
+                kind: isAccessor ? 'property' : 'function',
+                declaration: buildMethodSignature(symbol, '', isAccessor, accessor.accessorKind ?? null, accessor.propertyName ?? null),
                 ownerQualifiedName,
                 source: symbol.declaredModule ? 'script' : 'native',
                 visibility,
                 ...(includeDocs && normalizeMemberDocumentation(symbol.findAvailableDocumentation()) ? { documentation: normalizeMemberDocumentation(symbol.findAvailableDocumentation()) } : {}),
                 ...(symbol.isMixin ? { isMixin: true } : {}),
-                isCallable
+                isCallable,
+                ...(isAccessor ? { isAccessor: true } : {})
             });
             return;
         }

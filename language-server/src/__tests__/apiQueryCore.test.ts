@@ -121,6 +121,8 @@ function setup(): void
     const shadow = namespace('Core::FThing', 'Game.Core');
     shadow.addSymbol(method('Build', 'Game.Core'));
     shadow.addSymbol(method('B', 'Game.Core', [], { callable: false, property: true, returnType: 'int' }));
+    shadow.addSymbol(method('GetNamespaceValue', 'Game.Core', [], { callable: false, property: true, returnType: 'int' }));
+    shadow.addSymbol(method('OverrideOnlyNamespace', 'Game.Core', [], { callable: false, returnType: 'void' }));
     shadow.addSymbol(method('AMixinNamespace', 'Game.Core'));
 
     const base = type(core, 'UBase', {
@@ -135,6 +137,8 @@ function setup(): void
             constructor('UDerived', []),
             method('Run', 'Game.Core'),
             method('GetValue', 'Game.Core', [], { callable: false, property: true, returnType: 'int' }),
+            method('GetCallableAccessor', 'Game.Core', [], { property: true, returnType: 'int' }),
+            method('OverrideOnly', 'Game.Core', [], { callable: false, returnType: 'void' }),
             method('Secret', 'Game.Core', [], { private: true }),
         ],
     });
@@ -216,7 +220,12 @@ test('GetAPIQuery supports core kinds, visibility, accessor projection, and dedu
     );
 
     const accessor = GetAPIQuery({ query: 'GetValue', kinds: ['property'], limit: 10 });
-    assert.deepEqual(accessor.data.matches.map((match) => match.kind), ['property']);
+    assert.deepEqual(accessor.data.matches.map((match) => [
+        match.kind,
+        match.isAccessor,
+        (match.detailsData as unknown[])?.[0],
+        match.isCallable,
+    ]), [['property', true, 'method', false]]);
 
     const hidden = GetAPIQuery({ query: 'Secret', kinds: ['method'], limit: 10 });
     assert.equal(hidden.data.total, 0);
@@ -235,6 +244,72 @@ test('GetAPIQuery supports core kinds, visibility, accessor projection, and dedu
 
     for (const excluded of ['StaticClass', 'opAdd', 'LeakedDelegateMethod', 'LeakedEventMethod', 'LeakedPrimitiveMethod', 'LeakedTemplateMethod'])
         assert.equal(GetAPIQuery({ query: excluded, limit: 10 }).data.total, 0, excluded);
+});
+
+test('API query preserves accessor identity while ordinary non-callable symbols retain their callable kinds', () =>
+{
+    const kindIdentityFilterCases = [
+        { label: 'member accessor property', query: 'GetValue', kinds: ['property'], expected: [['property', true, 'method', false]] },
+        { label: 'callable member accessor property', query: 'GetCallableAccessor', kinds: ['property'], expected: [['property', true, 'method', true]] },
+        { label: 'member accessor method filter', query: 'GetValue', kinds: ['method'], expected: [] },
+        { label: 'global accessor property', query: 'GetNamespaceValue', kinds: ['property'], expected: [['property', true, 'function', false]] },
+        { label: 'global accessor function filter', query: 'GetNamespaceValue', kinds: ['function'], expected: [] },
+        { label: 'entity property property filter', query: 'Count', kinds: ['property'], expected: [['property', undefined, 'property', false]] },
+        { label: 'entity property method filter', query: 'Count', kinds: ['method'], expected: [] },
+        { label: 'entity property function filter', query: 'Count', kinds: ['function'], expected: [] },
+        { label: 'ordinary non-callable method', query: 'OverrideOnly', kinds: ['method'], expected: [['method', undefined, 'method', false]] },
+        { label: 'ordinary non-callable method property filter', query: 'OverrideOnly', kinds: ['property'], expected: [] },
+        { label: 'ordinary non-callable function', query: 'OverrideOnlyNamespace', kinds: ['function'], expected: [['function', undefined, 'function', false]] },
+        { label: 'ordinary non-callable function property filter', query: 'OverrideOnlyNamespace', kinds: ['property'], expected: [] },
+    ];
+    for (const testCase of kindIdentityFilterCases)
+    {
+        const result = GetAPIQuery({ query: testCase.query, kinds: testCase.kinds, limit: 10 });
+        assert.deepEqual(result.data.matches.map((match) => [
+            match.kind,
+            match.isAccessor,
+            (match.detailsData as unknown[])?.[0],
+            match.isCallable,
+        ]), testCase.expected, testCase.label);
+    }
+
+    const exactMember = GetAPIExactSymbols({ name: 'Core::UDerived.GetValue', kind: 'property' });
+    const exactGlobal = GetAPIExactSymbols({ name: 'Core::FThing::GetNamespaceValue', kind: 'property' });
+    assert.equal(exactMember.ok, true, JSON.stringify(exactMember));
+    assert.equal(exactGlobal.ok, true, JSON.stringify(exactGlobal));
+    if (exactMember.ok && exactGlobal.ok)
+    {
+        assert.deepEqual(exactMember.data.symbols.map((match) => [match.kind, match.isAccessor, (match.detailsData as unknown[])?.[0]]),
+            [['property', true, 'method']]);
+        assert.deepEqual(exactGlobal.data.symbols.map((match) => [match.kind, match.isAccessor, (match.detailsData as unknown[])?.[0]]),
+            [['property', true, 'function']]);
+    }
+
+    const typeData = GetAPISymbolMembers({ name: 'Core::UDerived', ownerKind: 'type', members: ['data'], limit: 200 });
+    const typeCallable = GetAPISymbolMembers({ name: 'Core::UDerived', ownerKind: 'type', members: ['callable'], limit: 200 });
+    const namespaceData = GetAPISymbolMembers({ name: 'Core::FThing', ownerKind: 'namespace', members: ['data'], limit: 200 });
+    const namespaceCallable = GetAPISymbolMembers({ name: 'Core::FThing', ownerKind: 'namespace', members: ['callable'], limit: 200 });
+    assert.equal(typeData.ok, true, JSON.stringify(typeData));
+    assert.equal(typeCallable.ok, true, JSON.stringify(typeCallable));
+    assert.equal(namespaceData.ok, true, JSON.stringify(namespaceData));
+    assert.equal(namespaceCallable.ok, true, JSON.stringify(namespaceCallable));
+    if (!typeData.ok || !typeCallable.ok || !namespaceData.ok || !namespaceCallable.ok)
+        return;
+
+    const typeDataItems = typeData.data.groups[0].members.items;
+    const namespaceDataItems = namespaceData.data.groups[0].members.items;
+    assert.deepEqual(typeDataItems.filter((member) => member.name == 'GetValue').map((member) => [member.kind, member.isAccessor, member.isCallable]),
+        [['property', true, false]]);
+    assert.deepEqual(typeDataItems.filter((member) => member.name == 'GetCallableAccessor').map((member) => [member.kind, member.isAccessor, member.isCallable]),
+        [['property', true, true]]);
+    assert.deepEqual(typeDataItems.filter((member) => member.name == 'OverrideOnly').map((member) => [member.kind, member.isAccessor, member.isCallable]),
+        [['method', undefined, false]]);
+    assert.deepEqual(namespaceDataItems.filter((member) => member.name == 'GetNamespaceValue').map((member) => [member.kind, member.isAccessor, member.isCallable]),
+        [['property', true, false]]);
+    assert.deepEqual(namespaceDataItems.filter((member) => member.name == 'OverrideOnlyNamespace').map((member) => [member.kind, member.isAccessor, member.isCallable]),
+        [['function', undefined, false]]);
+    assert.ok(!typeCallable.data.groups[0].members.items.some((member) => member.name == 'GetValue' || member.name == 'GetCallableAccessor' || member.name == 'OverrideOnly'));
+    assert.ok(!namespaceCallable.data.groups[0].members.items.some((member) => member.name == 'GetNamespaceValue' || member.name == 'OverrideOnlyNamespace'));
 });
 
 test('GetAPIQuery applies scoped inheritance modes before totals and paging', () =>

@@ -70,6 +70,7 @@ export type GetAPISearchMatch = {
     source: ApiSearchMatchSource;
     visibility: ApiSearchVisibility;
     isCallable?: boolean;
+    isAccessor?: true;
     isMixin?: boolean;
     scopeRelationship?: ApiSearchScopeRelationship;
     scopeDistance?: number;
@@ -192,6 +193,7 @@ type SearchIndexEntry = {
     qualifiedName: string;
     kind: ApiSearchKind;
     isCallable: boolean;
+    isAccessor: boolean;
     signature: string;
     summary?: string;
     documentation?: string;
@@ -224,6 +226,7 @@ export type ApiQueryMaterializedEntry = {
     namespaceQualifiedName: string;
     kind: ApiSearchKind;
     isCallable: boolean;
+    isAccessor?: true;
     signature: string;
     summary?: string;
     documentation?: string;
@@ -826,7 +829,7 @@ function rawKindsForCoreKinds(kinds: ApiQueryKind[] | undefined) : ApiSearchKind
 
 function getCorePresentationKind(match: GetAPISearchMatch) : ApiQueryKind
 {
-    if ((match.kind == 'method' || match.kind == 'function') && match.isCallable === false)
+    if ((match.kind == 'method' || match.kind == 'function') && match.isAccessor === true)
         return 'property';
     return match.kind;
 }
@@ -1479,6 +1482,7 @@ export function ExportAPIQueryMaterializedIndex() : ApiQueryMaterializedIndex
         namespaceQualifiedName: entry.namespaceQualifiedName,
         kind: entry.kind,
         isCallable: entry.isCallable,
+        ...(entry.isAccessor ? { isAccessor: true } : {}),
         signature: entry.signature,
         ...(entry.summary ? { summary: entry.summary } : {}),
         ...(entry.documentation ? { documentation: entry.documentation } : {}),
@@ -1690,6 +1694,7 @@ function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
     let documentation = normalizeSearchDocumentation(method.findAvailableDocumentation());
     let methodArgs = method.args ? method.args.map((arg) => arg.typename) : [];
     let isCallable = method.isCallable !== false;
+    let isAccessor = method.isProperty === true;
     let detailsData: unknown;
     let qualifiedName = '';
     let containerQualifiedName: string | undefined = undefined;
@@ -1743,6 +1748,7 @@ function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
         qualifiedName,
         kind: method.containingType ? 'method' : 'function',
         isCallable,
+        isAccessor,
         signature: buildMethodSignature(method),
         summary: extractSummary(documentation),
         documentation,
@@ -1854,6 +1860,7 @@ function createSearchEntry(input: {
     qualifiedName: string;
     kind: ApiSearchKind;
     isCallable: boolean;
+    isAccessor?: boolean;
     signature: string;
     summary?: string;
     documentation?: string;
@@ -1883,6 +1890,7 @@ function createSearchEntry(input: {
         qualifiedName: input.qualifiedName,
         kind: input.kind,
         isCallable: input.isCallable,
+        isAccessor: input.isAccessor === true,
         signature: input.signature,
         summary: input.summary,
         documentation: input.documentation,
@@ -3225,6 +3233,8 @@ function buildMatch(candidate: SearchCandidate, includeDocs: boolean) : GetAPISe
         match.containerQualifiedName = candidate.entry.containerQualifiedName;
     if (candidate.entry.isCallable !== undefined)
         match.isCallable = candidate.entry.isCallable;
+    if (candidate.entry.isAccessor)
+        match.isAccessor = true;
     if (candidate.entry.isMixin)
         match.isMixin = true;
     if (candidate.scopeRelationship)
