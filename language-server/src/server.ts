@@ -1044,8 +1044,8 @@ function IsInitialParseDone()
     return CanResolveModules() && ParseQueue.length == 0 && LoadQueue.length == 0;
 }
 
-scriptdiagnostics.OnDiagnosticsChanged( function (uri : string, diagnostics : Array<Diagnostic>){
-    automationRuntime.updateDiagnostics(uri, diagnostics);
+scriptdiagnostics.OnDiagnosticsChanged( function (uri : string, diagnostics : Array<Diagnostic>, projectStaticDiagnostics : readonly Diagnostic[]){
+    automationRuntime.updateDiagnostics(uri, projectStaticDiagnostics);
     connection.sendDiagnostics({ "uri": uri, "diagnostics": diagnostics });
 });
 

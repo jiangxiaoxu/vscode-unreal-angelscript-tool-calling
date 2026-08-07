@@ -20,8 +20,14 @@ let CompileDiagnostics = new Map<string, Array<Diagnostic>>();
 // Diagnostics we have determined from within the language server
 let ParseDiagnostics = new Map<string, Array<Diagnostic>>();
 
+type DiagnosticsChangedCallback = (
+    uri: string,
+    diagnostics: Array<Diagnostic>,
+    projectStaticDiagnostics: readonly Diagnostic[],
+) => void;
+
 // Functions that should be notified when diagnostics change
-let NotifyFunctions = new Array<any>();
+let NotifyFunctions = new Array<DiagnosticsChangedCallback>();
 
 export function UpdateCompileDiagnostics(uri : string, diagnostics : Array<Diagnostic>)
 {
@@ -50,11 +56,12 @@ function NotifyDiagnostics(uri : string, notifyEmpty = true)
     let fromParse = ParseDiagnostics.get(scriptfiles.NormalizeUri(uri));
     if (fromParse)
         allDiagnostics = allDiagnostics.concat(fromParse);
+    let projectStaticDiagnostics = fromParse ?? [];
 
     if (notifyEmpty || allDiagnostics.length != 0)
     {
         for (let func of NotifyFunctions)
-            func(uri, allDiagnostics);
+            func(uri, allDiagnostics, projectStaticDiagnostics);
     }
 }
 
@@ -64,7 +71,7 @@ function HasCompileDiagnostics(asmodule : scriptfiles.ASModule)
     return fromCompile && fromCompile.length != 0;
 }
 
-export function OnDiagnosticsChanged(bindFunction : any)
+export function OnDiagnosticsChanged(bindFunction : DiagnosticsChangedCallback)
 {
     NotifyFunctions.push(bindFunction);
 }

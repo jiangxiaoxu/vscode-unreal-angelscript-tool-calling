@@ -3,6 +3,7 @@ import test from 'node:test';
 import { CancellationTokenSource, ResponseError } from 'vscode-languageserver/node';
 import type { LanguageServerDiagnosticsStatus } from '../languageServerReadiness';
 import { waitForSettledDiagnosticsStatus } from '../workspaceDiagnostics';
+import { OnDiagnosticsChanged, UpdateCompileDiagnostics } from '../ls_diagnostics';
 
 function status(
     semanticGeneration: number,
@@ -152,4 +153,23 @@ test('workspace diagnostics hard deadline wins when settle arrives after an even
         ),
         (error: unknown) => error instanceof ResponseError && error.code == -32002,
     );
+});
+
+test('workspace diagnostics excludes Editor compile diagnostics from Project Static', () => {
+    const uri = 'file:///C:/Fixture/Script/CompileOnly.as';
+    let observed: { combined: number; projectStatic: number } | null = null;
+    OnDiagnosticsChanged((changedUri, combined, projectStatic) => {
+        if (changedUri === uri)
+            observed = { combined: combined.length, projectStatic: projectStatic.length };
+    });
+    UpdateCompileDiagnostics(uri, [{
+        range: {
+            start: { line: 59, character: 4 },
+            end: { line: 59, character: 47 },
+        },
+        severity: 1,
+        message: 'Compile-only finding',
+        source: 'as',
+    }]);
+    assert.deepEqual(observed, { combined: 1, projectStatic: 0 });
 });
