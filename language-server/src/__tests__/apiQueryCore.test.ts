@@ -17,8 +17,10 @@ import {
     GetAPIExactSymbols,
     GetAPIQuery,
     GetAPISearch,
+    ExportAPIQueryMaterializedIndex,
 } from '../api_search';
 import {
+    ExportAPIMaterializedMemberOwners,
     GetAPIClassHierarchy,
     GetAPISymbolMembers,
 } from '../api_docs';
@@ -49,7 +51,7 @@ function method(
     name: string,
     declaredModule: string | null,
     args: Array<{ type: string; name: string; defaultValue?: string }> = [],
-    options: { returnType?: string; callable?: boolean; private?: boolean; protected?: boolean; property?: boolean; mixin?: boolean } = {}
+    options: { returnType?: string; callable?: boolean; private?: boolean; protected?: boolean; property?: boolean; mixin?: boolean; blueprintEvent?: boolean } = {}
 ): DBMethod
 {
     const value = new DBMethod();
@@ -62,6 +64,7 @@ function method(
     value.isProtected = options.protected === true;
     value.isProperty = options.property === true;
     value.isMixin = options.mixin === true;
+    value.isBlueprintEvent = options.blueprintEvent === true;
     value.documentation = `${name} docs.`;
     return value;
 }
@@ -126,7 +129,7 @@ function setup(): void
     shadow.addSymbol(method('AMixinNamespace', 'Game.Core'));
 
     const base = type(core, 'UBase', {
-        methods: [method('Tick', null)],
+        methods: [method('Tick', null, [], { blueprintEvent: true })],
         properties: [property('BaseValue', null)],
     });
     void base;
@@ -139,6 +142,7 @@ function setup(): void
             method('GetValue', 'Game.Core', [], { callable: false, property: true, returnType: 'int' }),
             method('GetCallableAccessor', 'Game.Core', [], { property: true, returnType: 'int' }),
             method('OverrideOnly', 'Game.Core', [], { callable: false, returnType: 'void' }),
+            method('ScriptOverride', 'Game.Core', [], { blueprintEvent: true }),
             method('Secret', 'Game.Core', [], { private: true }),
         ],
     });
@@ -182,6 +186,7 @@ function setup(): void
 
     core.addSymbol(method('Overload', null, [{ type: 'int', name: 'Value' }]));
     core.addSymbol(method('Overload', null, [{ type: 'float', name: 'Value' }]));
+    core.addSymbol(method('NamespaceEvent', null, [], { blueprintEvent: true }));
     const duplicate = method('Duplicate', null);
     core.addSymbol(duplicate);
     core.addSymbol(duplicate);
@@ -203,6 +208,71 @@ function setup(): void
 }
 
 test.beforeEach(setup);
+
+test('native Blueprint events project canBlueprintOverride across API read surfaces', () =>
+{
+    const legacySearch = GetAPISearch({ query: 'Tick', kinds: ['method'], source: 'native', limit: 10 });
+    const legacyTick = legacySearch.matches.find((match) => match.qualifiedName == 'Core::UBase.Tick');
+    assert.equal(legacyTick?.canBlueprintOverride, true);
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyTick, 'canBlueprintOverride'), true);
+    const legacyScriptOverride = GetAPISearch({ query: 'ScriptOverride', kinds: ['method'], source: 'script', limit: 10 })
+        .matches.find((match) => match.qualifiedName == 'Core::UDerived.ScriptOverride');
+    assert.ok(legacyScriptOverride);
+    assert.equal(legacyScriptOverride.canBlueprintOverride, undefined);
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyScriptOverride, 'canBlueprintOverride'), false);
+
+    const query = GetAPIQuery({ query: 'Tick', kinds: ['method'], source: 'native', limit: 10 });
+    assert.equal(query.data.matches.find((match) => match.qualifiedName == 'Core::UBase.Tick')?.canBlueprintOverride, true);
+
+    const exact = GetAPIExactSymbols({ name: 'Core::UBase.Tick', kind: 'method', source: 'native' });
+    assert.equal(exact.ok, true, JSON.stringify(exact));
+    if (exact.ok)
+        assert.equal(exact.data.symbols.find((match) => match.qualifiedName == 'Core::UBase.Tick')?.canBlueprintOverride, true);
+
+    const members = GetAPISymbolMembers({ name: 'Core::UBase', ownerKind: 'type', members: ['callable'], limit: 10 });
+    assert.equal(members.ok, true, JSON.stringify(members));
+    if (members.ok)
+        assert.equal(members.data.groups[0]?.members.items.find((member) => member.qualifiedName == 'Core::UBase.Tick')?.canBlueprintOverride, true);
+
+    const materializedIndex = ExportAPIQueryMaterializedIndex();
+    assert.equal(materializedIndex.entries.find((entry) => entry.qualifiedName == 'Core::UBase.Tick')?.canBlueprintOverride, true);
+    const materializedMembers = ExportAPIMaterializedMemberOwners();
+    assert.equal(materializedMembers.find((owner) => owner.ownerQualifiedName == 'Core::UBase')?.directMembers
+        .find((member) => member.qualifiedName == 'Core::UBase.Tick')?.canBlueprintOverride, true);
+    const materializedScriptOverride = materializedMembers.find((owner) => owner.ownerQualifiedName == 'Core::UDerived')?.directMembers
+        .find((member) => member.qualifiedName == 'Core::UDerived.ScriptOverride');
+    assert.ok(materializedScriptOverride);
+    assert.equal(materializedScriptOverride.canBlueprintOverride, undefined);
+    assert.equal(Object.prototype.hasOwnProperty.call(materializedScriptOverride, 'canBlueprintOverride'), false);
+
+    const scriptMembers = GetAPISymbolMembers({ name: 'Core::UDerived', ownerKind: 'type', source: 'script', members: ['callable'], limit: 10 });
+    assert.equal(scriptMembers.ok, true, JSON.stringify(scriptMembers));
+    if (scriptMembers.ok)
+    {
+        const scriptOverride = scriptMembers.data.groups[0]?.members.items
+            .find((member) => member.qualifiedName == 'Core::UDerived.ScriptOverride');
+        assert.ok(scriptOverride);
+        assert.equal(scriptOverride.canBlueprintOverride, undefined);
+        assert.equal(Object.prototype.hasOwnProperty.call(scriptOverride, 'canBlueprintOverride'), false);
+    }
+
+    for (const { name, kind } of [
+        { name: 'Core::FThing.DoThing', kind: 'method' as const },
+        { name: 'Core::UDerived.ScriptOverride', kind: 'method' as const },
+        { name: 'Core::NamespaceEvent', kind: 'function' as const },
+    ])
+    {
+        const result = GetAPIExactSymbols({ name, kind });
+        assert.equal(result.ok, true, JSON.stringify(result));
+        if (result.ok)
+        {
+            const symbol = result.data.symbols.find((match) => match.qualifiedName == name);
+            assert.ok(symbol, name);
+            assert.equal(symbol.canBlueprintOverride, undefined, name);
+            assert.equal(Object.prototype.hasOwnProperty.call(symbol, 'canBlueprintOverride'), false, name);
+        }
+    }
+});
 
 test('GetAPIQuery supports core kinds, visibility, accessor projection, and dedupe before paging', () =>
 {

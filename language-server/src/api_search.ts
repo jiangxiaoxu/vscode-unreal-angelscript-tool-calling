@@ -57,6 +57,7 @@ export type GetAPISearchMatch = {
     containerQualifiedName?: string;
     source: ApiSearchMatchSource;
     isMixin?: boolean;
+    canBlueprintOverride?: true;
     scopeRelationship?: ApiSearchScopeRelationship;
     scopeDistance?: number;
     matchedBy?: ApiSearchMatchedBy;
@@ -148,6 +149,7 @@ type SearchIndexEntry = {
     qualifiedName: string;
     kind: ApiSearchKind;
     isCallable: boolean;
+    canBlueprintOverride?: true;
     signature: string;
     summary?: string;
     documentation?: string;
@@ -708,6 +710,11 @@ function buildSearchIndex() : SearchIndex
     };
 }
 
+function isNativeBlueprintOverrideTarget(method: typedb.DBMethod) : boolean
+{
+    return method.containingType != null && method.declaredModule == null && method.isBlueprintEvent;
+}
+
 function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
 {
     let documentation = normalizeSearchDocumentation(method.findAvailableDocumentation());
@@ -765,6 +772,7 @@ function createMethodEntry(method: typedb.DBMethod) : SearchIndexEntry
         qualifiedName,
         kind: method.containingType ? 'method' : 'function',
         isCallable,
+        ...(isNativeBlueprintOverrideTarget(method) ? { canBlueprintOverride: true } : {}),
         signature: buildMethodSignature(method),
         summary: extractSummary(documentation),
         documentation,
@@ -835,6 +843,7 @@ function createSearchEntry(input: {
     qualifiedName: string;
     kind: ApiSearchKind;
     isCallable: boolean;
+    canBlueprintOverride?: true;
     signature: string;
     summary?: string;
     documentation?: string;
@@ -858,6 +867,7 @@ function createSearchEntry(input: {
         qualifiedName: input.qualifiedName,
         kind: input.kind,
         isCallable: input.isCallable,
+        canBlueprintOverride: input.canBlueprintOverride,
         signature: input.signature,
         summary: input.summary,
         documentation: input.documentation,
@@ -2116,6 +2126,8 @@ function buildMatch(candidate: SearchCandidate, includeDocs: boolean) : GetAPISe
         match.documentation = candidate.entry.documentation;
     if (candidate.entry.containerQualifiedName)
         match.containerQualifiedName = candidate.entry.containerQualifiedName;
+    if (candidate.entry.canBlueprintOverride)
+        match.canBlueprintOverride = true;
     if (candidate.entry.isMixin)
         match.isMixin = true;
     if (candidate.scopeRelationship)
@@ -2346,6 +2358,7 @@ export {
     BuildConstructorSymbolId,
     CanonicalizeConstructorArgumentType,
     CompareConstructorProjections,
+    ExportAPIQueryMaterializedIndex,
     GetConstructorSymbolIdPrefix,
     GetAPIExactSymbols,
     GetAPIQuery,

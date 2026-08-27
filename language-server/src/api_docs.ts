@@ -36,6 +36,7 @@ type CollectedTypeMember = {
     args?: ApiConstructorArgument[];
     source: ApiDeclaredSource;
     isCallable?: boolean;
+    canBlueprintOverride?: true;
     symbolId?: string;
     requiredArgumentCount?: number;
 };
@@ -64,6 +65,11 @@ function matchesSearchSource(declaredModule: string | null | undefined, source: 
 function sourceOfDeclaredModule(declaredModule: string | null | undefined) : ApiDeclaredSource
 {
     return typeof declaredModule == "string" && declaredModule.length > 0 ? "script" : "native";
+}
+
+function isNativeBlueprintOverrideTarget(method: typedb.DBMethod) : boolean
+{
+    return method.containingType != null && method.declaredModule == null && method.isBlueprintEvent;
 }
 
 function isClassType(dbType: typedb.DBType) : boolean
@@ -852,6 +858,7 @@ function collectTypeMemberRecords(
                     visibility: visibility,
                     source: sourceOfDeclaredModule(symbol.declaredModule),
                     isCallable: symbol.isCallable !== false,
+                    ...(isNativeBlueprintOverrideTarget(symbol) ? { canBlueprintOverride: true } : {}),
                 });
             }
             else if (symbol instanceof typedb.DBProperty)
@@ -986,6 +993,7 @@ export type ApiSymbolMember = {
     isMixin?: boolean;
     isCallable?: boolean;
     isAccessor?: true;
+    canBlueprintOverride?: true;
     symbolId?: string;
     symbolIdPrefix?: string;
     args?: ApiConstructorArgument[];
@@ -1160,6 +1168,7 @@ function projectCollectedMember(member: CollectedTypeMember) : ApiSymbolMember
         ...(member.isMixin ? { isMixin: true } : {}),
         ...(member.isCallable !== undefined ? { isCallable: member.isCallable } : {}),
         ...(member.isAccessor ? { isAccessor: true } : {}),
+        ...(member.canBlueprintOverride ? { canBlueprintOverride: true } : {}),
         ...(member.symbolId ? { symbolId: member.symbolId } : {}),
         ...(symbolIdPrefix ? { symbolIdPrefix } : {}),
         ...(member.args ? { args: member.args } : {}),
@@ -1304,7 +1313,8 @@ function collectNamespaceMembers(
                 ...(includeDocs && normalizeMemberDocumentation(symbol.findAvailableDocumentation()) ? { documentation: normalizeMemberDocumentation(symbol.findAvailableDocumentation()) } : {}),
                 ...(symbol.isMixin ? { isMixin: true } : {}),
                 isCallable,
-                ...(isAccessor ? { isAccessor: true } : {})
+                ...(isAccessor ? { isAccessor: true } : {}),
+                ...(isNativeBlueprintOverrideTarget(symbol) ? { canBlueprintOverride: true } : {})
             });
             return;
         }
