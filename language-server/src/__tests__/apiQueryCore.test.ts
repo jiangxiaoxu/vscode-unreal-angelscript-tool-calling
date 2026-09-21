@@ -325,7 +325,14 @@ test('GetAPIQuery supports core kinds, visibility, accessor projection, and dedu
     {
         assert.equal(accessorAccess.read.normal, 'unknown');
         assert.equal(accessorAccess.write.normal, 'denied');
+        assert.deepEqual(accessorAccess.read.restrictions, [{ code: 'AccessMetadataUnavailable' }]);
     }
+
+    const unknownMethod = GetAPIQuery({ query: 'Tick', kinds: ['method'], limit: 10 });
+    const unknownMethodAccess = unknownMethod.data.matches[0]?.access;
+    assert.ok(unknownMethodAccess && 'call' in unknownMethodAccess);
+    if (unknownMethodAccess && 'call' in unknownMethodAccess)
+        assert.deepEqual(unknownMethodAccess.call.restrictions, [{ code: 'AccessMetadataUnavailable' }]);
 
     const hidden = GetAPIQuery({ query: 'Secret', kinds: ['method'], limit: 10 });
     assert.equal(hidden.data.total, 0);

@@ -3,6 +3,7 @@ import {
     BlueprintEventKind,
     FunctionAccess,
     PropertyAccess,
+    enumValuePropertyAccess,
     unknownFunctionAccess,
     unknownPropertyAccess,
 } from './accessContract';
@@ -2636,7 +2637,18 @@ function sidecarOwnerSymbols(
         if (rootCandidates.length > 0)
             return rootCandidates;
     }
-    let type = GetTypeByName(ownerName);
+    let type: DBType | null = null;
+    let separator = ownerName.lastIndexOf('::');
+    if (separator >= 0)
+    {
+        let namespace = LookupNamespace(null, ownerName.substring(0, separator));
+        let typeName = ownerName.substring(separator + 2);
+        let qualified = namespace ? LookupType(namespace, typeName) : null;
+        if (qualified && qualified.getQualifiedTypenameInNamespace(null) == ownerName)
+            type = qualified;
+    }
+    else
+        type = GetTypeByName(ownerName);
     if (!type)
         return [];
     // Access identities name the declaring owner.  `findSymbols` walks the
@@ -2741,14 +2753,18 @@ export function ApplyDebugDatabaseAccess(chunks: readonly DebugDatabaseAccessChu
     }
 
     // Legacy Engine responses and older sidecars are valid compatibility paths;
-    // expose their native symbols as unknown instead of inferring permissions.
+    // preserve uncertainty for ordinary native symbols instead of inferring
+    // permissions. Enum values are the one structural exception: their
+    // read-only semantics are intrinsic to the enum type.
     for (let type of TypesById.values())
     {
         type.forEachSymbol((symbol) => {
             if (symbol.declaredModule)
                 return;
             if (symbol instanceof DBProperty && !symbol.access)
-                symbol.access = unknownPropertyAccess();
+                symbol.access = symbol.containingType?.isEnum
+                    ? enumValuePropertyAccess()
+                    : unknownPropertyAccess();
             else if (symbol instanceof DBMethod && !symbol.access)
                 symbol.access = unknownFunctionAccess();
         }, false);
@@ -2757,7 +2773,9 @@ export function ApplyDebugDatabaseAccess(chunks: readonly DebugDatabaseAccessChu
         if (symbol.declaredModule)
             return;
         if (symbol instanceof DBProperty && !symbol.access)
-            symbol.access = unknownPropertyAccess();
+            symbol.access = symbol.containingType?.isEnum
+                ? enumValuePropertyAccess()
+                : unknownPropertyAccess();
         else if (symbol instanceof DBMethod && !symbol.access)
             symbol.access = unknownFunctionAccess();
     });

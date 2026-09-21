@@ -15,7 +15,8 @@ export type AccessRestrictionCode =
     | 'CustomAccess'
     | 'EditorOnly'
     | 'DefaultsOnly'
-    | 'UnsafeDuringActorConstruction';
+    | 'UnsafeDuringActorConstruction'
+    | 'AccessMetadataUnavailable';
 
 export type AccessRestriction = {
     code: AccessRestrictionCode;
@@ -59,6 +60,7 @@ const KNOWN_RESTRICTIONS = new Set<AccessRestrictionCode>([
     'EditorOnly',
     'DefaultsOnly',
     'UnsafeDuringActorConstruction',
+    'AccessMetadataUnavailable',
 ]);
 
 function isRecord(value: unknown) : value is Record<string, unknown>
@@ -310,17 +312,33 @@ export function scriptFunctionAccess(restrictions: AccessRestrictionCode[] = [])
 
 export function unknownPropertyAccess() : PropertyAccess
 {
+    let unavailable = normalizeRestriction({ code: 'AccessMetadataUnavailable' });
     return {
-        read: { normal: 'unknown', restricted: 'unknown' },
-        write: { normal: 'unknown', restricted: 'unknown' },
+        read: { normal: 'unknown', restricted: 'unknown', restrictions: [unavailable] },
+        write: { normal: 'unknown', restricted: 'unknown', restrictions: [unavailable] },
     };
 }
 
 export function unknownFunctionAccess() : FunctionAccess
 {
+    let unavailable = normalizeRestriction({ code: 'AccessMetadataUnavailable' });
     return {
         call: {
             state: 'unknown',
+            restrictions: [unavailable],
+        },
+    };
+}
+
+/** Access semantics for a native enum value when sidecar metadata is absent. */
+export function enumValuePropertyAccess() : PropertyAccess
+{
+    return {
+        read: { normal: 'allowed', restricted: 'allowed' },
+        write: {
+            normal: 'denied',
+            restricted: 'denied',
+            restrictions: [normalizeRestriction({ code: 'ConstProperty' })],
         },
     };
 }

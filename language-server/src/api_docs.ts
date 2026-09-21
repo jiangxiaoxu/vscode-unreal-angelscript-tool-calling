@@ -907,6 +907,7 @@ function collectTypeMemberRecords(
                     isAccessor: false,
                     visibility: visibility,
                     source: memberSource,
+                    isCallable: false,
                     access: symbol.access ?? unknownPropertyAccess(),
                 });
             }

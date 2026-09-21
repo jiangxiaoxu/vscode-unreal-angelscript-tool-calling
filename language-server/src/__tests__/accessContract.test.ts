@@ -7,6 +7,9 @@ import {
     normalizeDebugDatabaseAccessChunk,
     normalizeFunctionAccess,
     normalizePropertyAccess,
+    enumValuePropertyAccess,
+    unknownFunctionAccess,
+    unknownPropertyAccess,
 } from '../accessContract';
 import * as parser from '../as_parser';
 import * as database from '../database';
@@ -102,6 +105,34 @@ test('custom access normalization rejects malformed states and unknown restricti
     }), /access is invalid/i);
 });
 
+test('unknown access normalizes with an explicit metadata-unavailable restriction', () =>
+{
+    assert.deepEqual(unknownPropertyAccess(), {
+        read: {
+            normal: 'unknown',
+            restricted: 'unknown',
+            restrictions: [{ code: 'AccessMetadataUnavailable' }],
+        },
+        write: {
+            normal: 'unknown',
+            restricted: 'unknown',
+            restrictions: [{ code: 'AccessMetadataUnavailable' }],
+        },
+    });
+    assert.deepEqual(unknownFunctionAccess(), {
+        call: {
+            state: 'unknown',
+            restrictions: [{ code: 'AccessMetadataUnavailable' }],
+        },
+    });
+    let normalized = normalizeDebugDatabaseAccessChunk({
+        properties: [{ owner: 'UBlueprint', name: 'bDeprecate', access: unknownPropertyAccess() }],
+        methods: [{ owner: 'UBlueprint', name: 'MissingFunction', args: [], access: unknownFunctionAccess() }],
+    });
+    assert.deepEqual(normalized.properties?.[0].access, unknownPropertyAccess());
+    assert.deepEqual(normalized.methods?.[0].access, unknownFunctionAccess());
+});
+
 test('legacy native records stay unchanged and sidecar access joins by owner and signature', () =>
 {
     database.ResetDatabaseForTests();
@@ -132,6 +163,34 @@ test('legacy native records stay unchanged and sidecar access joins by owner and
     assert.ok(type);
     assert.equal(type.getProperty('InitialLifeSpan', false)?.access?.write.normal, 'denied');
     assert.deepEqual(type.getMethod('Tick', false)?.access?.call.restrictions, [{ code: 'UnsafeDuringActorConstruction' }]);
+});
+
+test('missing native access metadata preserves UBlueprint unknowns and enum value semantics', () =>
+{
+    database.ResetDatabaseForTests();
+    hydrateTypeDatabaseGeneration([{
+        UBlueprint: {
+            properties: { bDeprecate: ['bool'] },
+            methods: [{ name: 'MissingFunction', return: 'void', args: [] }],
+        },
+        EBlueprintStatus: {
+            isEnum: true,
+            properties: { Active: ['int32'] },
+            methods: {},
+        },
+    }], false);
+
+    let blueprint = database.GetTypeByName('UBlueprint');
+    let missingProperty = blueprint?.getProperty('bDeprecate', false);
+    assert.deepEqual(missingProperty?.access, unknownPropertyAccess());
+    assert.deepEqual(blueprint?.getMethod('MissingFunction', false)?.access, unknownFunctionAccess());
+
+    let enumValue = database.GetTypeByName('EBlueprintStatus')?.getProperty('Active', false);
+    assert.deepEqual(enumValue?.access, enumValuePropertyAccess());
+    assert.equal(enumValue?.access?.read.normal, 'allowed');
+    assert.equal(enumValue?.access?.write.normal, 'denied');
+    assert.equal(enumValue?.access?.write.restricted, 'denied');
+    assert.deepEqual(enumValue?.access?.write.restrictions, [{ code: 'ConstProperty' }]);
 });
 
 test('sidecar method identity uses direct owner symbols when a base has the same method', () =>
