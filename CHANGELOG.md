@@ -88,6 +88,24 @@ Maintenance rule:
 - 旧 `angelscript/getTypeMembers` 和 `angelscript/getTypeHierarchy` request handlers 已由 `angelscript/getAPISymbolMembers` 和 `angelscript/getAPIClassHierarchy` 替代.
 - `GetAPISearch` 现在会在解析到 class scope 且省略 `includeInheritedFromScope` 时自动展开 inherited methods/properties.
 
+## [1.9.3080] - 2026-10-13
+
+### English
+
+#### Changed
+- Exposed native access metadata through transport, API queries, and caches, including Blueprint event override classification.
+
+#### Fixed
+- Preserved native property callability, read-only enum semantics, and unavailable access metadata; resolved native owners by qualified name to avoid same-name type collisions.
+
+### 中文
+
+#### 变更
+- 通过 transport, API query 和 cache 公开 native access metadata, 包含 Blueprint event override 分类.
+
+#### 修复
+- 保留 native property 的可调用性, enum 只读语义和 access metadata 不可用状态; 使用 qualified name 解析 native owner, 避免同名类型冲突.
+
 ## [1.8.8035] - 2026-02-06
 
 ### English
