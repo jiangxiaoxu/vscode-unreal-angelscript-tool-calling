@@ -2,6 +2,7 @@ import {
     CancellationToken,
     Connection,
     Diagnostic,
+    DiagnosticServerCancellationData,
     DocumentDiagnosticReport,
     LSPErrorCodes,
     ResponseError,
@@ -11,8 +12,6 @@ import type { LanguageServerDiagnosticsStatus } from './languageServerReadiness'
 import { createHash } from 'node:crypto';
 import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
 import { performance } from 'node:perf_hooks';
-
-const DIAGNOSTICS_NOT_READY_ERROR_CODE = -32002;
 
 export type WorkspaceDiagnosticsWaitOptions = {
     timeoutMs?: number;
@@ -165,9 +164,10 @@ export async function waitForSettledDiagnosticsStatus(
         let remainingMs = deadline - now();
         if (remainingMs <= 0)
         {
-            throw new ResponseError<void>(
-                DIAGNOSTICS_NOT_READY_ERROR_CODE,
-                `NotReady: workspace diagnostics did not settle within ${timeoutMs}ms; stage=${status.stage}, generation=${status.semanticGeneration}, settledGeneration=${status.settledSemanticGeneration}.`,
+            throw new ResponseError<DiagnosticServerCancellationData>(
+                LSPErrorCodes.ServerCancelled,
+                `Workspace diagnostics did not settle within ${timeoutMs}ms; stage=${status.stage}, generation=${status.semanticGeneration}, settledGeneration=${status.settledSemanticGeneration}.`,
+                { retriggerRequest: true },
             );
         }
         status = getStatus();

@@ -1,6 +1,7 @@
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import test = require('node:test');
 import { CancellationTokenSource, WorkspaceDiagnosticReport } from 'vscode-languageserver/node';
 import {
@@ -31,6 +32,7 @@ function createProtocol(options: {
     enabled?: boolean;
     semanticGeneration?: number;
     fullReady?: boolean;
+    requestWaitTimeoutMs?: number;
     getDiagnostics?: () => WorkspaceDiagnosticReport;
     validateSnapshotContent?: (
         mode: 'full' | 'diff',
@@ -53,6 +55,7 @@ function createProtocol(options: {
         } as any,
         serverInstanceId: 'instance-a',
         isEnabled: () => options.enabled !== false,
+        requestWaitTimeoutMs: options.requestWaitTimeoutMs,
         getReadiness: () => ({
             generation: 3,
             semanticGeneration,
@@ -166,6 +169,68 @@ test('project-daemon snapshot protocol releases sixteen staggered query waiters 
         assert.equal(result.activeRevision, 'native-revision');
         assert.equal('value' in result, false);
     }
+});
+
+test('sequence-aware API and diagnostics time out without stale reports and allow later requests', async () =>
+{
+    let diagnosticsReads = 0;
+    const fixture = createProtocol({
+        fullReady: false,
+        requestWaitTimeoutMs: 10,
+        getDiagnostics: () => { ++diagnosticsReads; return { items: [] }; },
+    });
+    fixture.protocol.synchronize(full());
+    const params = query(1);
+    await Promise.all([
+        assert.rejects(fixture.protocol.query(params), (error: any) => error.code == -32002),
+        assert.rejects(fixture.protocol.queryDiagnostics(params), (error: any) => error.code == -32002),
+    ]);
+    assert.equal(diagnosticsReads, 0);
+    fixture.protocol.synchronize(diff());
+    fixture.setFullReady(true);
+    fixture.protocol.markSemanticSettled();
+    const results = await Promise.all([
+        fixture.protocol.query(params),
+        fixture.protocol.queryDiagnostics(params),
+    ]);
+    for (const result of results)
+    {
+        assert.equal(result.scriptSequence, 2);
+        assert.equal(result.scriptRevision, REVISION_B);
+    }
+    assert.equal(diagnosticsReads, 1);
+    fixture.protocol.shutdown();
+});
+
+test('sequence settlement after the deadline rejects even before the timeout timer runs', async () =>
+{
+    let diagnosticsReads = 0;
+    const fixture = createProtocol({
+        fullReady: false,
+        requestWaitTimeoutMs: 10,
+        getDiagnostics: () => { ++diagnosticsReads; return { items: [] }; },
+    });
+    fixture.protocol.synchronize(full());
+    const pending = fixture.protocol.queryDiagnostics(query(1));
+    const elapsedDeadline = performance.now() + 15;
+    while (performance.now() < elapsedDeadline) { /* Simulate a synchronous parse blocking timers. */ }
+    fixture.setFullReady(true);
+    fixture.protocol.markSemanticSettled();
+    await assert.rejects(pending, (error: any) => error.code == -32002);
+    assert.equal(diagnosticsReads, 0);
+    fixture.protocol.shutdown();
+});
+
+test('sequence-aware diagnostics preserve user cancellation', async () =>
+{
+    const fixture = createProtocol({ fullReady: false, requestWaitTimeoutMs: 100 });
+    fixture.protocol.synchronize(full());
+    const source = new CancellationTokenSource();
+    const pending = fixture.protocol.queryDiagnostics(query(1), source.token);
+    source.cancel();
+    await assert.rejects(pending, (error: any) => error.code == -32800);
+    source.dispose();
+    fixture.protocol.shutdown();
 });
 
 test('new sequence waits as a batch and preserves independent request cancellation', async () =>

@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CancellationTokenSource, ResponseError } from 'vscode-languageserver/node';
+import {
+    CancellationToken,
+    CancellationTokenSource,
+    Connection,
+    DocumentDiagnosticParams,
+    DocumentDiagnosticReport,
+    LSPErrorCodes,
+    ResponseError,
+    WorkspaceDiagnosticParams,
+    WorkspaceDiagnosticReport,
+} from 'vscode-languageserver/node';
 import type { LanguageServerDiagnosticsStatus } from '../languageServerReadiness';
-import { waitForSettledDiagnosticsStatus } from '../workspaceDiagnostics';
+import { createWorkspaceDiagnosticsRegistry, registerWorkspaceDiagnostics, waitForSettledDiagnosticsStatus, workspaceDiagnosticResultId } from '../workspaceDiagnostics';
 import { OnDiagnosticsChanged, UpdateCompileDiagnostics } from '../ls_diagnostics';
 
 function status(
@@ -26,58 +36,72 @@ function status(
     };
 }
 
-test('workspace diagnostics returns only the latest settled semantic generation', async () => {
-    let current = status(1, 0);
-    let now = 0;
-    let waits = 0;
-    let result = await waitForSettledDiagnosticsStatus(
-        () => current,
-        undefined,
-        {
+for (const scope of ['document', 'workspace'] as const)
+{
+    test(`${scope} diagnostics requests a retry on timeout and returns the latest settled report`, async () => {
+        let documentHandler!: (params: DocumentDiagnosticParams, token: CancellationToken) => Promise<DocumentDiagnosticReport>;
+        let workspaceHandler!: (params: WorkspaceDiagnosticParams, token: CancellationToken) => Promise<WorkspaceDiagnosticReport>;
+        let connection = {
+            languages: {
+                diagnostics: {
+                    on(handler: typeof documentHandler) { documentHandler = handler; },
+                    onWorkspace(handler: typeof workspaceHandler) { workspaceHandler = handler; },
+                },
+            },
+        } as unknown as Connection;
+        let registry = createWorkspaceDiagnosticsRegistry();
+        let current = status(1, 0);
+        let now = 0;
+        let uri = 'file:///C:/Fixture/Script/Retry.as';
+        registry.update(uri, []);
+        registerWorkspaceDiagnostics(connection, registry, () => current, {
             timeoutMs: 25,
             pollIntervalMs: 10,
             now: () => now,
-            wait: async (delayMs) => {
-                waits += 1;
-                now += delayMs;
-                current = status(2, 2, 'ready');
-                return true;
-            },
-        },
-    );
-    assert.equal(waits, 1);
-    assert.equal(result.semanticGeneration, 2);
-    assert.equal(result.settledSemanticGeneration, 2);
-});
+            wait: async (delayMs) => { now += delayMs; return true; },
+        });
+        let request = () => scope === 'document'
+            ? documentHandler({ textDocument: { uri } }, CancellationToken.None)
+            : workspaceHandler({ previousResultIds: [] }, CancellationToken.None);
+        await assert.rejects(request(), (error: unknown) => {
+            assert.ok(error instanceof ResponseError);
+            assert.equal(error.code, LSPErrorCodes.ServerCancelled);
+            assert.deepEqual(error.data, { retriggerRequest: true });
+            return true;
+        });
+        assert.equal(now, 25);
+        let diagnostics = [{
+            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+            message: 'Latest finding',
+        }];
+        registry.update(uri, diagnostics);
+        current = status(2, 2, 'ready');
+        let resultId = workspaceDiagnosticResultId(registry.get(uri)!.contentHash, current);
+        let report = await request();
+        assert.deepEqual(report, scope === 'document'
+            ? { kind: 'full', resultId, items: diagnostics }
+            : { items: [{ kind: 'full', uri, version: null, resultId, items: diagnostics }] });
+    });
+}
 
-test('workspace diagnostics hard deadline terminates the handler without further waits', async () => {
+test('workspace diagnostics tolerates slow startup with the default deadline', async () => {
+    let current = status(1, 0);
     let now = 0;
-    let waits = 0;
-    await assert.rejects(
-        waitForSettledDiagnosticsStatus(
-            () => status(3, 2, 'resolving'),
-            undefined,
-            {
-                timeoutMs: 25,
-                pollIntervalMs: 10,
-                now: () => now,
-                wait: async (delayMs) => {
-                    waits += 1;
-                    now += delayMs;
-                    return true;
-                },
-            },
-        ),
-        (error: unknown) => error instanceof ResponseError
-            && error.code == -32002
-            && /within 25ms/u.test(error.message),
-    );
-    assert.equal(waits, 3);
+    let result = await waitForSettledDiagnosticsStatus(() => current, undefined, {
+        now: () => now,
+        wait: async (delayMs) => {
+            now += delayMs;
+            if (now >= 25000)
+                current = status(2, 2, 'partial');
+            return true;
+        },
+    });
+    assert.equal(result, current);
+    assert.equal(result.stage, 'partial');
 });
 
 test('workspace diagnostics cancellation terminates the pending wait', async () => {
     let source = new CancellationTokenSource();
-    let waits = 0;
     await assert.rejects(
         waitForSettledDiagnosticsStatus(
             () => status(1, 0),
@@ -86,7 +110,6 @@ test('workspace diagnostics cancellation terminates the pending wait', async () 
                 timeoutMs: 100,
                 pollIntervalMs: 10,
                 wait: async () => {
-                    waits += 1;
                     source.cancel();
                     return false;
                 },
@@ -94,7 +117,6 @@ test('workspace diagnostics cancellation terminates the pending wait', async () 
         ),
         (error: unknown) => error instanceof ResponseError && error.code == -32800,
     );
-    assert.equal(waits, 1);
     source.dispose();
 });
 
@@ -151,7 +173,7 @@ test('workspace diagnostics hard deadline wins when settle arrives after an even
                 },
             },
         ),
-        (error: unknown) => error instanceof ResponseError && error.code == -32002,
+        (error: unknown) => error instanceof ResponseError && error.code == LSPErrorCodes.ServerCancelled,
     );
 });
 

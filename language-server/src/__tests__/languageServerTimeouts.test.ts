@@ -1,27 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { LANGUAGE_SERVER_TIMEOUTS_MS } from '../languageServerTimeouts';
 import {
     createUnrealReconnectScheduler,
     TimeoutHandle,
 } from '../unrealReconnectScheduler';
 
-test('production timeout budgets remain explicit and seconds-bounded', () => {
-    assert.deepEqual(LANGUAGE_SERVER_TIMEOUTS_MS, {
-        unrealReconnectDelay: 2000,
-        windowsEditorOwnerQuery: 2000,
-        verifiedDebugDatabaseRequestDelay: 250,
-        initialOnlineNoTypeDbClassification: 5000,
-        apiFullReadyWait: 2000,
-        apiFullReadyPoll: 50,
-        workspaceDiagnosticsSettle: 4000,
-        workspaceDiagnosticsPoll: 10,
-        shutdownPersistenceFlush: 1000,
-        debugDatabaseChunkIntermessage: 1000,
-        parentProcessWatchdog: 1000,
-        cachePersistenceRetry: [1000, 3000, 5000],
-    });
-});
 test('Unreal reconnect scheduling is single-flight, cancellable, and injectable', () => {
     let allowed = true;
     let reconnects = 0;

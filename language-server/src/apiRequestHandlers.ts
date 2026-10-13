@@ -48,6 +48,7 @@ function runWhenTypesReady<T>(
         describeNotReady?: () => string;
         notReadyCode?: number;
         cancellationToken?: CancellationToken;
+        deadline?: number;
     } = {}
 ) : T | ResponseError<void> | Promise<T | ResponseError<void>>
 {
@@ -75,7 +76,7 @@ function runWhenTypesReady<T>(
         throw new Error('API full-ready poll interval must be a positive finite number.');
     let now = options.now ?? (() => performance.now());
     let wait = options.wait ?? waitForDelayOrCancellation;
-    let deadline = now() + timeoutMs;
+    let deadline = options.deadline ?? now() + timeoutMs;
 
     return (async () => {
         while (true)
@@ -131,9 +132,10 @@ export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
             throw error;
         }
     };
-    const runReady = <T>(run: () => T, cancellationToken?: CancellationToken) => runWhenTypesReady(run, {
+    const runReady = <T>(run: () => T, cancellationToken?: CancellationToken, deadline?: number) => runWhenTypesReady(run, {
         ...deps.typesReadyWait,
         cancellationToken,
+        deadline,
         isReady: deps.getFullReadyStatus
             ? () => deps.getFullReadyStatus().fullReady
             : undefined,
@@ -155,6 +157,7 @@ export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
         params: unknown,
         run: () => T,
         cancellationToken?: CancellationToken,
+        deadline?: number,
     ) => {
         let source = normalizeRequestedSource(params);
         if (!deps.getDebugDatabaseAccessReadiness
@@ -166,6 +169,7 @@ export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
         return runWhenTypesReady(run, {
             ...deps.typesReadyWait,
             cancellationToken,
+            deadline,
             notReadyCode: API_NATIVE_ACCESS_NOT_READY_ERROR_CODE,
             isReady: () => deps.getDebugDatabaseAccessReadiness?.() == 'complete',
             isTerminalNotReady: () => deps.getDebugDatabaseAccessReadiness?.() == 'failed',
@@ -179,10 +183,15 @@ export function registerApiRequestHandlers(deps : ApiRequestHandlerDeps) : void
         operation: Parameters<typeof executeApiReadOperation>[0],
         params: unknown,
         cancellationToken?: CancellationToken,
-    ) => runReady(
-        () => runNativeAccessReady(operation, params, () => runLegacyRead(operation, params), cancellationToken),
-        cancellationToken,
-    );
+    ) => {
+        let now = deps.typesReadyWait?.now ?? (() => performance.now());
+        let deadline = now() + (deps.typesReadyWait?.timeoutMs ?? LANGUAGE_SERVER_TIMEOUTS_MS.apiFullReadyWait);
+        return runReady(
+            () => runNativeAccessReady(operation, params, () => runLegacyRead(operation, params), cancellationToken, deadline),
+            cancellationToken,
+            deadline,
+        );
+    };
 
     connection.onRequest("angelscript/getUnrealConnectionStatus", () : boolean => {
         return isUnrealConnected();

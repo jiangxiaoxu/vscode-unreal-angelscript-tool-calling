@@ -1,5 +1,6 @@
 import {
     CancellationToken,
+    CancellationTokenSource,
     Connection,
     LSPErrorCodes,
     ResponseError,
@@ -8,8 +9,10 @@ import {
 import { URI } from 'vscode-uri';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { ApiReadOperation, executeApiReadOperation, isApiReadOperation } from './apiReadExecutor';
 import { LanguageServerDiagnosticsStatus } from './languageServerReadiness';
+import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
 import {
     createScriptSnapshotSequenceController,
     ScriptSnapshotIdentity,
@@ -101,6 +104,7 @@ export type ProjectDaemonScriptSnapshotProtocolDeps = {
         content: ValidatedScriptSnapshotContent | undefined,
     ) => void;
     getDiagnostics: () => WorkspaceDiagnosticReport;
+    requestWaitTimeoutMs?: number;
 };
 
 export type ProjectDaemonScriptSnapshotProtocol = {
@@ -509,34 +513,69 @@ export function createProjectDaemonScriptSnapshotProtocol(
     {
         ensureEnabled();
         ensureExpectedInstance(expectedServerInstanceId);
-        for (let attempt = 0; attempt != 2; ++attempt)
+        const waitSource = new CancellationTokenSource();
+        const cancellation = cancellationToken?.onCancellationRequested(() => waitSource.cancel());
+        if (cancellationToken?.isCancellationRequested)
+            waitSource.cancel();
+        const timeoutMs = deps.requestWaitTimeoutMs ?? LANGUAGE_SERVER_TIMEOUTS_MS.apiFullReadyWait;
+        const deadline = performance.now() + timeoutMs;
+        let timedOut = false;
+        const timer = setTimeout(() => {
+            timedOut = true;
+            waitSource.cancel();
+        }, timeoutMs);
+        function checkWaitDeadline() : void
         {
-            let identity = await sequence.waitForSettled(minimumScriptSequence, cancellationToken);
             if (cancellationToken?.isCancellationRequested)
+                throw new ResponseError<void>(LSPErrorCodes.RequestCancelled, 'Sequence-aware Language Server request was cancelled.');
+            if (timedOut || performance.now() >= deadline)
             {
-                throw new ResponseError<void>(
-                    LSPErrorCodes.RequestCancelled,
-                    'Sequence-aware Language Server request was cancelled before execution.',
-                );
-            }
-            let before = deps.getReadiness();
-            if (!before.fullReady)
-            {
-                if (attempt == 0)
-                    continue;
-                throw protocolError('Language Server semantic generation changed before the sequence-aware query could execute.');
-            }
-            let value = run();
-            let after = deps.getReadiness();
-            let current = sequence.snapshot();
-            if (after.fullReady
-                && before.semanticGeneration == after.semanticGeneration
-                && current.settled?.scriptSequence >= identity.scriptSequence)
-            {
-                return { ...toProvenance(deps.serverInstanceId, identity, after), value };
+                timedOut = true;
+                throw new ResponseError<void>(-32002, `NotReady: script sequence did not settle within ${timeoutMs}ms.`);
             }
         }
-        throw protocolError('Language Server semantic generation changed during a sequence-aware query.');
+        try
+        {
+            for (let attempt = 0; attempt != 2; ++attempt)
+            {
+                checkWaitDeadline();
+                let identity = await sequence.waitForSettled(minimumScriptSequence, waitSource.token);
+                checkWaitDeadline();
+                let before = deps.getReadiness();
+                if (!before.fullReady)
+                {
+                    if (attempt == 0)
+                        continue;
+                    throw protocolError('Language Server semantic generation changed before the sequence-aware query could execute.');
+                }
+                checkWaitDeadline();
+                let value = run();
+                let after = deps.getReadiness();
+                let current = sequence.snapshot();
+                checkWaitDeadline();
+                if (after.fullReady
+                    && before.semanticGeneration == after.semanticGeneration
+                    && current.settled?.scriptSequence >= identity.scriptSequence)
+                {
+                    return { ...toProvenance(deps.serverInstanceId, identity, after), value };
+                }
+            }
+            throw protocolError('Language Server semantic generation changed during a sequence-aware query.');
+        }
+        catch (error)
+        {
+            if (cancellationToken?.isCancellationRequested)
+                throw new ResponseError<void>(LSPErrorCodes.RequestCancelled, 'Sequence-aware Language Server request was cancelled.');
+            if (timedOut)
+                throw new ResponseError<void>(-32002, `NotReady: script sequence did not settle within ${timeoutMs}ms.`);
+            throw error;
+        }
+        finally
+        {
+            clearTimeout(timer);
+            cancellation?.dispose();
+            waitSource.dispose();
+        }
     }
 
     function registerHandlers() : void

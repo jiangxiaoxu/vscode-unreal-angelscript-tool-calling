@@ -1195,6 +1195,45 @@ test('API handlers return a bounded NotReady ResponseError when Unreal types nev
     }
 });
 
+for (const accessReadyAt of [20, 40])
+{
+    test(`API readiness phases share one deadline when native access becomes ready at ${accessReadyAt}ms`, async () =>
+    {
+        FinishTypesFromUnreal();
+        const handlers = new Map<string, (params: any) => any>();
+        const connection = {
+            onRequest(name: string, handler: (params: any) => any): void
+            {
+                handlers.set(name, handler);
+            },
+        };
+        let now = 0;
+        registerApiRequestHandlers({
+            connection: connection as any,
+            isUnrealConnected: () => true,
+            getFullReadyStatus: () => ({ fullReady: now >= 10, stage: now >= 10 ? 'ready' : 'parsing', coverage: now >= 10 ? 'full' : 'none' }),
+            getDebugDatabaseAccessReadiness: () => now >= accessReadyAt ? 'complete' : 'pending',
+            typesReadyWait: {
+                timeoutMs: 30,
+                pollIntervalMs: 10,
+                now: () => now,
+                wait: async (delayMs) => { now += delayMs; return true; },
+            },
+        });
+        const result = await handlers.get('angelscript/queryAPI')?.({ query: 'Run', source: 'native' });
+        if (accessReadyAt < 30)
+        {
+            assert.equal(result?.ok, true);
+            assert.ok(now < 30);
+        }
+        else
+        {
+            assert.equal(result?.code, -32003);
+            assert.equal(now, 30);
+        }
+    });
+}
+
 test('API full-ready timeout uses an injectable wall-clock deadline', async () =>
 {
     const handlers = new Map<string, (params: any, cancellationToken?: CancellationToken) => any>();
