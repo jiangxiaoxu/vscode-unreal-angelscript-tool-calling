@@ -17,7 +17,6 @@ Maintenance rule:
 - Sequence-aware project-daemon diagnostics now return the standard `WorkspaceDiagnosticReport` shape, including per-document `kind`, `uri`, `version`, `resultId`, and diagnostic `items`, instead of exposing the internal registry snapshot.
 - Full project-daemon snapshot validation now recognizes `.as` extensions case-insensitively on Windows, so manifests containing files such as `Uppercase.AS` are accepted when their raw-byte hashes match.
 - Added a project-daemon-only sequence-aware script snapshot protocol with verified raw-byte manifests, cancellable semantic waiters, and provenance-bearing API and diagnostics reads. Concurrent daemon clients now wait for the minimum admitted script sequence without polling readiness or invalidating coherent in-flight snapshots when later edits arrive.
-- Bounded Language Server responsiveness with 2s Unreal reconnect and API-ready waits, 2s Windows owner queries, a 250ms verified DebugDatabase request delay, a 5s initial no-TypeDB classification, a 4s diagnostics settle deadline, and a 1s shutdown flush. API and diagnostics waits now honor cancellation, while Windows verification uses a fast socket-first query without weakening owner/project validation.
 - Replaced the prior roles with `vscode` and `project-daemon` while preserving stdio and IPC transports. Both roles maintain the Unreal connection and publish independent v2 caches at fixed VS Code and Saved paths.
 - VS Code now resolves one exact physical `.uproject` before enabling cache I/O. Windows TCP connections validate the same listener owner and project command line before and after connect.
 - Platforms without strict listener-owner verification now fail closed for live TCP refresh instead of accepting a blind port connection.
@@ -57,7 +56,6 @@ Maintenance rule:
 - Sequence-aware project-daemon diagnostics 现在返回标准 `WorkspaceDiagnosticReport` 结构,包含每个文档的 `kind`、`uri`、`version`、`resultId` 和 diagnostics `items`,不再暴露内部 registry snapshot.
 - Windows 上的 full project-daemon snapshot validation 现在以大小写无关方式识别 `.as` 扩展名. 当 raw-byte hash 匹配时,包含 `Uppercase.AS` 等文件的 manifest 会被接受.
 - 新增仅供 project-daemon 使用的 sequence-aware script snapshot protocol,包含 raw-byte manifest 校验、可取消的 semantic waiter,以及携带 provenance 的 API 与 diagnostics read. 并发 daemon client 现在会等待 admission 时要求的最小 script sequence,不再轮询 readiness;后续编辑也不会使已在执行的一致 snapshot 失效.
-- Language Server responsiveness 现在受明确上限约束:Unreal reconnect 与 API-ready wait 为 2s,Windows owner query 为 2s,verified DebugDatabase request delay 为 250ms,initial no-TypeDB classification 为 5s,diagnostics settle deadline 为 4s,shutdown flush 为 1s. API 与 diagnostics wait 现在响应 cancellation;Windows verification 改用快速 socket-first query,不放宽 owner/project validation.
 - 旧 roles 已替换为 `vscode` 和 `project-daemon`,同时保留 stdio 与 IPC transports. 两种 role 都维持 Unreal connection,并在固定的 VS Code 与 Saved 路径发布独立 v2 cache.
 - VS Code 只有解析到唯一 exact physical `.uproject` 后才启用 cache I/O. Windows TCP connection 会在 connect 前后验证同一个 listener owner 与项目 command line.
 - 无 strict listener-owner verification 的平台现在会拒绝 live TCP refresh,不再接受未经验证的 port connection.
@@ -87,6 +85,24 @@ Maintenance rule:
 - VS Code LM tool 集成与实现已删除,不提供 compatibility layer.
 - 旧 `angelscript/getTypeMembers` 和 `angelscript/getTypeHierarchy` request handlers 已由 `angelscript/getAPISymbolMembers` 和 `angelscript/getAPIClassHierarchy` 替代.
 - `GetAPISearch` 现在会在解析到 class scope 且省略 `includeInheritedFromScope` 时自动展开 inherited methods/properties.
+
+## [1.9.3081] - 2026-10-13
+
+### English
+
+#### Fixed
+- Unsettled document and workspace diagnostics now request a standard LSP retry instead of failing with a non-retryable `NotReady` error, so slow initialization cannot strand document pulls or exhaust workspace retry attempts.
+
+#### Changed
+- Relaxed all fork-managed waiting deadlines to 30s: API readiness and diagnostics (including sequence-aware daemon reads), initial no-TypeDB classification, each Windows owner query, DebugDatabase inter-message gaps, and shutdown cache flushing. API readiness phases share one per-request budget; polling, reconnect, deferred sends, and retry backoff intervals retain their original values. Cancellation and owner/project validation remain enforced.
+
+### 中文
+
+#### 修复
+- 未就绪的 document 和 workspace diagnostics 现在请求标准 LSP 重试, 不再返回不可重试的 `NotReady` 错误, 避免慢速初始化使 document pull 无法恢复或耗尽 workspace 重试次数.
+
+#### 变更
+- Fork 管理的等待期限统一放宽至 30s: API readiness 和 diagnostics (包含 sequence-aware daemon read), initial no-TypeDB classification, 每次 Windows owner query, DebugDatabase 相邻消息间隔和 shutdown cache flush. API 的多个 readiness 阶段共享单次请求预算; 轮询, 重连, 延迟发送和重试退避间隔保留原值. Cancellation 和 owner/project validation 仍然生效.
 
 ## [1.9.3080] - 2026-10-13
 
