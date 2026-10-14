@@ -16,7 +16,7 @@ export type EditorConnectionTuple = {
 
 export type EditorListenerIdentityResult =
     | { ok: true; processId: number; verification: 'windows-listener-owner' | 'windows-established-owner' }
-    | { ok: false; code: 'unsupported-platform' | 'owner-mismatch' | 'verification-failed'; reason: string };
+    | { ok: false; code: 'no-listener' | 'unsupported-platform' | 'owner-mismatch' | 'verification-failed'; reason: string };
 
 export type WindowsTcpOwner = {
     LocalAddress?: string;
@@ -102,8 +102,16 @@ export function validateWindowsListenerProcesses(
 {
     let listeners = asOwners(values).filter((value) =>
         value.LocalPort == options.port && isIpv4LoopbackReachableListener(value.LocalAddress));
+    if (listeners.length == 0)
+    {
+        return {
+            ok: false,
+            code: 'no-listener',
+            reason: `No TCP listener is reachable at 127.0.0.1:${options.port}.`,
+        };
+    }
     let ownerIds = new Set(listeners.map((value) => value.ProcessId).filter((value) => Number.isSafeInteger(value)));
-    if (listeners.length == 0 || ownerIds.size != 1 || !listeners.every((value) => matchesEditorProject(value, options.uprojectPath)))
+    if (ownerIds.size != 1 || !listeners.every((value) => matchesEditorProject(value, options.uprojectPath)))
     {
         return {
             ok: false,

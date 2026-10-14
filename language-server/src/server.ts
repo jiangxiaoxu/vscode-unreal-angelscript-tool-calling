@@ -51,6 +51,7 @@ import { resolveLanguageServerInitializationOptions, ResolvedAngelScriptLanguage
 import { createLanguageServerAutomationRuntime } from './languageServerAutomationRuntime';
 import { createActiveWorkTracker } from './activeWorkTracker';
 import { verifyEditorListenerIdentity, verifyEstablishedEditorConnectionIdentity } from './editorListenerIdentity';
+import { EditorConnectionWarnings } from './editorConnectionWarnings';
 import { createConnectionAttemptFence } from './connectionAttemptFence';
 import { createPerSocketRequestScheduler } from './perSocketRequestScheduler';
 import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
@@ -85,6 +86,7 @@ let connection: Connection = ipcSendAvailble
 // Create a connection to unreal
 let unreal : Socket;
 const requestDebugDatabaseScheduler = createPerSocketRequestScheduler<Socket>();
+const editorConnectionWarnings = new EditorConnectionWarnings((reason) => connection.console.warn(reason));
 
 const hostname = "127.0.0.1";
 let port : number = 27099;
@@ -205,9 +207,10 @@ async function connect_unreal() : Promise<void>
         readinessController.update({
             unrealConnected: false,
             editorProcessId: undefined,
-            editorIdentityVerification: preflight.code == 'unsupported-platform' ? 'unsupported-platform' : 'rejected',
+            editorIdentityVerification: preflight.code == 'no-listener' ? 'pending'
+                : (preflight.code == 'unsupported-platform' ? 'unsupported-platform' : 'rejected'),
         });
-        connection.console.warn(preflight.reason);
+        editorConnectionWarnings.report(preflight);
         if (preflight.code != 'unsupported-platform')
             schedule_unreal_reconnect();
         return;
@@ -509,6 +512,7 @@ async function connect_unreal() : Promise<void>
         connectAttemptFence.complete(attempt);
         // connection.console.log('Connection to unreal editor established.');
         UnrealConnected = true;
+        editorConnectionWarnings.reset();
         readinessController.update({
             unrealConnected: true,
             editorProcessId: postflight.processId,

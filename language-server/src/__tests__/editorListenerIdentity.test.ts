@@ -16,6 +16,26 @@ const editor = {
     CommandLine: '"C:\\UE\\UnrealEditor.exe" "G:\\Project\\Game\\Game.uproject"',
 };
 
+test('no reachable listener is distinct from an occupied port with a mismatched owner', () => {
+    for (let owners of [[], [{ ...editor, LocalAddress: '::1', LocalPort: options.port }],
+        [{ ...editor, LocalAddress: '127.0.0.1', LocalPort: options.port + 1 }]])
+    {
+        let result = validateWindowsListenerProcesses(owners, options);
+        assert.equal(result.ok, false);
+        if (!result.ok)
+            assert.equal(result.code, 'no-listener');
+    }
+    let occupied = validateWindowsListenerProcesses({
+        ...editor,
+        CommandLine: 'UnrealEditor.exe Other.uproject',
+        LocalAddress: '127.0.0.1',
+        LocalPort: options.port,
+    }, options);
+    assert.equal(occupied.ok, false);
+    if (!occupied.ok)
+        assert.equal(occupied.code, 'owner-mismatch');
+});
+
 test('preflight accepts only an unambiguous IPv4-loopback-reachable matching listener', () => {
     assert.deepEqual(validateWindowsListenerProcesses({
         ...editor,
