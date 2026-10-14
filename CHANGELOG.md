@@ -86,6 +86,18 @@ Maintenance rule:
 - 旧 `angelscript/getTypeMembers` 和 `angelscript/getTypeHierarchy` request handlers 已由 `angelscript/getAPISymbolMembers` 和 `angelscript/getAPIClassHierarchy` 替代.
 - `GetAPISearch` 现在会在解析到 class scope 且省略 `includeInheritedFromScope` 时自动展开 inherited methods/properties.
 
+## [1.9.3082] - 2026-10-14
+
+### English
+
+#### Fixed
+- Closing Unreal Editor or leaving its port without a listener now reconnects silently with pending identity verification. Repeated listener verification failures warn once per unchanged reason; an idle port or successful verified connection resets the warning state. Strict process and project checks remain enforced.
+
+### 中文
+
+#### 修复
+- 关闭 Unreal Editor 或端口没有监听者时, 现在以等待身份验证状态静默重连. 相同原因的 listener verification failure 只告警一次; 端口恢复空闲或验证连接成功后重置告警状态. 严格的进程和项目校验仍然生效.
+
 ## [1.9.3081] - 2026-10-13
 
 ### English

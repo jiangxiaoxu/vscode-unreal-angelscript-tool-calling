@@ -96,6 +96,7 @@ The language server restores its role-owned cache at startup to provide baseline
 - The single writer retries the latest generation after 1s, 3s, and 5s. Permanent failure keeps the active TypeDB and prior final cache, reports the cache as dirty, and waits for the next complete native generation or bounded shutdown flush.
 - After this VS Code process successfully publishes a live v2 generation, it safely removes the exact legacy `Script/.vscode/angelscript/unreal-cache.json` regular file.
 - Before and after each Windows TCP connection, the server verifies that the listener belongs to the same Unreal Editor process whose command line contains the exact physical `.uproject`.
+- A port without a listener is a normal offline state and reconnects silently. Repeated listener verification failures warn only when the failure reason changes; an idle port or successful verified connection resets the warning state.
 - Platforms without strict listener-owner verification fail closed for live TCP refresh and report `unsupported-platform`; a compatible existing v2 cache remains available offline.
 - `project-daemon` requires `initialize.processId`; the child performs a bounded cache flush and exits when its daemon parent dies or its stdio stream closes.
 - API queries use the live in-memory TypeDB. There is no API query index export or standalone index bundle.
@@ -176,6 +177,7 @@ Language Server 启动时会恢复当前 role 独占的缓存,在未连接引擎
 - Single writer 会在 1s、3s、5s 后重试 latest generation. 永久失败时保留 active TypeDB 与旧 final cache,报告 cache dirty,并等待下一轮完整 native generation 或 bounded shutdown flush.
 - 当前 VS Code process 成功发布 live v2 generation 后,才会安全删除 exact legacy `Script/.vscode/angelscript/unreal-cache.json` regular file.
 - Windows 下每次 TCP connect 前后都会验证 listener owner 是同一个 Unreal Editor process,且其 command line 包含 exact physical `.uproject`.
+- 端口没有监听者属于正常 offline 状态, 自动重连时保持静默. 重复的 listener verification failure 仅在失败原因变化时告警; 端口恢复空闲或验证连接成功后重置告警状态.
 - 无 strict listener-owner verification 的平台会拒绝 live TCP refresh 并报告 `unsupported-platform`;已有 compatible v2 cache 仍可用于 offline 能力.
 - `project-daemon` 必须提供 `initialize.processId`;daemon parent 退出或 stdio 关闭时 child 会执行 bounded cache flush 后退出.
 - API query 直接使用常驻内存 TypeDB,不再导出 API query index 或 standalone index bundle.
