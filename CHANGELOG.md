@@ -86,6 +86,28 @@ Maintenance rule:
 - 旧 `angelscript/getTypeMembers` 和 `angelscript/getTypeHierarchy` request handlers 已由 `angelscript/getAPISymbolMembers` 和 `angelscript/getAPIClassHierarchy` 替代.
 - `GetAPISearch` 现在会在解析到 class scope 且省略 `includeInheritedFromScope` 时自动展开 inherited methods/properties.
 
+## [1.9.3083] - 2026-10-16
+
+### English
+
+#### Fixed
+- Live TypeDB hydration and script resolution now yield between batches with a soft 8ms budget. FIFO semantic admission keeps requests and edits from observing a partially rebuilt database while transport, status, cancellation, and shutdown continue.
+- Each TypeDB synchronization round now shares one 30s budget across replacement candidates, reconnects, and rollback. Project-daemon hosts grant and confirm the round; VS Code uses a local best-effort budget. Failed rounds preserve the prior accepted generation and disk cache, and unapproved candidates cannot publish cache files.
+- Added transport and TypeDB phase diagnostics, bounded and cancellable semantic admission, and a guard against applying stale float-literal edits across native refreshes.
+
+#### Breaking Changes
+- Role-owned cache filenames are now `debug-database.json.gz` for both VS Code and project-daemon. Format compatibility remains controlled by the envelope schema/version. The former `debug-database.v2.json.gz` filename is neither read as a fallback nor migrated automatically; the next successful live refresh creates the new file.
+
+### 中文
+
+#### 修复
+- Live TypeDB hydrate 和 script resolve 现在使用 soft 8ms 预算分批让出执行. FIFO semantic admission 防止 request 和 edit 观察重建中的半成品, 同时继续处理 transport, status, cancellation 和 shutdown.
+- 每轮 TypeDB 同步共用一个 30s 总预算, replacement candidate, reconnect 和 rollback 均不续期. Project-daemon host 授予并确认本轮预算, VS Code 使用本地 best-effort 预算. 失败轮保留 prior accepted generation 和 disk cache, 未获批准的 candidate 不会发布 cache 文件.
+- 新增 transport 和 TypeDB 阶段 diagnostics, 有界且可取消的 semantic admission, 以及防止 float literal 旧编辑建议跨 native refresh 应用的保护.
+
+#### Breaking Changes
+- VS Code 和 project-daemon 的 role-owned cache 文件名统一为 `debug-database.json.gz`. 格式兼容性继续由 envelope schema/version 判断. 不读取旧 `debug-database.v2.json.gz` 文件名作为 fallback, 也不自动迁移; 下次成功的 live refresh 将生成新文件.
+
 ## [1.9.3082] - 2026-10-14
 
 ### English
