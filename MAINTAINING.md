@@ -1,249 +1,42 @@
-# Maintaining The Fork
+# Maintaining the Fork / Fork 维护
 
-[English](#english) | [中文](#中文)
+Use this guide for local validation and upstream integration. Product usage is in [README.md](README.md), and release history is in [CHANGELOG.md](CHANGELOG.md).
 
-## Table of Contents
-[English](#english)
-[File Tier Rules](#file-tier-rules)
-[Public Contract Rules](#public-contract-rules)
-[Commit Hygiene](#commit-hygiene)
-[Required Checks](#required-checks)
-[Upstream Merge Routine](#upstream-merge-routine)
-[中文](#中文)
-[文件分层规则](#文件分层规则)
-[公开契约规则](#公开契约规则)
-[提交卫生](#提交卫生)
-[必跑检查](#必跑检查)
-[上游合并流程](#上游合并流程)
+本页仅保留本地验证和 upstream 整合入口. 使用说明见 [README.md](README.md), 版本记录见 [CHANGELOG.md](CHANGELOG.md).
 
----
+## Validation / 验证
 
-## English
+Run from the repository root after `npm install`.
 
-This fork keeps a reusable language-server API query core while reducing long-term merge cost against `upstream/master`.
+执行 `npm install` 后, 在仓库根目录运行.
 
-The default strategy is layered compatibility:
-- keep fork-only behavior near request, contract, and query boundaries
-- keep upstream-sensitive entrypoints thin
-- prefer additive public API evolution over replacement
+| Command | Purpose / 用途 |
+| --- | --- |
+| `npm run compile` | Build extension and language server / 构建 extension 和 language server |
+| `npm test` | Full regression suite / 完整回归测试 |
+| `npm run test:fork-boundary` | Focused fork contract and query regression / fork 契约与查询回归 |
+| `npm run upstream:divergence:stat` | Changed files relative to upstream / 相对 upstream 的文件差异 |
+| `npm run upstream:divergence:log` | Fork commits relative to upstream / 相对 upstream 的提交 |
+| `npm run merge:smoke -- --base upstream/master` | Report integration-sensitive changes / 报告整合敏感改动 |
 
-### File Tier Rules
-Use these file tiers to decide where new work should land.
+The smoke command compares committed `HEAD` with the base ref. It reports likely conflicts and documentation gaps; it does not attempt a merge or run tests.
 
-Frozen / minimize changes:
-- `extension/src/extension.ts`
-- `language-server/src/server.ts`
-- `language-server/src/symbols.ts`
-- `package.json`
+smoke 命令比较已提交的 `HEAD` 与基线 ref, 报告可能的冲突和文档遗漏, 不会尝试合并或运行测试.
 
-These files should only take small bugfixes, thin glue, registration wiring, or unavoidable integration edits.
+## Upstream integration / 上游整合
 
-Cautious / change deliberately:
-- `extension/src/apiRequests.ts`
-- `README.md`
-- `AGENTS.md`
-- `MAINTAINING.md`
-- `scripts/merge-smoke.mjs`
+1. Preserve local work, then fetch and review divergence:
+   保存本地工作, 然后获取并检查差异:
 
-Boundary / preferred expansion area:
-- `extension/src/apiPanel.ts`
-- `extension/src/scriptRoots.ts`
-- `language-server/src/apiRequestHandlers.ts`
-- `language-server/src/workspaceLayout.ts`
-- `language-server/src/unrealCacheController.ts`
-- `language-server/src/symbolResolve.ts`
-- `language-server/src/api_query_engine.ts`
-- `language-server/src/api_search.ts`
-- `language-server/src/api_docs.ts`
-- `language-server/src/__tests__/apiQueryCore.test.ts`
-- `language-server/src/__tests__/apiSearch.test.ts`
-- `language-server/src/__tests__/symbolResolve.test.ts`
-- `language-server/src/__tests__/workspaceLayout.test.ts`
+   ```sh
+   git fetch upstream
+   npm run upstream:divergence:stat
+   npm run upstream:divergence:log
+   npm run merge:smoke -- --base upstream/master
+   npm run test:fork-boundary
+   ```
 
-Parser/database/core files should not be modified for fork-only features by default. This includes files such as:
-- `language-server/src/as_parser.ts`
-- `language-server/src/database.ts`
-- `language-server/src/parsed_completion.ts`
-- `language-server/src/references.ts`
-
-### Public Contract Rules
-Fork-owned API query requests should evolve additively by default:
-- add optional request fields
-- add optional response fields
-- add optional notices
-
-Do not make these changes in place unless a new opt-in path exists:
-- rename or remove public fields
-- flip default behavior for `filePath`, line/character indexing, or default search mode
-- replace structured output with an incompatible shape
-
-If a semantic break is unavoidable, add either:
-- a new opt-in flag, or
-- a new versioned request method
-
-### Commit Hygiene
-Keep each commit focused on one dimension only:
-- contract
-- search behavior
-- docs
-- CI
-
-Do not mix behavior changes with docs rewrites, release metadata, and workflow churn in the same commit.
-
-Recommended prefixes for fork-only work:
-- `fork(tooling):`
-- `fork(contract):`
-- `fork(release):`
-- `fork(docs):`
-
-### Required Checks
-Run these checks before risky maintenance work:
-- `npm run test:fork-boundary`
-- `npm run merge:smoke -- --base upstream/master`
-- `npm run upstream:divergence:stat`
-- `npm run upstream:divergence:log`
-
-Use this quick checklist during review:
-- Did new fork work stay in boundary files when possible?
-- Were frozen files touched only for bugfixes or unavoidable integration?
-- Did any fork-owned request schema or activation/config behavior change?
-- Do `README.md` and `CHANGELOG.md` still match the current contract?
-
-### Upstream Merge Routine
-1. Fetch upstream:
-   `git fetch upstream`
-2. Review current divergence:
-   `npm run upstream:divergence:stat`
-   `npm run upstream:divergence:log`
-3. Run merge smoke first:
-   `npm run merge:smoke -- --base upstream/master`
-4. Create a temporary merge-smoke branch from current work:
-   `git switch -c codex/upstream-smoke-YYYYMMDD`
-5. Attempt a non-final merge:
-   `git merge --no-commit --no-ff upstream/master`
-6. Inspect high-risk files first:
-   `extension/src/extension.ts`
-   `language-server/src/server.ts`
-   `package.json`
-7. Run the fork boundary regression suite:
-   `npm run test:fork-boundary`
-8. If the smoke pass is only for inspection, abort the merge:
-   `git merge --abort`
-
-If a change looks generally useful and low-coupling, consider extracting it into a standalone commit that can be proposed upstream.
-
----
-
-## 中文
-
-这个 fork 会继续保留可复用的 language-server API query core,同时尽量降低与 `upstream/master` 的长期合并成本.
-
-默认采用分层兼容策略:
-- 把 fork 专属行为尽量留在 request、contract、query 边界层
-- 保持 upstream 敏感入口足够薄
-- 公开 API 优先采用加法式演进,不要直接替换旧语义
-
-### 文件分层规则
-新增工作默认按以下分层落位.
-
-Frozen / 尽量冻结:
-- `extension/src/extension.ts`
-- `language-server/src/server.ts`
-- `language-server/src/symbols.ts`
-- `package.json`
-
-这些文件只应承载小型 bugfix、薄 glue、注册 wiring 或无法避免的集成改动.
-
-Cautious / 谨慎改:
-- `extension/src/apiRequests.ts`
-- `README.md`
-- `AGENTS.md`
-- `MAINTAINING.md`
-- `scripts/merge-smoke.mjs`
-
-Boundary / 可继续扩展:
-- `extension/src/apiPanel.ts`
-- `extension/src/scriptRoots.ts`
-- `language-server/src/apiRequestHandlers.ts`
-- `language-server/src/workspaceLayout.ts`
-- `language-server/src/unrealCacheController.ts`
-- `language-server/src/symbolResolve.ts`
-- `language-server/src/api_query_engine.ts`
-- `language-server/src/api_search.ts`
-- `language-server/src/api_docs.ts`
-- `language-server/src/__tests__/apiQueryCore.test.ts`
-- `language-server/src/__tests__/apiSearch.test.ts`
-- `language-server/src/__tests__/symbolResolve.test.ts`
-- `language-server/src/__tests__/workspaceLayout.test.ts`
-
-parser/database/core 文件默认不要为了 fork-only 功能去改,包括但不限于:
-- `language-server/src/as_parser.ts`
-- `language-server/src/database.ts`
-- `language-server/src/parsed_completion.ts`
-- `language-server/src/references.ts`
-
-### 公开契约规则
-fork-owned API query request 默认只允许加法式演进:
-- 新增 optional 请求字段
-- 新增 optional 响应字段
-- 新增 optional notice
-
-以下变化不要直接原地修改,除非已经提供新的 opt-in 路径:
-- 重命名或删除公开字段
-- 修改 `filePath`、line/character 基准、默认 search mode 这类默认行为
-- 把 structured output 改成不兼容的结构
-
-如果确实必须引入语义破坏,请优先采用:
-- 新增显式 opt-in 开关,或
-- 新增 versioned request method
-
-### 提交卫生
-每个 commit 只覆盖一个维度:
-- contract
-- search behavior
-- docs
-- CI
-
-不要把行为改动、文档重写、发布元数据和 workflow 调整混在同一个 commit 里.
-
-fork-only 提交推荐前缀:
-- `fork(tooling):`
-- `fork(contract):`
-- `fork(release):`
-- `fork(docs):`
-
-### 必跑检查
-以下检查用于高风险维护动作前的基线验证:
-- `npm run test:fork-boundary`
-- `npm run merge:smoke -- --base upstream/master`
-- `npm run upstream:divergence:stat`
-- `npm run upstream:divergence:log`
-
-评审时至少快速确认:
-- 新的 fork 能力是否尽量留在 boundary 文件?
-- Frozen 文件是否只因 bugfix 或无法避免的集成需求而被修改?
-- fork-owned request schema 或 activation/config 行为是否发生变化?
-- `README.md` 和 `CHANGELOG.md` 是否仍与当前 contract 一致?
-
-### 上游合并流程
-1. 拉取 upstream:
-   `git fetch upstream`
-2. 查看当前分叉情况:
-   `npm run upstream:divergence:stat`
-   `npm run upstream:divergence:log`
-3. 先运行 merge smoke:
-   `npm run merge:smoke -- --base upstream/master`
-4. 从当前工作创建一个临时 merge smoke 分支:
-   `git switch -c codex/upstream-smoke-YYYYMMDD`
-5. 执行一次不落盘的合并尝试:
-   `git merge --no-commit --no-ff upstream/master`
-6. 优先检查高风险文件:
-   `extension/src/extension.ts`
-   `language-server/src/server.ts`
-   `package.json`
-7. 运行 fork 边界回归测试:
-   `npm run test:fork-boundary`
-8. 如果这次只是做 smoke 检查,则中止合并:
-   `git merge --abort`
-
-如果某些改动本身通用、耦合低,优先把它们抽成独立 commit,必要时尝试回灌 upstream.
+2. Integrate `upstream/master` on a review branch. Inspect the files flagged by the report and resolve conflicts against the current API behavior.
+   在评审分支整合 `upstream/master`. 检查报告标出的文件, 按当前 API 行为解决冲突.
+3. After integration, run `npm test`. Check that user-facing changes are reflected in README and CHANGELOG.
+   整合后运行 `npm test`, 并确认 README 和 CHANGELOG 已反映用户可见的变化.

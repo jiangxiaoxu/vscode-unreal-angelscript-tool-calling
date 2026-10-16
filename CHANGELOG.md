@@ -86,6 +86,20 @@ Maintenance rule:
 - 旧 `angelscript/getTypeMembers` 和 `angelscript/getTypeHierarchy` request handlers 已由 `angelscript/getAPISymbolMembers` 和 `angelscript/getAPIClassHierarchy` 替代.
 - `GetAPISearch` 现在会在解析到 class scope 且省略 `includeInheritedFromScope` 时自动展开 inherited methods/properties.
 
+## [1.9.3084] - 2026-10-16
+
+### English
+
+#### Documentation
+- Simplified the bilingual README, maintenance guide, and search syntax reference. Moved language-server integration details to a short dedicated reference and corrected a search example.
+- Clarified that the former VS Code LM tool calling integration has been removed, while the API panel and language-server query interfaces remain available. No runtime behavior changed in this release.
+
+### 中文
+
+#### 文档
+- 精简双语 README, 维护指南和搜索语法说明. 将 language-server 集成细节整理为独立短参考, 并纠正搜索示例.
+- 明确旧版 VS Code LM 工具调用集成已移除, API 面板和 language-server 查询接口仍可使用. 本次发布不改变运行行为.
+
 ## [1.9.3083] - 2026-10-16
 
 ### English

@@ -1,216 +1,83 @@
 # Unreal Angelscript VS Code Extension
 
-[English](#english) | [中文](#中文)
+Language server, debugger, and API browser for UnrealEngine-Angelscript.
+UnrealEngine-Angelscript 的语言服务, 调试器和 API 浏览扩展.
 
-## Table of Contents
-[English](#english)
-[Overview](#overview)
-[Quick Start](#quick-start)
-[Core Features](#core-features)
-[More Language Features](#more-language-features)
-[Semantic Symbol Colors](#semantic-symbol-colors)
-[Offline Cache](#offline-cache)
-[Build](#build)
-[Known Limits](#known-limits)
-[Fork Maintenance](#fork-maintenance)
-[Upstream](#upstream)
+## Contents / 目录
 
-## 目录
-[中文](#中文)
-[概览](#概览)
-[快速开始](#快速开始)
-[核心功能](#核心功能)
-[更多语言功能](#更多语言功能)
-[语义符号颜色](#语义符号颜色)
-[离线缓存](#离线缓存)
-[构建](#构建)
-[已知限制](#已知限制)
-[维护策略](#维护策略)
-[上游](#上游)
-
----
+- English: [Quick start](#quick-start) | [Features](#features) | [Limits](#limits)
+- 中文: [快速开始](#快速开始) | [功能](#功能) | [使用限制](#使用限制)
+- [Development / 开发](#development--开发) | [References / 参考](#references--参考)
 
 ## English
 
-### Overview
-This extension provides language server and debugger support for UnrealEngine-Angelscript.
+### Quick start
 
-### Quick Start
-1. Use an Unreal Editor build with Angelscript enabled.
-2. Open either your project's `Script` folder itself, or its parent folder that contains `Script`, in VS Code.
-3. Start Unreal Editor. The extension connects automatically.
+1. Install this extension and use an Unreal Editor build with Angelscript enabled.
+2. Open the project's `Script` folder, or its parent containing `Script`, in VS Code.
+3. Open an `.as` file and start Unreal Editor. The extension connects automatically.
 
-Notes:
-- Core language features run across all resolved `Script` roots from the current workspace folders.
-- Supported workspace layouts are strict: the root must be `Script` itself, or contain `<workspace>/Script`.
-- Startup indexing scans only resolved `Script` roots (`Script/**/*.as`), not the entire workspace tree.
-- Runtime file watching and incremental parse/update handling are also restricted to resolved `Script` roots only.
-- Initial indexing honors `UnrealAngelscript.scriptIgnorePatterns`.
-- If workspace folders change after activation, reload the window to refresh Script-root watchers and indexing.
-- Unsupported workspace layouts fail fast with an error message and skip initial indexing.
+### Features
 
-### Core Features
-- Code completion, go to definition, rename, find references, semantic highlighting.
-- Compile errors from Unreal Editor on save.
-- Debugging support, breakpoints and exception pause.
-- Context commands: `Go to Symbol`, `Wrap with //#region`.
+- Completion, signature help, definition, references, rename, semantic highlighting, and code actions.
+- Compile errors from Unreal Editor on save; debugging with breakpoints and exception pause.
+- `Angelscript API` panel for browsing and searching symbols.
+- `Go to Symbol` and `Wrap with //#region` context commands.
+- Offline language support from a compatible cached DebugDatabase.
 
-Some features degrade when Unreal Editor is disconnected.
+**The former VS Code LM tool calling integration has been removed.** The API panel and language-server query interfaces remain. The repository name and extension ID retain the historical `tool-calling` name.
 
-### More Language Features
-The language server also provides signature help, code actions and quick fixes. Some of these features require an active Unreal Editor connection.
+### Limits
 
-### Semantic Symbol Colors
-Themes do not always distinguish every AngelScript semantic scope. Add `editor.tokenColorCustomizations` to the workspace settings when extra visual distinction is useful. Common scopes include `support.type.component.angelscript`, `support.type.actor.angelscript`, `variable.parameter.angelscript`, `variable.other.local.angelscript`, `variable.other.global.angelscript`, and `entity.name.function.angelscript`.
-
-```json
-{
-    "editor.tokenColorCustomizations": {
-        "[Default Dark+]": {
-            "textMateRules": [
-                {
-                    "scope": "support.type.component.angelscript",
-                    "settings": { "foreground": "#4ec962" }
-                },
-                {
-                    "scope": "support.type.actor.angelscript",
-                    "settings": { "foreground": "#2eb0c9" }
-                }
-            ]
-        }
-    }
-}
-```
-
-### Offline Cache
-The language server restores its role-owned cache at startup to provide baseline capabilities without an active engine connection.
-
-- Roles are limited to `vscode` and `project-daemon`; both keep the Unreal connection online and publish an independent cache.
-- VS Code cache: `<Project>/Script/.vscode/angelscript/debug-database.json.gz`.
-- Project daemon cache: `<Project>/Saved/ASEditorAutomation/LanguageServer/debug-database.json.gz`.
-- Cache filenames stay stable; the envelope's schema/version determines format compatibility. The former `debug-database.v2.json.gz` path is not read as a fallback or migrated automatically.
-- VS Code enables cache access only when its workspace resolves to exactly one physical `.uproject`; otherwise it keeps language features active, disables cache I/O, and warns.
-- The compact gzip envelope preserves ordered DebugDatabase chunks and records project identity, revision, content hash, producer metadata, script settings, and completion state.
-- Corrupt, oversized, incomplete, identity-mismatched, or unsupported cache files are ignored safely.
-- A complete native generation is validated and accepted into the in-memory TypeDB before cache I/O. API queries continue to use that active generation while an immutable snapshot is published asynchronously.
-- A worker thread serializes, hashes, compresses, writes, fsyncs, and verifies a unique same-directory temporary file. The main thread then rechecks the generation token, atomically replaces the final cache, and asynchronously fsyncs the parent directory. A superseded or invalid temporary file never touches the prior final cache.
-- The single writer retries the latest generation after 1s, 3s, and 5s. Permanent failure keeps the active TypeDB and prior final cache, reports the cache as dirty, and waits for the next complete native generation or bounded shutdown flush.
-- After this VS Code process successfully publishes a live generation, it safely removes the exact legacy `Script/.vscode/angelscript/unreal-cache.json` regular file.
-- Before and after each Windows TCP connection, the server verifies that the listener belongs to the same Unreal Editor process whose command line contains the exact physical `.uproject`.
-- A port without a listener is a normal offline state and reconnects silently. Repeated listener verification failures warn only when the failure reason changes; an idle port or successful verified connection resets the warning state.
-- Platforms without strict listener-owner verification fail closed for live TCP refresh and report `unsupported-platform`; a compatible existing cache remains available offline.
-- `project-daemon` requires `initialize.processId`; the child performs a bounded cache flush and exits when its daemon parent dies or its stdio stream closes.
-- API queries use the live in-memory TypeDB. There is no API query index export or standalone index bundle.
-- Standard `textDocument/diagnostic` and `workspace/diagnostic` pull requests return deterministic result IDs and support unchanged reports through previous-result IDs.
-- Fork-managed waiting deadlines are 30s: API readiness, diagnostics, initial no-TypeDB classification, each Windows owner query, DebugDatabase inter-message gaps, and shutdown cache flushing. API readiness phases share one per-request budget, including sequence-aware daemon reads. Unsettled standard diagnostics return `ServerCancelled` with `retriggerRequest: true`, allowing the client to retry; API and sequence-aware reads return `NotReady` on timeout and can be requested again. These are individual waiting budgets, not an overall initialization deadline; parse-only diagnostics still require script parsing to finish. Request cancellation remains supported. Polling, reconnect, deferred sends, and retry backoff intervals are unchanged.
-- `angelscript/diagnosticsStatus` exposes monotonic `semanticGeneration` and `settledSemanticGeneration` counters plus `activeRevision`, `persistedRevision`, `cacheState`, `cacheDirty`, `persistenceAttempt`, and `lastPersistenceError`. Persistence failure does not reduce semantic readiness. A request snapshot is stable only when both semantic counters match, `fullReady` is true, and the counters remain unchanged across status-before/request/status-after.
-- Each `DebugDatabaseSettings` message starts a new native transaction on the verified socket. Live TypeDB rebuild and script resolution yield between batches with a soft 8ms budget. Semantic requests and edit notifications wait in FIFO order while shared semantic data changes; connection control, status, cancellation, shutdown, and transport handling continue. A single synchronous step is not preempted.
-- A TypeDB synchronization round has one 30s total budget shared by transport, replacement candidates, reconnects, and rollback. For `project-daemon`, the host grants and confirms the round through `angelscript/beginTypeDatabaseSync`; its external watchdog remains the host's responsibility. VS Code uses a local best-effort budget without requiring that private host request. Waiting offline before the first verified Editor request is not charged.
-- The new generation becomes ready only after its script resolution settles and the synchronization round is confirmed. Cache publication requires that approval; a failed or superseded transaction restores the prior accepted generation under the semantic gate, and failed rounds do not overwrite the prior disk cache. Cache persistence after success confirmation remains asynchronous and is outside the synchronization budget.
-
-### Build
-- `npm install` installs the root dependencies and the nested `extension` and `language-server` packages via `postinstall`.
-- `npm run compile` builds both the extension bundle and the language server bundle.
-- `npm run watch` watches both bundles during development.
-- `npm test` runs the full test suite.
-- `npm run test:fork-boundary` runs the fork-boundary regression suite for the language-server API query core and workspace layout behavior.
-
-### Known Limits
-- When engine is disconnected, details depend on cached DebugDatabase and available `doc` fields.
-- Cache is not written before DebugDatabase processing completes.
-- This extension is incompatible with `Hazelight.unreal-angelscript`. On each startup, if that extension is installed, this extension shows an error message with an `Open Extensions` action, then stops initialization.
-
-### Fork Maintenance
-This fork uses a layered-compatibility maintenance strategy to keep future upstream merges manageable.
-
-- This repository follows a layered-compatibility strategy for future upstream merges.
-- Detailed maintenance rules live in [MAINTAINING.md](./MAINTAINING.md).
-- Agent and automation execution rules live in [AGENTS.md](./AGENTS.md).
-
-### Upstream
-Language Server and Debug Adapter for UnrealEngine-Angelscript:
-https://angelscript.hazelight.se
-
----
+- Only resolved `Script` roots are indexed and watched. `UnrealAngelscript.scriptIgnorePatterns` controls exclusions. Reload the window after changing workspace folders.
+- Some features require Unreal Editor; offline results depend on the cache and available documentation.
+- Cache access requires exactly one physical `.uproject`. Live engine refresh currently requires Windows listener-owner verification; compatible caches remain usable offline on other platforms.
+- `Hazelight.unreal-angelscript` must be uninstalled: its presence stops this extension's initialization.
 
 ## 中文
 
-### 概览
-这是 UnrealEngine-Angelscript 的 VS Code 扩展分支版本,提供语言服务与调试能力.
-
 ### 快速开始
-1. 使用启用 Angelscript 的 Unreal Editor 版本.
-2. 在 VS Code 中打开项目的 `Script` 文件夹本身,或打开其上一级且包含 `Script` 的目录.
-3. 启动 Unreal Editor,扩展会自动连接.
 
-说明:
-- 核心语言功能会覆盖当前 workspace folders 中所有解析成功的 `Script` 根目录.
-- 工作区兼容策略为严格模式: 根目录必须是 `Script` 本身,或包含 `<workspace>/Script`.
-- 启动索引只扫描解析后的 `Script` 根目录(`Script/**/*.as`),不会全盘递归扫描工作区.
-- 运行期文件监听与增量解析/更新同样严格限制在解析后的 `Script` 根目录内.
-- 初始索引会遵守 `UnrealAngelscript.scriptIgnorePatterns`.
-- 如果激活后发生 workspace folders 变更,需要 reload window 才会刷新 `Script` watcher 和索引.
-- 对不受支持的工作区形态会快速报错并跳过初始索引.
+1. 安装本扩展, 使用启用 Angelscript 的 Unreal Editor 版本.
+2. 在 VS Code 打开项目的 `Script` 文件夹, 或包含 `Script` 的上一级目录.
+3. 打开 `.as` 文件并启动 Unreal Editor, 扩展会自动连接.
 
-### 核心功能
-- 代码补全、定义跳转、重命名、引用查找、语义高亮.
-- 保存时展示 Unreal Editor 返回的编译错误.
-- 调试支持,含断点与异常暂停.
-- 右键命令: `Go to Symbol`、`Wrap with //#region`.
+### 功能
 
-部分能力依赖 Unreal Editor 连接,断开时会降级.
+- 代码补全, 签名提示, 定义跳转, 引用查找, 重命名, 语义高亮和 code actions.
+- 保存时显示 Unreal Editor 编译错误; 支持断点和异常暂停调试.
+- `Angelscript API` 面板用于浏览和搜索符号.
+- 右键命令 `Go to Symbol` 和 `Wrap with //#region`.
+- 使用兼容的 DebugDatabase 缓存提供离线语言能力.
 
-### 更多语言功能
-Language server 还提供 signature help、code actions 和 quick fixes. 部分功能需要 Unreal Editor 保持连接.
+**旧版 VS Code LM 工具调用集成已移除.** API 面板和 language-server 查询接口仍保留. 仓库名和扩展 ID 中的 `tool-calling` 是历史命名.
 
-### 语义符号颜色
-Color theme 不一定能区分所有 AngelScript semantic scope. 如需更明显的视觉区分,可在 workspace settings 中配置 `editor.tokenColorCustomizations`;常用 scope 与上方 English 示例相同.
+### 使用限制
 
-### 离线缓存
-Language Server 启动时会恢复当前 role 独占的缓存,在未连接引擎时提供基础能力.
+- 仅索引和监听解析成功的 `Script` 根目录. 使用 `UnrealAngelscript.scriptIgnorePatterns` 排除文件; 更改 workspace folders 后需重新加载窗口.
+- 部分功能需要 Unreal Editor; 离线结果取决于缓存和文档字段的可用性.
+- 缓存读写要求定位到唯一的物理 `.uproject`. 实时引擎刷新目前依赖 Windows listener-owner 校验; 其他平台仍可使用兼容缓存.
+- 需要卸载 `Hazelight.unreal-angelscript`, 否则本扩展会停止初始化.
 
-- Role 仅保留 `vscode` 和 `project-daemon`;两者都保持 Unreal connection online,并发布彼此独立的 cache.
-- VS Code cache: `<Project>/Script/.vscode/angelscript/debug-database.json.gz`.
-- Project daemon cache: `<Project>/Saved/ASEditorAutomation/LanguageServer/debug-database.json.gz`.
-- Cache 文件名保持稳定, 格式兼容性由 envelope 内的 schema/version 判断. 不读取旧 `debug-database.v2.json.gz` 路径作为 fallback, 也不自动迁移旧文件.
-- VS Code workspace 只有解析到唯一 physical `.uproject` 时才启用 cache I/O;否则保留语言功能、禁用 cache 并警告.
-- compact gzip envelope 保留 DebugDatabase chunks 的原始顺序,并记录 project identity、revision、content hash、producer metadata、script settings 和完成状态.
-- 损坏、超预算、不完整、identity 不匹配或 schema 不受支持的缓存会被安全忽略.
-- 完整 native generation 会先完成校验并成为 in-memory TypeDB 的 active authority,之后才进行 cache I/O. Immutable snapshot 异步发布期间,API query 继续使用该 active generation.
-- Worker thread 负责 serialize、hash、compress、写入、fsync 并验证同目录唯一临时文件. Main thread 随后再次检查 generation token、atomic replace final cache,再异步 fsync parent directory. 已被替代或无效的临时文件不会触碰旧 final cache.
-- Single writer 会在 1s、3s、5s 后重试 latest generation. 永久失败时保留 active TypeDB 与旧 final cache,报告 cache dirty,并等待下一轮完整 native generation 或 bounded shutdown flush.
-- 当前 VS Code process 成功发布 live generation 后,才会安全删除 exact legacy `Script/.vscode/angelscript/unreal-cache.json` regular file.
-- Windows 下每次 TCP connect 前后都会验证 listener owner 是同一个 Unreal Editor process,且其 command line 包含 exact physical `.uproject`.
-- 端口没有监听者属于正常 offline 状态, 自动重连时保持静默. 重复的 listener verification failure 仅在失败原因变化时告警; 端口恢复空闲或验证连接成功后重置告警状态.
-- 无 strict listener-owner verification 的平台会拒绝 live TCP refresh 并报告 `unsupported-platform`;已有 compatible cache 仍可用于 offline 能力.
-- `project-daemon` 必须提供 `initialize.processId`;daemon parent 退出或 stdio 关闭时 child 会执行 bounded cache flush 后退出.
-- API query 直接使用常驻内存 TypeDB,不再导出 API query index 或 standalone index bundle.
-- 标准 `textDocument/diagnostic` 与 `workspace/diagnostic` pull request 会返回确定性的 result ID,并通过 previous-result ID 支持 unchanged report.
-- Fork 管理的等待期限统一为 30s: API readiness, diagnostics, initial no-TypeDB classification, 每次 Windows owner query, DebugDatabase 相邻消息间隔和 shutdown cache flush. API 的多个 readiness 阶段共享单次请求预算, 包含 sequence-aware daemon read. 未就绪的标准 diagnostics 返回带 `retriggerRequest: true` 的 `ServerCancelled`, 由客户端重试; API 和 sequence-aware read 超时返回 `NotReady`, 可再次请求. 这些是各次等待的预算, 不是整个初始化期限; parse-only diagnostics 仍需等待脚本解析完成. 请求仍支持取消. 轮询, 重连, 延迟发送和重试退避间隔保持原值.
-- `angelscript/diagnosticsStatus` 提供单调递增的 `semanticGeneration` 与 `settledSemanticGeneration`,以及 `activeRevision`、`persistedRevision`、`cacheState`、`cacheDirty`、`persistenceAttempt` 和 `lastPersistenceError`. Persistence failure 不会降低 semantic readiness. 只有两个 semantic counter 相等、`fullReady` 为 true,且 status-before/request/status-after 的计数保持不变时,request snapshot 才稳定.
-- Verified socket 上每个 `DebugDatabaseSettings` message 都会开始新的 native transaction. Live TypeDB 重建和 script resolve 使用 soft 8ms 预算分批让出执行. 共享语义数据变化期间, semantic request 和 edit notification 按 FIFO 等待, 连接控制, status, cancellation, shutdown 和 transport 继续处理; 单个同步步骤不会被抢占.
-- 每轮 TypeDB 同步共用一个 30s 总预算, transport, replacement candidate, reconnect 和 rollback 均不续期. `project-daemon` host 通过 `angelscript/beginTypeDatabaseSync` 授予和确认本轮预算, 外部 watchdog 由 host 负责; VS Code 使用本地 best-effort 预算, 不依赖该私有 host request. 首次向 verified Editor 请求 TypeDB 前的 offline 等待不计入预算.
-- 新 generation 在 script resolve settled 且同步轮次获确认后才报告 ready, cache publication 同样需要批准. 失败或 superseded transaction 在 semantic gate 内恢复 prior accepted generation, 失败轮不覆盖旧 disk cache. 成功确认后的 cache persistence 继续异步执行, 不属于同步总预算.
+## Development / 开发
 
-### 构建
-- `npm install` 会安装根目录依赖,并通过 `postinstall` 安装嵌套的 `extension` 和 `language-server` 包依赖.
-- `npm run compile` 会同时构建 extension bundle 和 language server bundle.
-- `npm run watch` 会在开发时同时监听这两个 bundle.
-- `npm test` 会运行完整测试集.
-- `npm run test:fork-boundary` 会运行 fork boundary 回归测试,重点覆盖 language-server API query core 和 workspace layout 行为.
+Run from the repository root. `npm install` also installs the nested packages.
+在仓库根目录执行. `npm install` 同时安装嵌套包依赖.
 
-### 已知限制
-- 引擎断开时,详情能力依赖缓存 DebugDatabase 与 `doc` 字段可用性.
-- DebugDatabase 完整结束前不会写入缓存.
-- 本扩展与 `Hazelight.unreal-angelscript` 不兼容. 每次启动如果检测到该扩展已安装,会弹出错误提示并提供 `Open Extensions` 入口,随后停止初始化.
+```sh
+npm install
+npm run compile
+```
 
-### 维护策略
-这个 fork 默认采用分层兼容维护策略,以便后续继续合并 upstream 时把冲突控制在可管理范围内.
+| Command / 命令 | Purpose / 用途 |
+| --- | --- |
+| `npm run watch` | Watch both bundles / 监听构建 |
+| `npm test` | Full test suite / 完整测试 |
+| `npm run test:fork-boundary` | Fork boundary regression tests / Fork 边界回归测试 |
 
-- 本仓库采用 layered compatibility 策略来降低未来合并 upstream 的成本.
-- 更完整的维护规则见 [MAINTAINING.md](./MAINTAINING.md).
-- agent 和自动化执行约束见 [AGENTS.md](./AGENTS.md).
+## References / 参考
 
-### 上游
-Language Server and Debug Adapter for UnrealEngine-Angelscript:
-https://angelscript.hazelight.se
+- [Language-server integration / Language-server 集成](docs/language-server.md): cache paths, readiness, and daemon contracts / 缓存路径, 就绪状态和 daemon 契约.
+- [Search syntax / 搜索语法](structured-search-matching.md).
+- [Maintenance / 维护](MAINTAINING.md) and [Changelog / 更新记录](CHANGELOG.md).
+- [Upstream UnrealEngine-Angelscript](https://angelscript.hazelight.se).
