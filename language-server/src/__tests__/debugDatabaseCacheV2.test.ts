@@ -22,7 +22,7 @@ function withTempDir(run: (directory: string) => void) : void
 function makeContext(directory: string, overrides: Partial<DebugDatabaseCacheContext> = {}) : DebugDatabaseCacheContext
 {
     return {
-        cachePath: path.join(directory, 'debug-database.v2.json.gz'),
+        cachePath: path.join(directory, 'debug-database.json.gz'),
         access: 'read-write',
         projectIdentity: 'project-a',
         budgets: { ...DEFAULT_LANGUAGE_SERVER_BUDGETS },
@@ -77,7 +77,7 @@ test('debug database cache v2 round-trips ordered chunks and atomically replaces
         assert.equal(loaded.ok, true);
         if (loaded.ok)
             assert.deepEqual(loaded.cache.debugDatabaseChunks, [{ UThird: { id: 3 } }]);
-        assert.deepEqual(fs.readdirSync(directory), ['debug-database.v2.json.gz']);
+        assert.deepEqual(fs.readdirSync(directory), ['debug-database.json.gz']);
     });
 });
 

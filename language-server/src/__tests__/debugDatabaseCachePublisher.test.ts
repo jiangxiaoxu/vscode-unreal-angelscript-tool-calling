@@ -176,7 +176,7 @@ test('shutdown bounded flush retries a dirty generation that exhausted active re
 test('memory acceptance is immediate while persistence is slow', async () => {
     ResetDatabaseForTests();
     let directory = fs.mkdtempSync(path.join(os.tmpdir(), 'as-memory-first-'));
-    let cachePath = path.join(directory, 'debug-database.v2.json.gz');
+    let cachePath = path.join(directory, 'debug-database.json.gz');
     let context = {
         cachePath,
         access: 'read-write' as const,
@@ -212,7 +212,8 @@ test('memory acceptance is immediate while persistence is slow', async () => {
     assert.equal(controller.loadCacheFromDisk().loaded, true);
     controller.beginRefresh();
     controller.recordDebugDatabaseChunk(nativeType('UNewActive'));
-    let accepted = controller.acceptCompleteCandidate();
+    let accepted = await controller.acceptCompleteCandidate();
+    controller.approveAcceptedPublication(accepted.generation);
     assert.ok(GetTypeByName('UNewActive'));
     assert.equal(GetTypeByName('UOldPersisted') == null, true);
     assert.equal(controller.getPersistenceStatus().activeRevision, accepted.revision);
@@ -230,7 +231,7 @@ test('memory acceptance is immediate while persistence is slow', async () => {
 test('permanent publication failure keeps new active memory and the old final cache', async () => {
     ResetDatabaseForTests();
     let directory = fs.mkdtempSync(path.join(os.tmpdir(), 'as-memory-dirty-'));
-    let cachePath = path.join(directory, 'debug-database.v2.json.gz');
+    let cachePath = path.join(directory, 'debug-database.json.gz');
     let context = {
         cachePath,
         access: 'read-write' as const,
@@ -266,7 +267,8 @@ test('permanent publication failure keeps new active memory and the old final ca
     assert.equal(controller.loadCacheFromDisk().loaded, true);
     controller.beginRefresh();
     controller.recordDebugDatabaseChunk(nativeType('UNewMemoryAuthority'));
-    let accepted = controller.acceptCompleteCandidate();
+    let accepted = await controller.acceptCompleteCandidate();
+    controller.approveAcceptedPublication(accepted.generation);
     assert.ok(GetTypeByName('UNewMemoryAuthority'));
     assert.equal(await controller.flushPersistence(1000), false);
     assert.equal(attempts, 4);
@@ -283,7 +285,7 @@ test('permanent publication failure keeps new active memory and the old final ca
 
 test('stale atomic publication guard leaves the previous final untouched', async () => {
     let directory = fs.mkdtempSync(path.join(os.tmpdir(), 'as-stale-publish-'));
-    let cachePath = path.join(directory, 'debug-database.v2.json.gz');
+    let cachePath = path.join(directory, 'debug-database.json.gz');
     let context = {
         cachePath,
         access: 'read-write' as const,
@@ -323,7 +325,7 @@ test('stale atomic publication guard leaves the previous final untouched', async
 test('real large-cache preparation keeps status polling responsive on the main event loop', { timeout: 30000 }, async () => {
     let directory = fs.mkdtempSync(path.join(os.tmpdir(), 'as-worker-latency-'));
     let context = {
-        cachePath: path.join(directory, 'debug-database.v2.json.gz'),
+        cachePath: path.join(directory, 'debug-database.json.gz'),
         access: 'read-write' as const,
         projectIdentity: 'latency-project',
         budgets: { ...DEFAULT_LANGUAGE_SERVER_BUDGETS },

@@ -315,7 +315,7 @@ test('constructor access joins legacy root-namespace constructor records', () =>
     assert.equal(rootConstructor.access?.call.state, 'allowed');
 });
 
-test('incomplete sidecar access is discarded before legacy fallback commit', () =>
+test('incomplete sidecar access is discarded before legacy fallback commit', async () =>
 {
     database.ResetDatabaseForTests();
     let controller = createUnrealCacheController({ publisherRetryDelaysMs: [] });
@@ -335,13 +335,13 @@ test('incomplete sidecar access is discarded before legacy fallback commit', () 
         }],
     });
     controller.discardDebugDatabaseAccessChunks();
-    controller.acceptCompleteCandidate();
+    await controller.acceptCompleteCandidate();
     let property = database.GetTypeByName('AActor')?.getProperty('InitialLifeSpan', false);
     assert.equal(property?.access?.read.normal, 'unknown');
     assert.equal(property?.access?.write.normal, 'unknown');
 });
 
-test('accepted complete access remains ready after the live refresh closes', () =>
+test('accepted complete access remains ready after the live refresh closes', async () =>
 {
     database.ResetDatabaseForTests();
     let controller = createUnrealCacheController({ publisherRetryDelaysMs: [] });
@@ -359,11 +359,11 @@ test('accepted complete access remains ready after the live refresh closes', () 
         }],
     });
     controller.finishDebugDatabaseAccess();
-    controller.acceptCompleteCandidate();
+    await controller.acceptCompleteCandidate();
     assert.equal(controller.getDebugDatabaseAccessReadiness(), 'complete');
 });
 
-test('an empty access stream cannot be marked complete', () =>
+test('an empty access stream cannot be marked complete', async () =>
 {
     database.ResetDatabaseForTests();
     let controller = createUnrealCacheController({ publisherRetryDelaysMs: [] });
@@ -373,7 +373,7 @@ test('an empty access stream cannot be marked complete', () =>
     controller.recordDebugDatabaseAccessChunk({ properties: [], methods: [] });
     controller.finishDebugDatabaseAccess();
     assert.equal(controller.getDebugDatabaseAccessReadiness(), 'failed');
-    controller.acceptCompleteCandidate();
+    await controller.acceptCompleteCandidate();
     assert.equal(controller.getDebugDatabaseAccessReadiness(), 'base-only');
 });
 

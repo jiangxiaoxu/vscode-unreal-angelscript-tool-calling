@@ -37,6 +37,10 @@ try {
     $client = $listener.AcceptTcpClient()
     $stream = $client.GetStream()
     Send-Round -Stream $stream -Json '{"URestoredActive":{"properties":{},"methods":{}}}'
+    # 等待测试确认首轮已完整 settle 并持久化, 再发送失败替换.
+    if ([Console]::In.ReadLine() -ne 'REPLACE') {
+        throw 'Expected the replacement command after the accepted baseline.'
+    }
     Send-Round -Stream $stream -Json '{"UInvalidReplacement":{"properties":{"Broken":null},"methods":{}}}'
     Start-Sleep -Milliseconds 1200
 }

@@ -64,6 +64,9 @@ import {
 import { ScriptSnapshotIdentity } from './scriptSnapshotSequence';
 import { createScriptSnapshotFileManifestValidator } from './scriptSnapshotFileManifest';
 import glob from 'glob';
+import { performance } from 'node:perf_hooks';
+import { createNativeTypeDatabaseCoordinator } from './nativeTypeDatabaseCoordinator';
+import { UnrealTransportDiagnostics } from './unrealTransportDiagnostics';
 
 const ExtensionVersion = String(require('../../package.json').version);
 
@@ -79,9 +82,13 @@ import {
 // If we have a Node IPC send function available, use that, otherwise use stdio
 // to be used as a standalone lsp client.
 const ipcSendAvailble = typeof process.send === 'function';
-let connection: Connection = ipcSendAvailble
-    ? createConnection(new IPCMessageReader(process), new IPCMessageWriter(process))
-    : createConnection(new StreamMessageReader(process.stdin), new StreamMessageWriter(process.stdout));
+const languageServerMessageReader = ipcSendAvailble ? new IPCMessageReader(process) : new StreamMessageReader(process.stdin);
+const languageServerMessageWriter = ipcSendAvailble ? new IPCMessageWriter(process) : new StreamMessageWriter(process.stdout);
+let nativeCoordinator: ReturnType<typeof createNativeTypeDatabaseCoordinator>;
+let connection: Connection = createConnection(languageServerMessageReader, languageServerMessageWriter, {
+    messageStrategy: { handleMessage: (message, next) => nativeCoordinator.handleMessage(message, next) },
+});
+const transportDiagnostics = new UnrealTransportDiagnostics((method, payload) => connection.sendNotification(method, payload));
 
 // Create a connection to unreal
 let unreal : Socket;
@@ -120,7 +127,11 @@ let LanguageServerShutdownPromise: Promise<boolean> | null = null;
 let ParentProcessWatch: NodeJS.Timeout | null = null;
 let InitialUnrealConnectionClassificationTimeout: NodeJS.Timeout | null = null;
 let LanguageServerOptions : ResolvedAngelScriptLanguageServerOptions | null = null;
-const automationRuntime = createLanguageServerAutomationRuntime(connection, ExtensionVersion);
+const automationRuntime = createLanguageServerAutomationRuntime(connection, ExtensionVersion, {
+    onAbortLiveRefresh: (reason) => nativeCoordinator.abort(reason),
+    isLiveRefreshDisconnected: () => nativeCoordinator.active?.disconnected === true,
+    onDiagnostic: (event, data) => transportDiagnostics.report(unreal, event, data),
+});
 const unrealCacheController = automationRuntime.cache;
 const readinessController = automationRuntime.readiness;
 const ProjectDaemonServerInstanceId = randomUUID();
@@ -140,6 +151,23 @@ const unrealReconnectScheduler = createUnrealReconnectScheduler(
     () => void connect_unreal(),
     () => !LanguageServerStopping && !!LanguageServerOptions?.unrealOnline,
 );
+
+nativeCoordinator = createNativeTypeDatabaseCoordinator({
+    connection, writer: languageServerMessageWriter, ipc: ipcSendAvailble, transport: transportDiagnostics,
+    runtime: automationRuntime, scriptSnapshot: projectDaemonScriptSnapshotProtocol,
+    getOptions: () => LanguageServerOptions, getSocket: () => unreal, getSocketEpoch: () => UnrealSocketEpoch,
+    isStopping: () => LanguageServerStopping,
+    cancelReconnect: () => unrealReconnectScheduler.cancel(), cancelRequests: () => requestDebugDatabaseScheduler.cancelAll(),
+    cancelDiagnostics: () => ActiveNativeDiagnosticsCancel?.(),
+    onCommitted: (generation) => {
+        cancelInitialUnrealConnectionClassification();
+        PendingReResolveAfterInitialParse = false;
+        ScheduleNativeDiagnosticsRefresh(generation);
+    },
+    onCommitFailure: () => { if (!typedb.HasTypesFromUnreal()) UnrealTypesTimedOut = true; },
+    startDiagnostics: StartPendingNativeDiagnosticsRefresh,
+    resumeDiagnostics: resumeRestoredNativeDiagnosticsIfNeeded, trySettle: TrySettleSemanticGeneration,
+});
 
 function resumeRestoredNativeDiagnosticsIfNeeded() : void
 {
@@ -171,12 +199,13 @@ function watchProjectDaemonParent(processId: number | null) : void
 
 function schedule_unreal_reconnect() : void
 {
+    if (nativeCoordinator.deferReconnect(schedule_unreal_reconnect)) return;
     unrealReconnectScheduler.schedule();
 }
 
 async function connect_unreal() : Promise<void>
 {
-    if (LanguageServerStopping || !LanguageServerOptions?.unrealOnline || connectAttemptFence.hasActive())
+    if (nativeCoordinator.stopped || LanguageServerStopping || !LanguageServerOptions?.unrealOnline || connectAttemptFence.hasActive())
         return;
     let attemptOptions = LanguageServerOptions;
     let attempt = connectAttemptFence.begin();
@@ -221,20 +250,21 @@ async function connect_unreal() : Promise<void>
         requestDebugDatabaseScheduler.cancel(unreal);
         unreal.removeAllListeners();
         unreal.write(Uint8Array.from(buildDisconnect()));
-        unreal.destroy();
+        transportDiagnostics.destroy(unreal, 'replaced_by_connection_attempt');
     }
     UnrealConnected = false;
     let connectingSocket = new Socket;
     UnrealSocketEpoch += 1;
+    transportDiagnostics.attach(connectingSocket, UnrealSocketEpoch, hostname, port);
     let messageDecoder = new UnrealMessageDecoder();
     unreal = connectingSocket;
 
+    const engineQueue = nativeCoordinator.createEngineQueue(connectingSocket, dispatchUnrealMessage, () => unreal === connectingSocket);
     connectingSocket.on("data", function(data : Buffer) {
-        if (unreal !== connectingSocket)
-            return;
-        let messages : Array<Message> = messageDecoder.push(data);
-        for (let msg of messages)
-        {
+        if (unreal !== connectingSocket) return;
+        engineQueue.receive(messageDecoder.push(data));
+    });
+    function dispatchUnrealMessage(msg: Message) {
             if (msg.type == MessageType.Diagnostics)
             {
                 let diagnostics: Diagnostic[] = [];
@@ -289,10 +319,23 @@ async function connect_unreal() : Promise<void>
             else if(msg.type == MessageType.DebugDatabase)
             {
                 if (!unrealCacheController.isRefreshInProgress())
-                    continue;
-                let dbStr = msg.readString();
-                let dbObj = JSON.parse(dbStr);
-                unrealCacheController.recordDebugDatabaseChunk(dbObj);
+                    return;
+                const diagnostic = transportDiagnostics.get(connectingSocket)!;
+                if (diagnostic.chunkCount === 0) transportDiagnostics.report(connectingSocket, 'type_database_begin', { phase: 'decode_chunks' });
+                const startedAt = performance.now();
+                try {
+                    const dbObj = JSON.parse(msg.readString());
+                    unrealCacheController.recordDebugDatabaseChunk(dbObj);
+                    diagnostic.chunkCount += 1;
+                    diagnostic.decodeDurationMs += performance.now() - startedAt;
+                } catch (error) {
+                    transportDiagnostics.report(connectingSocket, 'type_database_end', {
+                        phase: 'decode_chunks', succeeded: false, durationMs: diagnostic.decodeDurationMs + performance.now() - startedAt,
+                        chunkCount: diagnostic.chunkCount, errorCode: String((error as NodeJS.ErrnoException)?.code ?? '').slice(0, 255),
+                        errorMessage: String((error as Error)?.message ?? error).slice(0, 1024),
+                    });
+                    throw error;
+                }
 
                 UnrealTypesTimedOut = false;
                 ArmDebugDatabaseStreamTimeout();
@@ -300,21 +343,23 @@ async function connect_unreal() : Promise<void>
             else if(msg.type == MessageType.DebugDatabaseFinished)
             {
                 if (!unrealCacheController.isRefreshInProgress())
-                    continue;
+                    return;
                 if (ReceivingTypesTimeout)
                     clearTimeout(ReceivingTypesTimeout);
                 ReceivingTypesTimeout = null;
-                CommitLegacyDebugDatabaseBase(connectingSocket, UnrealSocketEpoch);
+                const diagnostic = transportDiagnostics.get(connectingSocket)!;
+                transportDiagnostics.report(connectingSocket, 'type_database_end', { phase: 'decode_chunks', durationMs: diagnostic.decodeDurationMs, chunkCount: diagnostic.chunkCount, succeeded: true });
+                nativeCoordinator.commit(connectingSocket, UnrealSocketEpoch);
             }
             else if(msg.type == MessageType.DebugDatabaseAccessBegin)
             {
                 if (!unrealCacheController.isRefreshInProgress())
-                    continue;
+                    return;
                 if (msg.remainingSize != 0)
                 {
                     connection.console.error('DebugDatabase access sidecar begin contains an unsupported payload.');
                     unrealCacheController.discardDebugDatabaseAccessChunks();
-                    continue;
+                    return;
                 }
                 unrealCacheController.setDebugDatabaseAccessExpected(true);
                 ArmDebugDatabaseStreamTimeout();
@@ -323,7 +368,7 @@ async function connect_unreal() : Promise<void>
             {
                 if (!unrealCacheController.isRefreshInProgress()
                     || unrealCacheController.getDebugDatabaseAccessReadiness() != 'pending')
-                    continue;
+                    return;
                 try
                 {
                     let frame = readDebugDatabaseAccessFrame(msg);
@@ -341,7 +386,7 @@ async function connect_unreal() : Promise<void>
             {
                 if (!unrealCacheController.isRefreshInProgress()
                     || unrealCacheController.getDebugDatabaseAccessReadiness() != 'pending')
-                    continue;
+                    return;
                 try
                 {
                     readDebugDatabaseAccessFinishedFrame(msg);
@@ -379,6 +424,7 @@ async function connect_unreal() : Promise<void>
             }
             else if(msg.type == MessageType.DebugDatabaseSettings)
             {
+                Object.assign(transportDiagnostics.get(connectingSocket)!, { chunkCount: 0, decodeDurationMs: 0 });
                 automationRuntime.beginLiveRefresh();
                 projectDaemonScriptSnapshotProtocol.markSemanticUnsettled();
                 PendingNativeDiagnosticsGeneration = null;
@@ -419,15 +465,15 @@ async function connect_unreal() : Promise<void>
 
                 ReplaceScriptAssetDefinition(assetName, lines);
             }
-        }
-    });
+    }
 
-    connectingSocket.on("error", function() {
+    connectingSocket.on("error", function(error) {
+        transportDiagnostics.report(connectingSocket, 'socket_error', { errorCode: String((error as NodeJS.ErrnoException)?.code ?? '').slice(0, 255), errorMessage: String(error?.message ?? error).slice(0, 1024) });
         requestDebugDatabaseScheduler.cancel(connectingSocket);
         // connection.console.log('Reconnecting to unreal due to error');
         if (unreal === connectingSocket)
         {
-            connectingSocket.destroy();
+            transportDiagnostics.destroy(connectingSocket, 'socket_error');
             unreal = null;
             connectAttemptFence.complete(attempt);
             UnrealConnected = false;
@@ -443,12 +489,14 @@ async function connect_unreal() : Promise<void>
         }
     });
 
-    connectingSocket.on("close", function() {
+    connectingSocket.on("close", function(hadError) {
+        engineQueue.clear();
+        transportDiagnostics.report(connectingSocket, 'socket_close', { hadError });
         requestDebugDatabaseScheduler.cancel(connectingSocket);
         // connection.console.log('Ceconnecting to unreal due to close');
         if (unreal === connectingSocket)
         {
-            connectingSocket.destroy();
+            transportDiagnostics.destroy(connectingSocket, 'socket_close_cleanup');
             unreal = null;
             connectAttemptFence.complete(attempt);
             UnrealConnected = false;
@@ -466,10 +514,11 @@ async function connect_unreal() : Promise<void>
 
     connectingSocket.connect(port, hostname, async function()
     {
+        transportDiagnostics.report(connectingSocket, 'connected', { localAddress: connectingSocket.localAddress, localPort: connectingSocket.localPort, remoteAddress: connectingSocket.remoteAddress, remotePort: connectingSocket.remotePort });
         connectingSocket.pause();
         if (!isCurrentAttempt())
         {
-            connectingSocket.destroy();
+            transportDiagnostics.destroy(connectingSocket, 'stale_connection_attempt');
             return;
         }
         let tuple = {
@@ -484,14 +533,14 @@ async function connect_unreal() : Promise<void>
         }, tuple, preflight.processId);
         if (!isCurrentAttempt())
         {
-            connectingSocket.destroy();
+            transportDiagnostics.destroy(connectingSocket, 'stale_connection_attempt');
             return;
         }
         if (!postflight.ok || unreal !== connectingSocket)
         {
             requestDebugDatabaseScheduler.cancel(connectingSocket);
             connectAttemptFence.complete(attempt);
-            connectingSocket.destroy();
+            transportDiagnostics.destroy(connectingSocket, postflight.ok ? 'superseded_socket' : 'editor_identity_rejected');
             unreal = null;
             readinessController.update({
                 unrealConnected: false,
@@ -503,10 +552,11 @@ async function connect_unreal() : Promise<void>
             schedule_unreal_reconnect();
             return;
         }
+        transportDiagnostics.get(connectingSocket)!.editorProcessId = postflight.processId;
         connectingSocket.resume();
         if (!isCurrentAttempt())
         {
-            connectingSocket.destroy();
+            transportDiagnostics.destroy(connectingSocket, 'stale_connection_attempt');
             return;
         }
         connectAttemptFence.complete(attempt);
@@ -520,16 +570,20 @@ async function connect_unreal() : Promise<void>
         });
         if (LanguageServerStopping || LanguageServerOptions !== attemptOptions || unreal !== connectingSocket)
         {
-            connectingSocket.destroy();
+            transportDiagnostics.destroy(connectingSocket, 'session_changed_before_database_request');
             return;
         }
         requestDebugDatabaseScheduler.schedule(
             connectingSocket,
             LANGUAGE_SERVER_TIMEOUTS_MS.verifiedDebugDatabaseRequestDelay,
             () => unreal === connectingSocket && UnrealConnected && !LanguageServerStopping,
-            () => {
-            let reqDb = buildLegacyRequestDebugDatabase();
-            connectingSocket.write(Uint8Array.from(reqDb));
+            async () => {
+                try {
+                    await nativeCoordinator.begin();
+                    nativeCoordinator.checkDeadline();
+                    if (unreal !== connectingSocket || LanguageServerStopping) return;
+                    connectingSocket.write(Uint8Array.from(buildLegacyRequestDebugDatabase()));
+                } catch (error) { nativeCoordinator.stop(error); }
             },
         );
     });
@@ -644,8 +698,12 @@ connection.onInitialize((_params): InitializeResult => {
         let globOptions: glob.IOptions = {
             ignore: scriptIgnorePatterns
         };
-        glob(RootPath + "/**/*.as", globOptions, function (err: any, files: any)
+        glob(RootPath + "/**/*.as", globOptions, function applyScriptGlob(err: any, files: any)
         {
+            if (nativeCoordinator.active) {
+                void nativeCoordinator.active.promise.then(() => applyScriptGlob(err, files));
+                return;
+            }
             if (err)
             {
                 connection.console.error("Failed to glob Angelscript files in " + RootPath + ": " + err);
@@ -774,7 +832,7 @@ function DetectUnrealTypeListTimeout()
     if (!typedb.HasTypesFromUnreal())
         UnrealTypesTimedOut = true;
     if (unreal)
-        unreal.destroy();
+        transportDiagnostics.destroy(unreal, 'debug_database_stream_timeout');
     TrySettleSemanticGeneration();
 }
 
@@ -788,30 +846,9 @@ function ArmDebugDatabaseStreamTimeout() : void
     );
 }
 
-function CommitLegacyDebugDatabaseBase(socket: Socket, epoch: number) : void
-{
-    if (unreal !== socket || epoch != UnrealSocketEpoch || !unrealCacheController.isRefreshInProgress())
-        return;
-    try
-    {
-        let accepted = automationRuntime.commitLiveRefresh();
-        cancelInitialUnrealConnectionClassification();
-        PendingReResolveAfterInitialParse = false;
-        ScheduleNativeDiagnosticsRefresh(accepted.generation);
-    }
-    catch (error)
-    {
-        if (!typedb.HasTypesFromUnreal())
-            UnrealTypesTimedOut = true;
-        connection.console.error(`DebugDatabase base transaction failed: ${String(error)}`);
-        automationRuntime.abortLiveRefresh('DebugDatabase base transaction failed.');
-        socket.destroy();
-    }
-    TrySettleSemanticGeneration();
-}
-
 function TickQueues()
 {
+    if (nativeCoordinator.active) { setTimeout(TickQueues, 1); return; }
     IsServicingQueues = true;
 
     // let startTime = performance.now();
@@ -936,6 +973,7 @@ function DirtyAllDiagnostics()
 
     function UpdateDiagnostics()
     {
+        if (nativeCoordinator.active) return;
         for (let i = 0; i < 20; ++i)
         {
             if (moduleIndex >= moduleList.length)
@@ -961,6 +999,7 @@ function ScheduleNativeDiagnosticsRefresh(generation: number) : void
 
 function StartPendingNativeDiagnosticsRefresh() : void
 {
+    if (nativeCoordinator.active) return;
     if (PendingNativeDiagnosticsGeneration == null || IsServicingQueues || ActiveNativeDiagnosticsCancel)
         return;
 
@@ -1002,6 +1041,7 @@ function StartPendingNativeDiagnosticsRefresh() : void
 
     function ReResolveModules()
     {
+        if (nativeCoordinator.active) return;
         if (resolveGeneration != unrealCacheController.getActiveGeneration())
         {
             finish(true);
@@ -1028,7 +1068,7 @@ function StartPendingNativeDiagnosticsRefresh() : void
 
 function CanResolveModules()
 {
-    return typedb.HasTypesFromUnreal() && LoadQueue.length == 0;
+    return !nativeCoordinator.active && typedb.HasTypesFromUnreal() && LoadQueue.length == 0;
 }
 
 function BeginModuleSemanticRefresh(module : scriptfiles.ASModule) : void
@@ -1046,7 +1086,7 @@ function FinishModuleSemanticRefresh(module : scriptfiles.ASModule) : void
 
 function TrySettleSemanticGeneration() : void
 {
-    if (LanguageServerStopping)
+    if (LanguageServerStopping || nativeCoordinator.active)
         return;
     if (PendingSemanticModules.size != 0 || IsServicingQueues || reResolveWork.hasActiveWork()
         || PendingNativeDiagnosticsGeneration != null
@@ -1054,6 +1094,7 @@ function TrySettleSemanticGeneration() : void
         return;
     if (CanResolveModules() && scriptfiles.GetAllLoadedModules().every((module) => module.resolved))
     {
+        if (nativeCoordinator.settlePending()) return;
         automationRuntime.markCurrentGenerationFullReady();
         if (readinessController.snapshot().fullReady)
             projectDaemonScriptSnapshotProtocol.markSemanticSettled();
@@ -1252,6 +1293,7 @@ connection.onReferences(function (params : ReferenceParams) : Location[] | Thena
     if (LoadQueue.length != 0)
         return null;
 
+    const databaseEpoch = nativeCoordinator.epoch;
     let generator = scriptreferences.FindReferences(params.textDocument.uri, params.position);
     let result = generator.next();
     if (result && result.value)
@@ -1261,6 +1303,12 @@ connection.onReferences(function (params : ReferenceParams) : Location[] | Thena
         let timerHandle = setInterval(MakeProgress, 1);
         function MakeProgress()
         {
+            if (databaseEpoch !== nativeCoordinator.epoch) {
+                clearInterval(timerHandle);
+                reject(new ResponseError(-32801, 'TypeDB changed during the request.'));
+                return;
+            }
+            if (nativeCoordinator.active) return;
             let result = generator.next();
             if (result && result.value)
             {
@@ -1294,11 +1342,18 @@ connection.onRenameRequest(function (params : RenameParams) : WorkspaceEdit | Th
     if (LoadQueue.length != 0)
         return null;
 
+    const databaseEpoch = nativeCoordinator.epoch;
     let generator = scriptreferences.PerformRename(params.textDocument.uri, params.position, params.newName);
     return new Promise((resolve, reject) => {
         let timerHandle = setInterval(MakeProgress, 1);
         function MakeProgress()
         {
+            if (databaseEpoch !== nativeCoordinator.epoch) {
+                clearInterval(timerHandle);
+                reject(new ResponseError(-32801, 'TypeDB changed during the request.'));
+                return;
+            }
+            if (nativeCoordinator.active) return;
             let result = generator.next();
             if (result && result.value)
             {
@@ -1610,7 +1665,8 @@ function TriggerThrottledModuleParse(asmodule : scriptfiles.ASModule)
         }
         FinishModuleSemanticRefresh(asmodule);
 
-        asmodule.parseDelay = setTimeout(function() {
+        asmodule.parseDelay = setTimeout(function delayedParse() {
+            if (nativeCoordinator.active) { asmodule.parseDelay = setTimeout(delayedParse, 100); return; }
             asmodule.parseDelay = null;
 
             if (asmodule.parseAfterDelay)
@@ -1876,14 +1932,15 @@ function stopLanguageServerResources() : Promise<boolean>
         requestDebugDatabaseScheduler.cancel(socket);
         socket.removeAllListeners();
         try { socket.write(Uint8Array.from(buildDisconnect())); } catch {}
-        socket.destroy();
+        transportDiagnostics.destroy(socket, 'language_server_shutdown');
     }
     requestDebugDatabaseScheduler.cancelAll();
     UnrealConnected = false;
     readinessController.update({ unrealConnected: false, editorProcessId: undefined, editorIdentityVerification: 'pending' });
-    LanguageServerShutdownPromise = automationRuntime.shutdown(
-        LANGUAGE_SERVER_TIMEOUTS_MS.shutdownPersistenceFlush,
-    );
+    LanguageServerShutdownPromise = (async () => {
+        await nativeCoordinator.active?.promise;
+        return automationRuntime.shutdown(LANGUAGE_SERVER_TIMEOUTS_MS.shutdownPersistenceFlush);
+    })();
     return LanguageServerShutdownPromise;
 }
 

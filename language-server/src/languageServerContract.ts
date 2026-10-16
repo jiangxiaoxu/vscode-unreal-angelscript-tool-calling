@@ -84,11 +84,11 @@ export function resolveLanguageServerInitializationOptions(
 
     let projectRoot = normalizeAbsolutePath(options.canonicalProjectRoot, inferredProjectRoot);
     let cachePath = role == 'vscode'
-        ? path.join(projectRoot, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz')
-        : path.join(projectRoot, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.v2.json.gz');
+        ? path.join(projectRoot, 'Script', '.vscode', 'angelscript', 'debug-database.json.gz')
+        : path.join(projectRoot, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.json.gz');
     let cacheAccess: AngelScriptCacheAccess = options.cache?.enabled === false ? 'disabled' : 'read-write';
     if (role == 'project-daemon' && cacheAccess != 'read-write')
-        throw new Error("Role 'project-daemon' requires its fixed Saved v2 cache writer.");
+        throw new Error("Role 'project-daemon' requires its fixed Saved cache writer.");
 
     if (role == 'project-daemon' && options.unreal?.debuggerPort === undefined)
         throw new Error("Role 'project-daemon' requires the project-derived unreal.debuggerPort.");

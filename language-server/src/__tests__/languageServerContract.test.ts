@@ -29,14 +29,14 @@ function scriptSettings() : Record<string, boolean>
     };
 }
 
-test('roles own distinct fixed read-write v2 cache paths', () => {
+test('roles own distinct fixed read-write cache paths', () => {
     let root = path.resolve('ExampleProject');
     let vscode = resolveLanguageServerInitializationOptions({
         role: 'vscode',
         ...identityOptions(root),
     }, root);
     assert.equal(vscode.cacheAccess, 'read-write');
-    assert.equal(vscode.cachePath, path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz'));
+    assert.equal(vscode.cachePath, path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.json.gz'));
 
     let daemon = resolveLanguageServerInitializationOptions({
         role: 'project-daemon',
@@ -46,7 +46,7 @@ test('roles own distinct fixed read-write v2 cache paths', () => {
     assert.equal(daemon.unrealOnline, true);
     assert.equal(daemon.debuggerPort, 41001);
     assert.equal(daemon.cacheAccess, 'read-write');
-    assert.equal(daemon.cachePath, path.join(root, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.v2.json.gz'));
+    assert.equal(daemon.cachePath, path.join(root, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.json.gz'));
 });
 
 test('project daemon is always online and enabled writers require exact identity', () => {
@@ -61,7 +61,7 @@ test('project daemon is always online and enabled writers require exact identity
         ...identityOptions(root),
         cache: { enabled: false },
         unreal: { debuggerPort: 41001 },
-    }, root), /fixed Saved v2 cache writer/u);
+    }, root), /fixed Saved cache writer/u);
     assert.throws(() => resolveLanguageServerInitializationOptions({
         role: 'project-daemon',
         ...identityOptions(root),

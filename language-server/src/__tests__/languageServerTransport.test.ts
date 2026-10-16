@@ -152,7 +152,7 @@ function projectIdentity(root: string) : string
 
 function writeEmptyNativeCache(root: string, projectIdentity: string) : string
 {
-    let cachePath = path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz');
+    let cachePath = path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.json.gz');
     saveDebugDatabaseCacheV2({
         cachePath,
         access: 'read-write',
@@ -185,7 +185,24 @@ function createClient(transport: 'stdio' | 'ipc') : TestClient
     let nextId = 1;
     let pending = new Map<number, (message: JsonRpcMessage) => void>();
     let notifications: JsonRpcMessage[] = [];
+    let nativeRound: { id: string; deadline: number } | null = null;
     let accept = (message: JsonRpcMessage) => {
+        if (message.method === 'angelscript/beginTypeDatabaseSync' && message.id !== undefined)
+        {
+            const params = message.params as { phase: string; roundId?: string };
+            if (params.phase === 'finish')
+            {
+                assert.equal(params.roundId, nativeRound?.id);
+                nativeRound = null;
+                send({ jsonrpc: '2.0', id: message.id, result: { completed: true } });
+            }
+            else
+            {
+                nativeRound ??= { id: 'transport-fixture-round', deadline: Date.now() + 30_000 };
+                send({ jsonrpc: '2.0', id: message.id, result: { roundId: nativeRound.id, remainingMs: nativeRound.deadline - Date.now() } });
+            }
+            return;
+        }
         if (typeof message.id == 'number' && pending.has(message.id))
         {
             pending.get(message.id)!(message);
@@ -601,8 +618,8 @@ test('VS Code and project daemon reconnect to a new Editor PID and publish isola
         return fake;
     };
     let cachePaths = [
-        path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz'),
-        path.join(root, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.v2.json.gz'),
+        path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.json.gz'),
+        path.join(root, 'Saved', 'ASEditorAutomation', 'LanguageServer', 'debug-database.json.gz'),
     ];
     let waitForType = async (typeName: string, priorRevisions: string[] = []) => {
         for (let attempt = 0; attempt < 160; ++attempt)
@@ -902,7 +919,7 @@ test('same Editor PID recovers after a stale half-frame and an invalid finished 
                 persistedRevision?: string;
             };
             let cache = loadDebugDatabaseCacheV2({
-                cachePath: path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz'),
+                cachePath: path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.json.gz'),
                 access: 'read-write',
                 projectIdentity: identity,
                 budgets: DEFAULT_LANGUAGE_SERVER_BUDGETS,
@@ -981,7 +998,7 @@ test('back-to-back A/B/C rounds settle and publish only generation C', {
         assert.equal(initialized.error, undefined);
         client.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
 
-        let cachePath = path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz');
+        let cachePath = path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.json.gz');
         let settled = false;
         for (let attempt = 0; attempt < 300 && !settled; ++attempt)
         {
@@ -1057,7 +1074,7 @@ test('a failed replacement resumes diagnostics for the restored active generatio
         });
     });
     let fake = spawn(fakeEditor, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixture, uprojectPath, String(port)], {
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
     });
     let client = createClient('stdio');
@@ -1088,13 +1105,16 @@ test('a failed replacement resumes diagnostics for the restored active generatio
         });
         assert.equal(initialized.error, undefined);
         client.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
-        let cachePath = path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.v2.json.gz');
+        let cachePath = path.join(root, 'Script', '.vscode', 'angelscript', 'debug-database.json.gz');
         let restored = false;
+        let baselineRevision: string | null = null;
         let lastObserved: unknown;
         for (let attempt = 0; attempt < 300 && !restored; ++attempt)
         {
             let response = await client.request('angelscript/diagnosticsStatus');
             let status = response.result as {
+                generation: number;
+                unrealConnected: boolean;
                 fullReady: boolean;
                 semanticGeneration: number;
                 settledSemanticGeneration: number;
@@ -1107,12 +1127,19 @@ test('a failed replacement resumes diagnostics for the restored active generatio
                 projectIdentity: identity,
                 budgets: DEFAULT_LANGUAGE_SERVER_BUDGETS,
             });
-            restored = status.fullReady
+            const coherentBaseline = status.fullReady
                 && status.semanticGeneration == status.settledSemanticGeneration
                 && !!status.activeRevision
                 && status.activeRevision == status.persistedRevision
                 && cache.ok
                 && JSON.stringify(cache.cache.debugDatabaseChunks).includes('URestoredActive');
+            if (!baselineRevision && coherentBaseline)
+            {
+                baselineRevision = status.activeRevision!;
+                fake.stdin!.write('REPLACE\n');
+            }
+            restored = coherentBaseline && status.generation >= 2 && status.unrealConnected === false
+                && status.activeRevision === baselineRevision;
             lastObserved = { status, cache };
             if (!restored)
                 await new Promise((resolve) => setTimeout(resolve, 20));

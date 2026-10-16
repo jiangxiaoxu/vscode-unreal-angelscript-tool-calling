@@ -12,7 +12,10 @@ import { removeLegacyCacheAfterVerifiedPublish } from './legacyCacheCleanup';
 import { LANGUAGE_SERVER_TIMEOUTS_MS } from './languageServerTimeouts';
 
 export type LanguageServerAutomationRuntimeOptions = Pick<UnrealCacheControllerOptions,
-    'publishCache' | 'publisherRetryDelaysMs'>;
+    'publishCache' | 'publisherRetryDelaysMs' | 'onDiagnostic'> & {
+        onAbortLiveRefresh?: (reason: string) => boolean;
+        isLiveRefreshDisconnected?: () => boolean;
+    };
 
 export function createLanguageServerAutomationRuntime(
     connection: Connection,
@@ -129,18 +132,20 @@ export function createLanguageServerAutomationRuntime(
         return generation;
     }
 
-    function commitLiveRefresh() : { generation: number; revision: string }
+    async function commitLiveRefresh(check: () => void = () => {}, recoveryCheck: () => void = () => {}) : Promise<{ generation: number; revision: string }>
     {
         if (nativeCandidateGeneration == null || nativeCandidateGeneration != cache.getGeneration())
             throw new Error('No native DebugDatabase refresh is pending.');
         let accepted: { generation: number; revision: string };
         try
         {
-            accepted = cache.acceptCompleteCandidate();
+            accepted = await cache.acceptCompleteCandidate(check, recoveryCheck);
         }
         catch (error)
         {
-            markHydrationFailed(error);
+            if ((error as { code?: string })?.code === 'LanguageServerTypeDatabaseDeadlineExceeded')
+                throw error;
+            markHydrationFailed(error, !runtimeOptions.isLiveRefreshDisconnected?.());
             throw error;
         }
 
@@ -220,6 +225,8 @@ export function createLanguageServerAutomationRuntime(
 
     function abortLiveRefresh(reason: string) : boolean
     {
+        if (runtimeOptions.onAbortLiveRefresh?.(reason))
+            return true;
         if (nativeCandidateGeneration == null || !cache.abortRefresh())
         {
             readiness.update({

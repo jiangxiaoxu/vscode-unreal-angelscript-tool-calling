@@ -9,6 +9,7 @@ import * as specifiers from './specifiers';
 import { FormatFunctionDocumentation, FormatPropertyDocumentation } from './documentation';
 import { GetPropertyAccessorInfo } from './accessor_utils';
 import * as path from 'path';
+import { isNativeSemanticMutationActive } from './nativeTypeDatabaseCoordinator';
 
 let CommonTypenames = new Set<string>([
     "FVector", "FRotator", "FTransform", "FQuat",
@@ -4898,6 +4899,12 @@ export function HandleFloatLiteralHelper(asmodule : scriptfiles.ASModule) : Prom
         function (resolve, reject)
         {
             asmodule.onResolved(() => {
+                // 旧自动修改建议不跨越 native 重建事务, 避免应用到后来输入的文本.
+                if (isNativeSemanticMutationActive())
+                {
+                    resolve(null);
+                    return;
+                }
                 // If the float literal has changed, don't do this
                 if (asmodule.content.substring(matchStart, matchEnd) != match[0])
                 {

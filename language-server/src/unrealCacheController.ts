@@ -12,14 +12,18 @@ import {
     saveDebugDatabaseCacheV2Async,
 } from './debugDatabaseCacheV2';
 import {
+    DebugDatabaseCachePublication,
     DebugDatabasePersistenceStatus,
     createDebugDatabaseCachePublisher,
 } from './debugDatabaseCachePublisher';
 import {
     hydrateTypeDatabaseGeneration,
-    resetTypeDatabaseForGeneration,
-    resolveAllScriptModulesForGeneration,
 } from './typeDatabaseGeneration';
+import {
+    hydrateTypeDatabaseGenerationCooperatively,
+    resetTypeDatabaseCooperatively,
+    resolveAllScriptModulesCooperatively,
+} from './typeDatabaseCooperativeGeneration';
 import {
     DebugDatabaseAccessChunk,
     normalizeDebugDatabaseAccessChunk,
@@ -63,6 +67,7 @@ export type UnrealCacheControllerOptions = {
     publisherRetryDelaysMs?: readonly number[];
     onPersistenceStatus?: (status: DebugDatabasePersistenceStatus) => void;
     onPublished?: (cache: DebugDatabaseCacheV2) => void;
+    onDiagnostic?: (event: string, data: Record<string, unknown>) => void;
 };
 
 export type UnrealCacheController = {
@@ -78,7 +83,8 @@ export type UnrealCacheController = {
     discardDebugDatabaseAccessChunks: () => void;
     getDebugDatabaseAccessReadiness: () => DebugDatabaseAccessReadiness;
     recordDebugDatabaseSettings: (settings: Partial<CachedScriptSettings>, engineSupportsCreateBlueprint: boolean, accessExpected?: boolean) => void;
-    acceptCompleteCandidate: () => { generation: number; revision: string };
+    acceptCompleteCandidate: (check?: () => void, recoveryCheck?: () => void) => Promise<{ generation: number; revision: string }>;
+    approveAcceptedPublication: (generation: number) => void;
     invalidateSearchCache: () => void;
     loadCacheFromDisk: () => UnrealCacheLoadOutcome;
     getActiveRevision: () => string | undefined;
@@ -108,6 +114,7 @@ export function createUnrealCacheController(
         languageServerCommit: 'unknown',
     };
     let acceptedGeneration: AcceptedDebugDatabaseGeneration | null = null;
+    let pendingPublication: { accepted: AcceptedDebugDatabaseGeneration; task: DebugDatabaseCachePublication } | null = null;
     let generation = 0;
     let refreshInProgress = false;
     let pendingScriptSettings: CachedScriptSettings | null = null;
@@ -242,23 +249,23 @@ export function createUnrealCacheController(
         return true;
     }
 
-    function restoreAcceptedGeneration(prior: AcceptedDebugDatabaseGeneration | null) : void
+    async function restoreAcceptedGeneration(prior: AcceptedDebugDatabaseGeneration | null, recoveryCheck: () => void = () => {}) : Promise<void>
     {
         if (prior)
         {
             applyCachedScriptSettings(prior.scriptSettings, prior.engineSupportsCreateBlueprint);
-            hydrateTypeDatabaseGeneration(prior.chunks, prior.scriptSettings.floatIsFloat64, prior.accessChunks);
-            resolveAllScriptModulesForGeneration();
+            await hydrateTypeDatabaseGenerationCooperatively(prior.chunks, prior.scriptSettings.floatIsFloat64, prior.accessChunks, recoveryCheck);
+            await resolveAllScriptModulesCooperatively(recoveryCheck);
         }
         else
         {
-            resetTypeDatabaseForGeneration();
-            resolveAllScriptModulesForGeneration();
+            await resetTypeDatabaseCooperatively(recoveryCheck);
+            await resolveAllScriptModulesCooperatively(recoveryCheck);
         }
         api_search.InvalidateAPISearchCache();
     }
 
-    function publishAcceptedGeneration(
+    function prepareAcceptedPublication(
         acceptedId: number,
         revision: string,
         accessState: 'base-only' | 'base+access',
@@ -266,7 +273,7 @@ export function createUnrealCacheController(
         accessChunks: DebugDatabaseAccessChunk[],
         settings: CachedScriptSettings,
         blueprintSupport: boolean,
-    ) : void
+    ) : DebugDatabaseCachePublication
     {
         let contextSnapshot = cacheContext ? { ...cacheContext, budgets: { ...cacheContext.budgets } } : null;
         let payload: DebugDatabaseCachePayload | null = contextSnapshot ? immutableJsonClone({
@@ -278,7 +285,7 @@ export function createUnrealCacheController(
             debugDatabaseChunks: chunks,
             ...(accessState == 'base+access' ? { debugDatabaseAccessChunks: accessChunks } : {}),
         }) : null;
-        publisher.submit({
+        return {
             generation: acceptedId,
             revision,
             publish: async (isCurrent) => {
@@ -287,10 +294,10 @@ export function createUnrealCacheController(
                 let write = options.publishCache ?? saveDebugDatabaseCacheV2Async;
                 return write(contextSnapshot, payload, isCurrent);
             },
-        });
+        };
     }
 
-    function acceptCompleteCandidate() : { generation: number; revision: string }
+    async function acceptCompleteCandidate(check: () => void = () => {}, recoveryCheck: () => void = () => {}) : Promise<{ generation: number; revision: string }>
     {
         if (!refreshInProgress)
             throw new Error('DebugDatabase candidate is incomplete or contains no chunks.');
@@ -314,25 +321,55 @@ export function createUnrealCacheController(
         let acceptedId = generation;
         let prior = acceptedGeneration;
 
+        let preparedPublication: DebugDatabaseCachePublication;
         try
         {
-            // Candidate validation and hydration are synchronous. No request can observe the
-            // temporary global TypeDB before the accepted authority is swapped below.
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            check();
             applyCachedScriptSettings(nextSettings, nextBlueprintSupport);
-            hydrateTypeDatabaseGeneration(nextChunks, nextSettings.floatIsFloat64, nextAccessChunks);
-            resolveAllScriptModulesForGeneration();
+            let diagnosticStartedAt = performance.now();
+            let diagnosticSucceeded = false;
+            options.onDiagnostic?.('type_database_begin', { phase: 'hydrate', chunkCount: nextChunks.length });
+            try
+            {
+                await hydrateTypeDatabaseGenerationCooperatively(nextChunks, nextSettings.floatIsFloat64, nextAccessChunks, check);
+                diagnosticSucceeded = true;
+            }
+            finally
+            {
+                options.onDiagnostic?.('type_database_end', { phase: 'hydrate', durationMs: performance.now() - diagnosticStartedAt, chunkCount: nextChunks.length, succeeded: diagnosticSucceeded });
+            }
+            diagnosticStartedAt = performance.now();
+            diagnosticSucceeded = false;
+            options.onDiagnostic?.('type_database_begin', { phase: 'resolve_scripts' });
+            try
+            {
+                await resolveAllScriptModulesCooperatively(check);
+                diagnosticSucceeded = true;
+            }
+            finally
+            {
+                options.onDiagnostic?.('type_database_end', { phase: 'resolve_scripts', durationMs: performance.now() - diagnosticStartedAt, succeeded: diagnosticSucceeded });
+            }
+            check();
+            preparedPublication = prepareAcceptedPublication(acceptedId, nextRevision, nextAccessState, nextChunks, nextAccessChunks, nextSettings, nextBlueprintSupport);
+            check();
         }
         catch (error)
         {
             clearCandidate();
+            if ((error as { code?: string })?.code === 'LanguageServerTypeDatabaseDeadlineExceeded')
+                throw error;
             try
             {
-                restoreAcceptedGeneration(prior);
+                await restoreAcceptedGeneration(prior, recoveryCheck);
             }
             catch (rollbackError)
             {
+                if ((rollbackError as { code?: string })?.code === 'LanguageServerTypeDatabaseDeadlineExceeded')
+                    throw rollbackError;
                 acceptedGeneration = null;
-                throw new Error(`DebugDatabase candidate failed (${String(error)}); accepted generation restore failed (${String(rollbackError)}).`);
+                throw Object.assign(new Error(`DebugDatabase candidate failed (${String(error)}); accepted generation restore failed (${String(rollbackError)}).`), { code: 'TypeDatabaseRecoveryFailed' });
             }
             throw error;
         }
@@ -349,16 +386,17 @@ export function createUnrealCacheController(
         clearCandidate();
         api_search.InvalidateAPISearchCache();
 
-        publishAcceptedGeneration(
-            acceptedId,
-            nextRevision,
-            nextAccessState,
-            nextChunks,
-            nextAccessChunks,
-            nextSettings,
-            nextBlueprintSupport,
-        );
+        pendingPublication = { accepted: acceptedGeneration, task: preparedPublication };
         return { generation: acceptedId, revision: nextRevision };
+    }
+
+    function approveAcceptedPublication(acceptedId: number) : void
+    {
+        if (!pendingPublication || pendingPublication.accepted.generation !== acceptedId || acceptedGeneration !== pendingPublication.accepted)
+            return;
+        const approved = pendingPublication.task;
+        pendingPublication = null;
+        publisher.submit(approved);
     }
 
     function invalidateSearchCache() : void
@@ -412,7 +450,7 @@ export function createUnrealCacheController(
             accessState: result.cache.accessState,
         };
         publisher.setInitialState('clean', result.cache.revision);
-        return { loaded: true, code: 'loaded', message: 'Loaded debug database cache v2.', revision: result.cache.revision };
+        return { loaded: true, code: 'loaded', message: 'Loaded debug database cache.', revision: result.cache.revision };
     }
 
     return {
@@ -431,6 +469,7 @@ export function createUnrealCacheController(
             : acceptedGeneration?.accessState == 'base+access' ? 'complete' : 'base-only',
         recordDebugDatabaseSettings,
         acceptCompleteCandidate,
+        approveAcceptedPublication,
         invalidateSearchCache,
         loadCacheFromDisk,
         getActiveRevision: () => acceptedGeneration?.revision,
